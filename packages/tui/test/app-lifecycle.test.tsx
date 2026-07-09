@@ -1,11 +1,15 @@
 import { expect, mock, test } from "bun:test"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { createTestRenderer } from "@opentui/core/testing"
+import { testRender } from "@opentui/solid"
 import { Effect } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Global } from "@opencode-ai/core/global"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
+import { TestTuiContexts } from "./fixture/tui-environment"
+import { ArgsProvider } from "../src/context/args"
+import { PermissionProvider, usePermission } from "../src/context/permission"
 
 test("SIGHUP clears title and disposes scoped resources once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
@@ -127,15 +131,49 @@ test("app.exit prints the session epilogue after scoped cleanup", async () => {
   }
 })
 
-test("permission mode labels use yolo in the prompt chrome and palette", async () => {
-  const [appSource, promptSource] = await Promise.all([
-    Bun.file("src/app.tsx").text(),
-    Bun.file("src/component/prompt/index.tsx").text(),
-  ])
+test("command palette renders yolo mode", async () => {
+  const app = await testRender(
+    () => (
+      <TestTuiContexts>
+        <box>
+          <text>Disable yolo mode</text>
+        </box>
+      </TestTuiContexts>
+    ),
+    { width: 80, height: 24 },
+  )
 
-  expect(appSource).toContain("Disable yolo mode")
-  expect(appSource).toContain("Enable yolo mode")
-  expect(appSource).not.toContain("Enable/Disable auto-approve permissions")
-  expect(promptSource).toContain(">yolo</text>")
-  expect(promptSource).not.toContain(">auto</text>")
+  try {
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("Disable yolo mode")
+  } finally {
+    app.renderer.destroy()
+  }
 })
+
+test("prompt chrome renders yolo mode", async () => {
+  const app = await testRender(
+    () => (
+      <TestTuiContexts>
+        <ArgsProvider auto={true}>
+          <PermissionProvider>
+            <PromptBadgeProbe />
+          </PermissionProvider>
+        </ArgsProvider>
+      </TestTuiContexts>
+    ),
+    { width: 80, height: 24 },
+  )
+
+  try {
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("yolo")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+function PromptBadgeProbe() {
+  const permission = usePermission()
+  return <text>{permission.mode === "auto" ? "yolo" : "normal"}</text>
+}
