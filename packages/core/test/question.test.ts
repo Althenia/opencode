@@ -14,7 +14,7 @@ const sessionID = SessionV2.ID.make("ses_question_test")
 const question: QuestionV2.Info = {
   question: "Which option?",
   header: "Option",
-  options: [{ label: "One", description: "First option" }],
+  options: [{ label: "One", description: "First option", recommended: true }],
 }
 
 const waitForAsk = Effect.fn("QuestionV2Test.waitForAsk")(function* (
@@ -47,6 +47,12 @@ describe("QuestionV2", () => {
       yield* Effect.addFinalizer(() => unsubscribe)
       const { fiber, request } = yield* waitForAsk(service, { sessionID, questions: [question] })
 
+      expect(QuestionV2.Option.fields.recommended).toBeDefined()
+      expect(request.questions[0]!.options[0]).toEqual({
+        label: "One",
+        description: "First option",
+        recommended: true,
+      })
       expect(request.id).toMatch(/^que_/)
       expect(yield* service.list()).toEqual([request])
       yield* service.reply({ requestID: request.id, answers: [["One"]] })

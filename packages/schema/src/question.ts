@@ -22,6 +22,7 @@ export type ID = typeof ID.Type
 export const Option = Schema.Struct({
   label: Schema.String.annotate({ description: "Display text (1-5 words, concise)" }),
   description: Schema.String.annotate({ description: "Explanation of choice" }),
+  recommended: Schema.Boolean.pipe(optional),
 }).annotate({ identifier: "QuestionV2.Option" })
 export interface Option extends Schema.Schema.Type<typeof Option> {}
 
