@@ -21,12 +21,12 @@ import type {
   SessionsCompactOutput,
   SessionsWaitInput,
   SessionsWaitOutput,
-  SessionsStartInput,
-  SessionsStartOutput,
-  SessionsStopInput,
-  SessionsStopOutput,
-  SessionsStatusInput,
-  SessionsStatusOutput,
+  SessionsGoalStartInput,
+  SessionsGoalStartOutput,
+  SessionsGoalStopInput,
+  SessionsGoalStopOutput,
+  SessionsGoalStatusInput,
+  SessionsGoalStatusOutput,
   SessionsStageInput,
   SessionsStageOutput,
   SessionsClearInput,
@@ -407,8 +407,8 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
-      start: (input: SessionsStartInput, requestOptions?: RequestOptions) =>
-        request<{ readonly data: SessionsStartOutput }>(
+      goalStart: (input: SessionsGoalStartInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsGoalStartOutput }>(
           {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/start`,
@@ -419,8 +419,8 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
-      stop: (input: SessionsStopInput, requestOptions?: RequestOptions) =>
-        request<SessionsStopOutput>(
+      goalStop: (input: SessionsGoalStopInput, requestOptions?: RequestOptions) =>
+        request<SessionsGoalStopOutput>(
           {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/stop`,
@@ -430,8 +430,8 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
-      status: (input: SessionsStatusInput, requestOptions?: RequestOptions) =>
-        request<{ readonly data: SessionsStatusOutput }>(
+      goalStatus: (input: SessionsGoalStatusInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsGoalStatusOutput }>(
           {
             method: "GET",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/status`,
