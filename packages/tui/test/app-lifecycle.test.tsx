@@ -18,6 +18,7 @@ import { ClipboardProvider } from "../src/context/clipboard"
 import { DataProvider } from "../src/context/data"
 import { EditorContextProvider } from "../src/context/editor"
 import { ExitProvider } from "../src/context/exit"
+import { GoalProvider } from "../src/context/goal"
 import { KVProvider } from "../src/context/kv"
 import { LocalProvider } from "../src/context/local"
 import { LocationProvider } from "../src/context/location"
@@ -201,19 +202,25 @@ test("command palette renders yolo mode", async () => {
   }
 })
 
-test("prompt chrome renders yolo mode", async () => {
+test("prompt chrome renders yolo mode and goal badge", async () => {
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
   await Bun.write(path.join(tmp.path, "state", "kv.json"), "{}")
   const events = createEventSource()
-  const calls = createFetch(undefined, events)
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/session/session-test/goal/status") {
+      return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
+    }
+  }, events)
   const app = await testRender(
     () => <PromptHarness root={tmp.path} fetch={calls.fetch} events={events.source} />,
     { width: 80, height: 24 },
   )
 
   try {
-    expect(await captureFrame(app, (frame) => frame.includes("yolo"))).toContain("yolo")
+    const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal · 2/7"))
+    expect(frame).toContain("yolo")
+    expect(frame).toContain("goal · 2/7")
   } finally {
     app.renderer.destroy()
   }
@@ -243,37 +250,39 @@ function PromptHarness(props: { root: string; fetch: typeof fetch; events: Retur
             <ArgsProvider auto={true}>
               <KVProvider>
                 <ToastProvider>
-                  <RouteProvider>
+                  <RouteProvider initialRoute={{ type: "session", sessionID: "session-test" }}>
                     <TuiConfigProvider config={config}>
                       <PluginRuntimeProvider value={pluginRuntime}>
                         <SDKProvider url="http://test" directory={directory} fetch={props.fetch} events={props.events}>
                           <PermissionProvider>
-                            <ProjectProvider>
-                              <SyncProvider>
-                                <DataProvider>
-                                  <ThemeProvider mode="dark">
-                                    <LocalProvider>
-                                      <PromptSyncData />
-                                      <PromptStashProvider>
-                                        <DialogProvider>
-                                          <FrecencyProvider>
-                                            <PromptHistoryProvider>
-                                              <PromptRefProvider>
-                                                <EditorContextProvider>
-                                                  <LocationProvider>
-                                                    <Prompt />
-                                                  </LocationProvider>
-                                                </EditorContextProvider>
-                                              </PromptRefProvider>
-                                            </PromptHistoryProvider>
-                                          </FrecencyProvider>
-                                        </DialogProvider>
-                                      </PromptStashProvider>
-                                    </LocalProvider>
-                                  </ThemeProvider>
-                                </DataProvider>
-                              </SyncProvider>
-                            </ProjectProvider>
+                            <GoalProvider>
+                              <ProjectProvider>
+                                <SyncProvider>
+                                  <DataProvider>
+                                    <ThemeProvider mode="dark">
+                                      <LocalProvider>
+                                        <PromptSyncData />
+                                        <PromptStashProvider>
+                                          <DialogProvider>
+                                            <FrecencyProvider>
+                                              <PromptHistoryProvider>
+                                                <PromptRefProvider>
+                                                  <EditorContextProvider>
+                                                    <LocationProvider>
+                                                      <Prompt sessionID="session-test" />
+                                                    </LocationProvider>
+                                                  </EditorContextProvider>
+                                                </PromptRefProvider>
+                                              </PromptHistoryProvider>
+                                            </FrecencyProvider>
+                                          </DialogProvider>
+                                        </PromptStashProvider>
+                                      </LocalProvider>
+                                    </ThemeProvider>
+                                  </DataProvider>
+                                </SyncProvider>
+                              </ProjectProvider>
+                            </GoalProvider>
                           </PermissionProvider>
                         </SDKProvider>
                       </PluginRuntimeProvider>

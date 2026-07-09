@@ -8,6 +8,24 @@ export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
 }
 
+type Client = ReturnType<typeof createOpencodeClient>
+type GoalStatus = {
+  readonly goal: string
+  readonly active: boolean
+  readonly iteration: number
+  readonly cap: number
+}
+type ClientWithSessions = Client & {
+  sessions: {
+    goalStart(input: GoalStartInput): Promise<{ readonly data: GoalStatus }>
+    goalStop(input: GoalSessionInput): Promise<void>
+    goalStatus(input: GoalSessionInput): Promise<{ readonly data: GoalStatus | null }>
+  }
+}
+
+type GoalSessionInput = { readonly sessionID: string }
+type GoalStartInput = GoalSessionInput & { readonly goal: string }
+
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
   init: (props: {
@@ -20,13 +38,37 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     const abort = new AbortController()
     let sse: AbortController | undefined
 
-    function createSDK() {
-      return createOpencodeClient({
+    function createSDK(): ClientWithSessions {
+      const headers = new Headers(props.headers)
+      if (props.directory) headers.set("x-opencode-directory", encodeURIComponent(props.directory))
+      const fetcher = props.fetch ?? fetch
+      async function request<T>(path: string, init?: RequestInit) {
+        if (init?.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json")
+        const response = await fetcher(new Request(new URL(path, props.url), { ...init, headers }))
+        if (response.status === 204) return undefined as T
+        return response.json() as Promise<T>
+      }
+      const client = createOpencodeClient({
         baseUrl: props.url,
         signal: abort.signal,
         directory: props.directory,
         fetch: props.fetch,
         headers: props.headers,
+      })
+      return Object.assign(client, {
+        sessions: {
+          goalStart: (input: GoalStartInput) =>
+            request<{ readonly data: GoalStatus }>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/start`, {
+              method: "POST",
+              body: JSON.stringify({ goal: input.goal }),
+            }),
+          goalStop: (input: GoalSessionInput) =>
+            request<void>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/stop`, { method: "POST" }),
+          goalStatus: (input: GoalSessionInput) =>
+            request<{ readonly data: GoalStatus | null }>(
+              `/api/session/${encodeURIComponent(input.sessionID)}/goal/status`,
+            ),
+        },
       })
     }
 

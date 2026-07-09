@@ -51,11 +51,13 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
+import { useGoal } from "../../context/goal"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
+import { DialogPrompt } from "../../ui/dialog-prompt"
 
 registerOpencodeSpinner()
 
@@ -169,6 +171,7 @@ export function Prompt(props: PromptProps) {
   const dimensions = useTerminalDimensions()
   const { theme, syntax } = useTheme()
   const kv = useKV()
+  const goal = useGoal()
   const animationsEnabled = createMemo(() => kv.get("animations_enabled", true))
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
@@ -962,6 +965,21 @@ export function Prompt(props: PromptProps) {
       void exit()
       return true
     }
+    if (trimmed === "/goal stop") {
+      await goal.stop()
+      clearPrompt()
+      props.onSubmit?.()
+      return true
+    }
+    if (trimmed === "/goal" || trimmed.startsWith("/goal ")) {
+      const value = trimmed.slice("/goal".length).trim()
+      const prompt =
+        value || (await DialogPrompt.show(dialog, "Goal", { placeholder: "What should opencode work toward?" }))
+      if (prompt?.trim()) await goal.start(prompt.trim())
+      clearPrompt()
+      props.onSubmit?.()
+      return true
+    }
     const selectedModel = local.model.current()
     if (!selectedModel) {
       void promptModelWarning()
@@ -1446,6 +1464,13 @@ export function Prompt(props: PromptProps) {
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>yolo</text>
+                      </Show>
+                      <Show when={store.mode === "normal" && goal.current()}>
+                        {(status) => (
+                          <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>
+                            goal · {status().iteration}/{status().cap}
+                          </text>
+                        )}
                       </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
