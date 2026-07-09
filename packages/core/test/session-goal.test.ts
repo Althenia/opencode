@@ -96,6 +96,26 @@ function makeSession(outputs: string[] = []) {
   return { service, prompts }
 }
 
+function makeFailingPromptSession(error: SessionV2.NotFoundError | SessionV2.PromptConflictError) {
+  const fake = makeSession()
+  const service = SessionV2.Service.of({ ...fake.service, prompt: () => Effect.fail(error) })
+  return { service, prompts: fake.prompts }
+}
+
+function makePublishingPromptSession(events: EventV2.Interface, outputs: string[] = []) {
+  const fake = makeSession(outputs)
+  const service = SessionV2.Service.of({
+    ...fake.service,
+    prompt: (input) =>
+      Effect.gen(function* () {
+        const admitted = yield* fake.service.prompt(input)
+        yield* turnEnded(events)
+        return admitted
+      }),
+  })
+  return { service, prompts: fake.prompts }
+}
+
 const turnEnded = (events: EventV2.Interface) =>
   events.publish(SessionEvent.Step.Ended, {
     sessionID,
@@ -124,6 +144,42 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts[0]).toMatchObject({ sessionID, delivery: "steer", resume: true })
       expect(fake.prompts[0]?.prompt.text).toContain("ship task 4")
       expect(fake.prompts[0]?.prompt.text).toContain("Iteration 1 of 10")
+    }),
+  )
+
+  it.effect("observes a turn that ends before prompt returns", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const fake = makePublishingPromptSession(events, ["GOAL COMPLETE\nYES"])
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(1)
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: false, goal: "finish", iteration: 1 })
+    }),
+  )
+
+  it.effect("start surfaces first prompt failures and clears state", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const fake = makeFailingPromptSession(new SessionV2.NotFoundError({ sessionID }))
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      const result = yield* goals.start({ sessionID, goal: "finish" }).pipe(
+        Effect.as("unexpected success"),
+        Effect.catch((error) => Effect.succeed(error)),
+      )
+
+      expect(result).toBeInstanceOf(Error)
+      expect(yield* goals.status(sessionID)).toBeUndefined()
     }),
   )
 
@@ -189,9 +245,9 @@ describe("GoalSupervisor", () => {
     }),
   )
 
-  it.effect("verify gate requires YES before stopping", () =>
+  it.effect("verify gate requires YES as its own answer before stopping", () =>
     Effect.gen(function* () {
-      const fake = makeSession(["GOAL COMPLETE\nNO", "GOAL COMPLETE\nYES"])
+      const fake = makeSession(["GOAL COMPLETE\nnot YES yet", "GOAL COMPLETE\nYES"])
       const events = yield* makeEvents
       const goals = yield* GoalSupervisor.make.pipe(
         Effect.provideService(SessionV2.Service, fake.service),

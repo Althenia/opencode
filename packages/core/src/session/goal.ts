@@ -22,8 +22,10 @@ export interface StartInput {
   readonly cap?: number
 }
 
+type PromptError = SessionV2.NotFoundError | SessionV2.PromptConflictError
+
 export interface Interface {
-  readonly start: (input: StartInput) => Effect.Effect<GoalState>
+  readonly start: (input: StartInput) => Effect.Effect<GoalState, PromptError>
   readonly stop: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly status: (sessionID: SessionSchema.ID) => Effect.Effect<GoalState | undefined>
 }
@@ -80,7 +82,7 @@ export const make = Effect.gen(function* () {
       ),
     )
 
-  const verified = (text: string) => text.includes("GOAL COMPLETE") && /\bYES\b/i.test(text)
+  const verified = (text: string) => text.includes("GOAL COMPLETE") && /^\s*YES\s*$/im.test(text)
 
   const promptText = (state: GoalState) =>
     [
@@ -89,22 +91,48 @@ export const make = Effect.gen(function* () {
       "When the goal is complete, include GOAL COMPLETE and answer YES to verify completion.",
     ].join("\n")
 
-  const run = Effect.fn("GoalSupervisor.run")(function* (sessionID: SessionSchema.ID) {
+  const beginTurn = Effect.fn("GoalSupervisor.beginTurn")(function* (sessionID: SessionSchema.ID) {
+    const current = goals.get(sessionID)?.state
+    if (!current?.active) return undefined
+    if (current.iteration >= current.cap) {
+      yield* setState(sessionID, (state) => ({ ...state, active: false }))
+      return undefined
+    }
+    const state = yield* setState(sessionID, (state) => ({ ...state, iteration: state.iteration + 1 }))
+    if (!state) return undefined
+    const wait = yield* waitForTurn(sessionID).pipe(Effect.forkIn(scope))
+    yield* Effect.yieldNow
+    yield* sessions.prompt({ sessionID, prompt: { text: promptText(state) }, delivery: "steer", resume: true }).pipe(
+      Effect.catch((error: PromptError) =>
+        Effect.gen(function* () {
+          yield* Fiber.interrupt(wait)
+          return yield* Effect.fail(error)
+        }),
+      ),
+    )
+    return wait
+  })
+
+  const completeTurn = Effect.fn("GoalSupervisor.completeTurn")(function* (
+    sessionID: SessionSchema.ID,
+    wait: Fiber.Fiber<void, unknown>,
+  ) {
+    yield* Fiber.join(wait)
+    if (verified(yield* latestAssistantText(sessionID))) {
+      yield* setState(sessionID, (state) => ({ ...state, active: false }))
+      return false
+    }
+    return true
+  })
+
+  const run = Effect.fn("GoalSupervisor.run")(function* (sessionID: SessionSchema.ID, firstWait: Fiber.Fiber<void, unknown>) {
+    if (!(yield* completeTurn(sessionID, firstWait))) return
     while (true) {
       const current = goals.get(sessionID)?.state
       if (!current?.active) return
-      if (current.iteration >= current.cap) {
-        yield* setState(sessionID, (state) => ({ ...state, active: false }))
-        return
-      }
-      const state = yield* setState(sessionID, (state) => ({ ...state, iteration: state.iteration + 1 }))
-      if (!state) return
-      yield* sessions.prompt({ sessionID, prompt: { text: promptText(state) }, delivery: "steer", resume: true })
-      yield* waitForTurn(sessionID)
-      if (verified(yield* latestAssistantText(sessionID))) {
-        yield* setState(sessionID, (state) => ({ ...state, active: false }))
-        return
-      }
+      const wait = yield* beginTurn(sessionID)
+      if (!wait) return
+      if (!(yield* completeTurn(sessionID, wait))) return
     }
   })
 
@@ -120,9 +148,27 @@ export const make = Effect.gen(function* () {
     yield* stop(input.sessionID)
     const state = { goal: input.goal, active: true, iteration: 0, cap: input.cap ?? GOAL_MAX_ITERATIONS }
     goals.set(input.sessionID, { state })
-    const fiber = yield* run(input.sessionID).pipe(Effect.catch(() => Effect.void), Effect.forkIn(scope))
-    goals.set(input.sessionID, { state, fiber })
-    return snapshot(state)
+    const wait = yield* beginTurn(input.sessionID).pipe(
+      Effect.catch((error: PromptError) =>
+        Effect.gen(function* () {
+          goals.delete(input.sessionID)
+          return yield* Effect.fail(error)
+        }),
+      ),
+    )
+    if (wait) {
+      const fiber = yield* run(input.sessionID, wait).pipe(
+        Effect.catch(() =>
+          Effect.sync(() => {
+            goals.delete(input.sessionID)
+          }),
+        ),
+        Effect.forkIn(scope),
+      )
+      const active = goals.get(input.sessionID)
+      if (active) goals.set(input.sessionID, { ...active, fiber })
+    }
+    return snapshot(goals.get(input.sessionID)?.state ?? state)
   })
 
   yield* Effect.addFinalizer(() =>
