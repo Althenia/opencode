@@ -2,6 +2,7 @@ export * as GoalSupervisor from "./goal"
 
 import { Context, Effect, Fiber, Layer, Scope, Stream } from "effect"
 import { EventV2 } from "../event"
+import { makeGlobalNode } from "../effect/app-node"
 import { SessionV2 } from "../session"
 import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
@@ -179,3 +180,9 @@ export const make = Effect.gen(function* () {
 })
 
 export const layer = Layer.effect(Service, make)
+
+export const node = makeGlobalNode({
+  service: Service,
+  layer: layer.pipe(Layer.orDie),
+  deps: [SessionV2.node, EventV2.node],
+})

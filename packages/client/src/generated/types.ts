@@ -490,6 +490,30 @@ export type SessionsWaitInput = { readonly sessionID: { readonly sessionID: stri
 
 export type SessionsWaitOutput = void
 
+export type SessionsStartInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly goal: { readonly goal: string }["goal"]
+}
+
+export type SessionsStartOutput = {
+  readonly data: { readonly goal: string; readonly active: boolean; readonly iteration: number; readonly cap: number }
+}["data"]
+
+export type SessionsStopInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsStopOutput = void
+
+export type SessionsStatusInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsStatusOutput = {
+  readonly data: {
+    readonly goal: string
+    readonly active: boolean
+    readonly iteration: number
+    readonly cap: number
+  } | null
+}["data"]
+
 export type SessionsStageInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly messageID: { readonly messageID: string; readonly files?: boolean | undefined }["messageID"]

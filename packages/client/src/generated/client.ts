@@ -21,6 +21,12 @@ import type {
   SessionsCompactOutput,
   SessionsWaitInput,
   SessionsWaitOutput,
+  SessionsStartInput,
+  SessionsStartOutput,
+  SessionsStopInput,
+  SessionsStopOutput,
+  SessionsStatusInput,
+  SessionsStatusOutput,
   SessionsStageInput,
   SessionsStageOutput,
   SessionsClearInput,
@@ -401,6 +407,40 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      start: (input: SessionsStartInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsStartOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/start`,
+            body: { goal: input["goal"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      stop: (input: SessionsStopInput, requestOptions?: RequestOptions) =>
+        request<SessionsStopOutput>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/stop`,
+            successStatus: 204,
+            declaredStatuses: [400, 404, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      status: (input: SessionsStatusInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsStatusOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/status`,
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       stage: (input: SessionsStageInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: SessionsStageOutput }>(
           {

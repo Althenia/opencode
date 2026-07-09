@@ -86,6 +86,13 @@ const SessionActive = Schema.Struct({
 
 const SessionHistoryLimit = PositiveInt.check(Schema.isLessThanOrEqualTo(100))
 
+const GoalState = Schema.Struct({
+  goal: Schema.String,
+  active: Schema.Boolean,
+  iteration: NonNegativeInt,
+  cap: PositiveInt,
+}).annotate({ identifier: "SessionGoalState" })
+
 export const SessionHistoryQuery = Schema.Struct({
   limit: Schema.NumberFromString.pipe(Schema.decodeTo(SessionHistoryLimit), Schema.optional),
   after: Schema.NumberFromString.pipe(Schema.decodeTo(NonNegativeInt), Schema.optional),
@@ -249,6 +256,50 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             identifier: "v2.session.wait",
             summary: "Wait for session",
             description: "Wait for a session agent loop to become idle.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.goal.start", "/api/session/:sessionID/goal/start", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({ goal: Schema.String }),
+        success: Schema.Struct({ data: GoalState }),
+        error: [ConflictError, SessionNotFoundError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.goal.start",
+            summary: "Start session goal",
+            description: "Start supervised goal execution for a session.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.goal.stop", "/api/session/:sessionID/goal/stop", {
+        params: { sessionID: Session.ID },
+        success: HttpApiSchema.NoContent,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.goal.stop",
+            summary: "Stop session goal",
+            description: "Stop supervised goal execution for a session.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.goal.status", "/api/session/:sessionID/goal/status", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Schema.NullOr(GoalState) }),
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.goal.status",
+            summary: "Get session goal status",
+            description: "Retrieve the current supervised goal state for a session.",
           }),
         ),
     )
