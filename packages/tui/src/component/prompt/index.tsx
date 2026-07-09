@@ -965,14 +965,20 @@ export function Prompt(props: PromptProps) {
       void exit()
       return true
     }
-    if (trimmed === "/goal stop") {
+    if (trimmed === "/goal stop" || trimmed === "/goal-mode stop") {
       await goal.stop()
       clearPrompt()
       props.onSubmit?.()
       return true
     }
-    if (trimmed === "/goal" || trimmed.startsWith("/goal ")) {
-      const value = trimmed.slice("/goal".length).trim()
+    if (
+      trimmed === "/goal" ||
+      trimmed.startsWith("/goal ") ||
+      trimmed === "/goal-mode" ||
+      trimmed.startsWith("/goal-mode ")
+    ) {
+      const command = trimmed.startsWith("/goal-mode") ? "/goal-mode" : "/goal"
+      const value = trimmed.slice(command.length).trim()
       const prompt =
         value || (await DialogPrompt.show(dialog, "Goal", { placeholder: "What should opencode work toward?" }))
       if (prompt?.trim()) await goal.start(prompt.trim())

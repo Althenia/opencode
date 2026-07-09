@@ -82,6 +82,28 @@ test("goal start switches to yolo before the server responds", async () => {
   }
 })
 
+test("/goal-mode alias starts supervision", async () => {
+  const calls: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      calls.push(request ? await request.json() : undefined)
+      return json({ data: { goal: "alias goal", active: true, iteration: 1, cap: 25 } })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    app.promptRef?.set({ input: "/goal-mode alias goal", parts: [] })
+    await app.promptRef?.submit()
+    await waitFor(() => app.local.permission.mode === "auto")
+    await Bun.sleep(50)
+
+    expect(calls).toEqual([{ goal: "alias goal" }])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("/goal with no text opens DialogPrompt and starts with the entered text", async () => {
   const calls: unknown[] = []
   const app = await mountGoalPrompt(async (url, request) => {

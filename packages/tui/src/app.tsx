@@ -964,6 +964,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Start goal mode",
         category: "Session",
         slashName: "goal",
+        slashAliases: ["goal-mode"],
         run: async () => {
           const value = await DialogPrompt.show(dialog, "Goal", { placeholder: "What should opencode work toward?" })
           if (!value?.trim()) return
