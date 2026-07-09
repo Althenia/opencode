@@ -32,6 +32,7 @@ import { batch, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
+import { autoAnswer } from "../util/question"
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -236,6 +237,15 @@ export const {
 
         case "question.asked": {
           const request = event.properties
+          if (permission.mode === "auto") {
+            void sdk.client.question.reply({
+              requestID: request.id,
+              directory,
+              workspace,
+              answers: request.questions.map((question) => autoAnswer(question)),
+            })
+            break
+          }
           const requests = store.question[request.sessionID]
           if (!requests) {
             setStore("question", request.sessionID, [request])
