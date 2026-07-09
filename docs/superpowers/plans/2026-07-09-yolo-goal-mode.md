@@ -287,7 +287,7 @@
 
 **Interfaces:**
 - Consumes: `sdk.client.sessions.goalStart/goalStop/goalStatus`, the existing permission toggle, and `DialogPrompt`
-- Produces: a `/goal` slash command, `/goal stop`, a goal status context, and a prompt-bar badge that reads `goal · <iteration>/25` while active
+- Produces: a `/goal` slash command, `/goal stop`, a goal status context, and a prompt-bar badge that reads `goal · <iteration>/<cap>` while active
 
 - [ ] **Step 1: Add the TUI contract test first**
 
@@ -295,7 +295,7 @@
   - `/goal` with inline text sets yolo, starts supervision, and submits the first goal prompt
   - `/goal` with no text opens `DialogPrompt` and uses the entered text
   - `/goal stop` stops supervision and clears the active badge
-  - status polling renders `goal · <n>/25` when active
+  - status polling renders `goal · <n>/<cap>` when active
 
   Run: `bun test test/context/goal.test.tsx`
   
@@ -323,7 +323,7 @@
 
 - [ ] **Step 4: Render the live badge**
 
-  Update `packages/tui/src/component/prompt/index.tsx` so the badge still shows yolo mode, and append `goal · <iteration>/25` when the goal context reports an active goal.
+  Update `packages/tui/src/component/prompt/index.tsx` so the badge still shows yolo mode, and append `goal · <iteration>/<cap>` when the goal context reports an active goal.
 
 - [ ] **Step 5: Add the app-level check**
 
@@ -408,7 +408,7 @@
 - The TUI copy says `yolo`, not `auto`.
 - `GoalSupervisor` can start, stop, report status, and loop with a hard iteration cap.
 - `session.goal.start`, `session.goal.stop`, and `session.goal.status` are available through protocol/server and the regenerated client.
-- `/goal` starts yolo mode, prompts for text when needed, and shows `goal · <iteration>/25` while active.
+- `/goal` starts yolo mode, prompts for text when needed, and shows `goal · <iteration>/<cap>` while active.
 - All package-scoped validation commands pass.
 
 ### Risks
