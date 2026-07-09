@@ -40,7 +40,7 @@ test("/goal with inline text sets yolo and starts supervision without sending a 
   const app = await mountGoalPrompt(async (url, request) => {
     if (url.pathname === "/api/session/session-test/goal/start") {
       calls.push({ method: "goalStart", body: request ? await request.json() : undefined })
-      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
+      return json({ goal: "ship task 6", active: true, iteration: 1, cap: 7 })
     }
     if (url.pathname === "/api/session/session-test/message") {
       calls.push({ method: "prompt" })
@@ -65,7 +65,7 @@ test("/goal with no text opens DialogPrompt and starts with the entered text", a
   const app = await mountGoalPrompt(async (url, request) => {
     if (url.pathname === "/api/session/session-test/goal/start") {
       calls.push(request ? await request.json() : undefined)
-      return json({ data: { goal: "from dialog", active: true, iteration: 1, cap: 7 } })
+      return json({ goal: "from dialog", active: true, iteration: 1, cap: 7 })
     }
   })
 
@@ -91,7 +91,7 @@ test("/goal stop stops supervision and clears the active badge", async () => {
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/api/session/session-test/goal/status") {
       calls.push("status")
-      return json({ data: { goal: "ship task 6", active: true, iteration: 3, cap: 7 } })
+      return json({ goal: "ship task 6", active: true, iteration: 3, cap: 7 })
     }
     if (url.pathname === "/api/session/session-test/goal/stop") {
       calls.push("stop")
@@ -116,13 +116,35 @@ test("/goal stop stops supervision and clears the active badge", async () => {
 test("status polling renders goal iteration and returned cap", async () => {
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/api/session/session-test/goal/status") {
-      return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
+      return json({ goal: "ship task 6", active: true, iteration: 2, cap: 7 })
     }
   })
 
   try {
     app.goal.status()
     expect(await captureFrame(app, (frame) => frame.includes("goal · 2/7"))).toContain("goal · 2/7")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("failed goal start does not switch permission mode", async () => {
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return json({ error: "goal already active" }, { status: 409 })
+    }
+  })
+
+  try {
+    let rejected = false
+    try {
+      await app.goal.start("ship task 6")
+    } catch {
+      rejected = true
+    }
+
+    expect(rejected).toBe(true)
+    expect(app.local.permission.mode).not.toBe("auto")
   } finally {
     app.renderer.destroy()
   }
@@ -141,7 +163,7 @@ async function mountGoalPrompt(
     const url = new URL(request.url)
     const overridden = await handler(url, request.clone())
     if (overridden) return overridden
-    if (url.pathname === "/api/session/session-test/goal/status") return json({ data: null })
+    if (url.pathname === "/api/session/session-test/goal/status") return json(null)
     return base.fetch(request)
   }) as typeof globalThis.fetch
   const state = {} as {

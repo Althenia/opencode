@@ -17,9 +17,9 @@ type GoalStatus = {
 }
 type ClientWithSessions = Client & {
   sessions: {
-    goalStart(input: GoalStartInput): Promise<{ readonly data: GoalStatus }>
+    goalStart(input: GoalStartInput): Promise<GoalStatus>
     goalStop(input: GoalSessionInput): Promise<void>
-    goalStatus(input: GoalSessionInput): Promise<{ readonly data: GoalStatus | null }>
+    goalStatus(input: GoalSessionInput): Promise<GoalStatus | null>
   }
 }
 
@@ -45,6 +45,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       async function request<T>(path: string, init?: RequestInit) {
         if (init?.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json")
         const response = await fetcher(new Request(new URL(path, props.url), { ...init, headers }))
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim())
         if (response.status === 204) return undefined as T
         return response.json() as Promise<T>
       }
@@ -58,16 +59,14 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       return Object.assign(client, {
         sessions: {
           goalStart: (input: GoalStartInput) =>
-            request<{ readonly data: GoalStatus }>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/start`, {
+            request<GoalStatus>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/start`, {
               method: "POST",
               body: JSON.stringify({ goal: input.goal }),
             }),
           goalStop: (input: GoalSessionInput) =>
             request<void>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/stop`, { method: "POST" }),
           goalStatus: (input: GoalSessionInput) =>
-            request<{ readonly data: GoalStatus | null }>(
-              `/api/session/${encodeURIComponent(input.sessionID)}/goal/status`,
-            ),
+            request<GoalStatus | null>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/status`),
         },
       })
     }

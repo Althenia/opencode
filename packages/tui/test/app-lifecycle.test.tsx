@@ -209,7 +209,7 @@ test("prompt chrome renders yolo mode and goal badge", async () => {
   const events = createEventSource()
   const calls = createFetch((url) => {
     if (url.pathname === "/api/session/session-test/goal/status") {
-      return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
+      return json({ goal: "ship task 6", active: true, iteration: 2, cap: 7 })
     }
   }, events)
   const app = await testRender(

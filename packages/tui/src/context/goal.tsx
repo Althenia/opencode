@@ -26,9 +26,9 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     async function start(goal: string) {
       const id = sessionID()
       if (!id) return
-      permission.set("auto")
       const result = await sdk.client.sessions.goalStart({ sessionID: id, goal })
-      setCurrent(result.data?.active ? result.data : undefined)
+      permission.set("auto")
+      setCurrent(result.active ? result : undefined)
     }
 
     async function stop() {
@@ -45,8 +45,8 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
         return
       }
       const result = await sdk.client.sessions.goalStatus({ sessionID: id })
-      setCurrent(result.data?.active ? result.data : undefined)
-      return result.data ?? undefined
+      setCurrent(result?.active ? result : undefined)
+      return result ?? undefined
     }
 
     createEffect(() => {
