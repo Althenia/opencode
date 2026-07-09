@@ -8,7 +8,7 @@ import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 
-export const GOAL_MAX_ITERATIONS = 10
+export const GOAL_MAX_ITERATIONS = 25
 
 export interface GoalState {
   readonly goal: string

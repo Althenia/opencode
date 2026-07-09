@@ -143,7 +143,7 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts).toHaveLength(1)
       expect(fake.prompts[0]).toMatchObject({ sessionID, delivery: "steer", resume: true })
       expect(fake.prompts[0]?.prompt.text).toContain("ship task 4")
-      expect(fake.prompts[0]?.prompt.text).toContain("Iteration 1 of 10")
+      expect(fake.prompts[0]?.prompt.text).toContain("Iteration 1 of 25")
     }),
   )
 
