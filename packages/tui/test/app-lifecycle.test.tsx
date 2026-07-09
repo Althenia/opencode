@@ -253,6 +253,60 @@ test("disabling yolo mode stops active goal supervision", async () => {
   }
 })
 
+test("goal palette command toggles active supervision off", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  let stopped = false
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/session/dummy/goal/status") {
+      return json({ data: stopped ? null : { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
+    }
+    if (url.pathname === "/api/session/dummy/goal/stop") {
+      stopped = true
+      return new Response(null, { status: 204 })
+    }
+  }, events)
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { auto: true, continue: true },
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    api?.keymap.dispatchCommand("goal.start")
+    await waitFor(() => stopped)
+    api?.keymap.dispatchCommand("app.exit")
+    await task
+
+    expect(stopped).toBe(true)
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("prompt chrome renders yolo mode and goal badge", async () => {
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
@@ -269,9 +323,10 @@ test("prompt chrome renders yolo mode and goal badge", async () => {
   )
 
   try {
-    const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal · 2/7"))
+    const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal"))
     expect(frame).toContain("yolo")
-    expect(frame).toContain("goal · 2/7")
+    expect(frame).toMatch(/yolo\s+goal/)
+    expect(frame).not.toContain("goal ·")
     expect(frame.split("\n").find((line) => line.includes("yolo"))?.indexOf("yolo")).toBeGreaterThan(40)
   } finally {
     app.renderer.destroy()

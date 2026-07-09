@@ -214,7 +214,7 @@ export function Prompt(props: PromptProps) {
   const move = usePromptMove({ projectID: project.project, sessionID: () => props.sessionID })
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
-  const hasRightContent = createMemo(() => Boolean(props.right) || local.permission.mode === "auto")
+  const hasRightContent = createMemo(() => Boolean(props.right) || local.permission.mode === "auto" || goal.current())
 
   function promptModelWarning() {
     toast.show({
@@ -968,28 +968,13 @@ export function Prompt(props: PromptProps) {
       void exit()
       return true
     }
-    if (trimmed === "/goal stop" || trimmed === "/goal-mode stop") {
-      await goal.stop()
+    const toggleGoal = trimmed === "/goal" || trimmed === "/goal-mode"
+    if (toggleGoal) {
       clearPrompt()
       props.onSubmit?.()
+      if (goal.current()) await goal.stop()
+      else await goal.start(GOAL_PROMPT)
       return true
-    }
-    const goalCommand =
-      trimmed === "/goal" ||
-      trimmed.startsWith("/goal ") ||
-      trimmed === "/goal-mode" ||
-      trimmed.startsWith("/goal-mode ")
-    const goalPrompt = goalCommand
-      ? (() => {
-          const command = trimmed.startsWith("/goal-mode") ? "/goal-mode" : "/goal"
-          const value = trimmed.slice(command.length).trim()
-          if (!value) return GOAL_PROMPT
-          return `${GOAL_PROMPT}\n\nContext from user: ${value}`
-        })()
-      : undefined
-    if (goalPrompt) {
-      input.setText(goalPrompt)
-      setStore("prompt", "input", goalPrompt)
     }
 
     const selectedModel = local.model.current()
@@ -1049,8 +1034,6 @@ export function Prompt(props: PromptProps) {
 
       sessionID = res.data.id
     }
-
-    if (goalPrompt) local.permission.set("auto")
 
     const inputText = expandTrackedPastedText(
       store.prompt.input,
@@ -1476,13 +1459,6 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
-                      <Show when={store.mode === "normal" && goal.current()}>
-                        {(status) => (
-                          <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>
-                            goal · {status().iteration}/{status().cap}
-                          </text>
-                        )}
-                      </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
@@ -1511,6 +1487,9 @@ export function Prompt(props: PromptProps) {
                 <box flexDirection="row" gap={1} alignItems="center">
                   <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                     <text fg={fadeColor(theme.success, agentMetaAlpha())}>yolo</text>
+                  </Show>
+                  <Show when={store.mode === "normal" && goal.current()}>
+                    <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>goal</text>
                   </Show>
                   {props.right}
                 </box>

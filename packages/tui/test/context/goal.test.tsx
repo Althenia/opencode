@@ -52,10 +52,10 @@ test("/goal asks the agent to create or update the goal todo list", async () => 
     await waitFor(() => !!app.promptRef)
     await waitFor(() => !!app.local.model.current())
     app.promptRef?.set({ input: "/goal", parts: [] })
-    app.promptRef?.submit()
+    await app.promptRef?.submit()
     await waitFor(() => calls.length === 1)
 
-    expect(calls[0]?.method).toBe("prompt")
+    expect(calls[0]?.method).toBe("goalStart")
     expect(JSON.stringify(calls[0]?.body)).toContain("create or update the goal todo list")
     expect(app.local.permission.mode).toBe("auto")
   } finally {
@@ -63,11 +63,15 @@ test("/goal asks the agent to create or update the goal todo list", async () => 
   }
 })
 
-test("/goal with text passes the text as context for the agent", async () => {
-  const calls: unknown[] = []
+test("/goal with text is sent as a normal prompt", async () => {
+  const calls: Array<{ method: string; body?: unknown }> = []
   const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      calls.push({ method: "goalStart", body: request ? await request.json() : undefined })
+      return json({ data: { goal: "unexpected", active: true, iteration: 1, cap: 7 } })
+    }
     if (url.pathname === "/session/session-test/message") {
-      calls.push(request ? await request.json() : undefined)
+      calls.push({ method: "prompt", body: request ? await request.json() : undefined })
       return json({ data: {} })
     }
   })
@@ -76,12 +80,12 @@ test("/goal with text passes the text as context for the agent", async () => {
     await waitFor(() => !!app.promptRef)
     await waitFor(() => !!app.local.model.current())
     app.promptRef?.set({ input: "/goal focus on auth and tests", parts: [] })
-    app.promptRef?.submit()
+    await app.promptRef?.submit()
     await waitFor(() => calls.length === 1)
 
-    expect(JSON.stringify(calls[0])).toContain("create or update the goal todo list")
-    expect(JSON.stringify(calls[0])).toContain("focus on auth and tests")
-    expect(app.local.permission.mode).toBe("auto")
+    expect(calls[0]?.method).toBe("prompt")
+    expect(JSON.stringify(calls[0]?.body)).toContain("/goal focus on auth and tests")
+    expect(app.local.permission.mode).not.toBe("auto")
   } finally {
     app.renderer.destroy()
   }
@@ -109,52 +113,53 @@ test("goal start switches to yolo before the server responds", async () => {
   }
 })
 
-test("/goal-mode alias asks the agent to create or update goals", async () => {
-  const calls: unknown[] = []
+test("/goal-mode alias toggles goal supervision on", async () => {
+  const calls: Array<{ method: string; body?: unknown }> = []
   const app = await mountGoalPrompt(async (url, request) => {
-    if (url.pathname === "/session/session-test/message") {
-      calls.push(request ? await request.json() : undefined)
-      return json({ data: {} })
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      calls.push({ method: "goalStart", body: request ? await request.json() : undefined })
+      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
     }
   })
 
   try {
     await waitFor(() => !!app.promptRef)
     await waitFor(() => !!app.local.model.current())
-    app.promptRef?.set({ input: "/goal-mode alias goal", parts: [] })
+    app.promptRef?.set({ input: "/goal-mode", parts: [] })
     await app.promptRef?.submit()
     await waitFor(() => calls.length === 1)
 
+    expect(calls[0]?.method).toBe("goalStart")
     expect(JSON.stringify(calls[0])).toContain("create or update the goal todo list")
-    expect(JSON.stringify(calls[0])).toContain("alias goal")
+    expect(app.local.permission.mode).toBe("auto")
   } finally {
     app.renderer.destroy()
   }
 })
 
-test("/goal with no text does not open a popup", async () => {
-  const calls: unknown[] = []
+test("/goal renders the goal badge after starting", async () => {
   const app = await mountGoalPrompt(async (url, request) => {
     if (url.pathname === "/api/session/session-test/goal/start") {
-      calls.push(request ? await request.json() : undefined)
-      return json({ data: { goal: "unexpected", active: true, iteration: 1, cap: 7 } })
+      await request?.json()
+      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
     }
-    if (url.pathname === "/session/session-test/message") return json({ data: {} })
   })
 
   try {
     await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
     app.promptRef?.set({ input: "/goal", parts: [] })
     await app.promptRef?.submit()
-    await Bun.sleep(50)
 
-    expect(calls).toEqual([])
+    const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal"))
+    expect(frame).toMatch(/yolo\s+goal/)
+    expect(frame).not.toContain("goal ·")
   } finally {
     app.renderer.destroy()
   }
 })
 
-test("/goal stop stops supervision and clears the active badge", async () => {
+test("/goal stop is sent as a normal prompt", async () => {
   const calls: string[] = []
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/api/session/session-test/goal/status") {
@@ -165,23 +170,59 @@ test("/goal stop stops supervision and clears the active badge", async () => {
       calls.push("stop")
       return new Response(null, { status: 204 })
     }
+    if (url.pathname === "/session/session-test/message") {
+      calls.push("prompt")
+      return json({ data: {} })
+    }
   })
 
   try {
     await app.goal.status()
-    expect(await captureFrame(app, (frame) => frame.includes("goal · 3/7"))).toContain("goal · 3/7")
+    const frame = await captureFrame(app, (frame) => frame.includes("goal"))
+    expect(frame).toContain("goal")
+    expect(frame).not.toContain("goal ·")
     await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
     app.promptRef?.set({ input: "/goal stop", parts: [] })
-    app.promptRef?.submit()
-    await waitFor(() => calls.includes("stop"))
+    await app.promptRef?.submit()
+    await waitFor(() => calls.includes("prompt"))
 
-    expect(await captureFrame(app, (frame) => !frame.includes("goal ·"))).not.toContain("goal ·")
+    expect(calls).not.toContain("stop")
   } finally {
     app.renderer.destroy()
   }
 })
 
-test("status polling renders goal iteration and returned cap", async () => {
+test("/goal toggles active supervision off", async () => {
+  const calls: string[] = []
+  let stopped = false
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/status") {
+      if (stopped) return json({ data: null })
+      calls.push("status")
+      return json({ data: { goal: "ship task 6", active: true, iteration: 3, cap: 7 } })
+    }
+    if (url.pathname === "/api/session/session-test/goal/stop") {
+      calls.push("stop")
+      stopped = true
+      return new Response(null, { status: 204 })
+    }
+  })
+
+  try {
+    await app.goal.status()
+    await waitFor(() => !!app.goal.current())
+    await waitFor(() => !!app.promptRef)
+    app.promptRef?.set({ input: "/goal", parts: [] })
+    await app.promptRef?.submit()
+    await waitFor(() => calls.includes("stop"))
+    await waitFor(() => app.promptRef?.current.input === "")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("status polling renders active goal badge without the counter", async () => {
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/api/session/session-test/goal/status") {
       return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
@@ -190,7 +231,9 @@ test("status polling renders goal iteration and returned cap", async () => {
 
   try {
     app.goal.status()
-    expect(await captureFrame(app, (frame) => frame.includes("goal · 2/7"))).toContain("goal · 2/7")
+    const frame = await captureFrame(app, (frame) => frame.includes("goal"))
+    expect(frame).toContain("goal")
+    expect(frame).not.toContain("goal ·")
   } finally {
     app.renderer.destroy()
   }
