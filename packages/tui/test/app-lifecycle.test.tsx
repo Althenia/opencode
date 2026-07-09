@@ -126,3 +126,16 @@ test("app.exit prints the session epilogue after scoped cleanup", async () => {
     mock.restore()
   }
 })
+
+test("permission mode labels use yolo in the prompt chrome and palette", async () => {
+  const [appSource, promptSource] = await Promise.all([
+    Bun.file("src/app.tsx").text(),
+    Bun.file("src/component/prompt/index.tsx").text(),
+  ])
+
+  expect(appSource).toContain("Disable yolo mode")
+  expect(appSource).toContain("Enable yolo mode")
+  expect(appSource).not.toContain("Enable/Disable auto-approve permissions")
+  expect(promptSource).toContain(">yolo</text>")
+  expect(promptSource).not.toContain(">auto</text>")
+})
