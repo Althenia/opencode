@@ -102,6 +102,8 @@ const money = new Intl.NumberFormat("en-US", {
   currency: "USD",
 })
 
+const GOAL_PROMPT = "Analyze this session and create or update the goal todo list. Keep it concise and actionable."
+
 const DRAFT_RETENTION_MIN_CHARS = 20
 
 function randomIndex(count: number) {
@@ -212,7 +214,7 @@ export function Prompt(props: PromptProps) {
   const move = usePromptMove({ projectID: project.project, sessionID: () => props.sessionID })
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
-  const hasRightContent = createMemo(() => Boolean(props.right))
+  const hasRightContent = createMemo(() => Boolean(props.right) || local.permission.mode === "auto")
 
   function promptModelWarning() {
     toast.show({
@@ -971,21 +973,24 @@ export function Prompt(props: PromptProps) {
       props.onSubmit?.()
       return true
     }
-    if (
+    const goalCommand =
       trimmed === "/goal" ||
       trimmed.startsWith("/goal ") ||
       trimmed === "/goal-mode" ||
       trimmed.startsWith("/goal-mode ")
-    ) {
-      const command = trimmed.startsWith("/goal-mode") ? "/goal-mode" : "/goal"
-      const value = trimmed.slice(command.length).trim()
-      const prompt =
-        value || (await DialogPrompt.show(dialog, "Goal", { placeholder: "What should opencode work toward?" }))
-      if (prompt?.trim()) await goal.start(prompt.trim())
-      clearPrompt()
-      props.onSubmit?.()
-      return true
+    const goalPrompt = goalCommand
+      ? (() => {
+          const command = trimmed.startsWith("/goal-mode") ? "/goal-mode" : "/goal"
+          const value = trimmed.slice(command.length).trim()
+          if (!value) return GOAL_PROMPT
+          return `${GOAL_PROMPT}\n\nContext from user: ${value}`
+        })()
+      : undefined
+    if (goalPrompt) {
+      input.setText(goalPrompt)
+      setStore("prompt", "input", goalPrompt)
     }
+
     const selectedModel = local.model.current()
     if (!selectedModel) {
       void promptModelWarning()
@@ -1043,6 +1048,8 @@ export function Prompt(props: PromptProps) {
 
       sessionID = res.data.id
     }
+
+    if (goalPrompt) local.permission.set("auto")
 
     const inputText = expandTrackedPastedText(
       store.prompt.input,
@@ -1468,9 +1475,6 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
-                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
-                        <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>yolo</text>
-                      </Show>
                       <Show when={store.mode === "normal" && goal.current()}>
                         {(status) => (
                           <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>
@@ -1504,6 +1508,9 @@ export function Prompt(props: PromptProps) {
               </box>
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center">
+                  <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
+                    <text fg={fadeColor(theme.success, agentMetaAlpha())}>yolo</text>
+                  </Show>
                   {props.right}
                 </box>
               </Show>

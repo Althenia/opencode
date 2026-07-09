@@ -58,7 +58,6 @@ import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
-import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
@@ -965,10 +964,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Session",
         slashName: "goal",
         slashAliases: ["goal-mode"],
-        run: async () => {
-          const value = await DialogPrompt.show(dialog, "Goal", { placeholder: "What should opencode work toward?" })
-          if (!value?.trim()) return
-          await goal.start(value.trim())
+        run: () => {
+          promptRef.current?.set({ input: "/goal ", parts: [] })
+          promptRef.current?.focus()
           dialog.clear()
         },
       },

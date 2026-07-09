@@ -5,6 +5,7 @@ import { useTheme } from "../../context/theme"
 import { useTuiConfig } from "../../config"
 import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { usePluginRuntime } from "../../plugin/runtime"
+import { useGoal } from "../../context/goal"
 
 import { getScrollAcceleration } from "../../util/scroll"
 import { WorkspaceLabel } from "../../component/workspace-label"
@@ -13,6 +14,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const pluginRuntime = usePluginRuntime()
   const project = useProject()
   const sync = useSync()
+  const goal = useGoal()
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
   const session = createMemo(() => sync.session.get(props.sessionID))
@@ -82,6 +84,19 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </Show>
               </box>
             </pluginRuntime.Slot>
+            <Show when={goal.current()}>
+              {(item) => (
+                <box paddingRight={1}>
+                  <text fg={theme.text}>
+                    <b>Goal</b>
+                  </text>
+                  <text fg={theme.textMuted}>{item().goal}</text>
+                  <text fg={theme.textMuted}>
+                    {item().iteration}/{item().cap}
+                  </text>
+                </box>
+              )}
+            </Show>
             <pluginRuntime.Slot name="sidebar_content" session_id={props.sessionID} />
           </box>
         </scrollbox>

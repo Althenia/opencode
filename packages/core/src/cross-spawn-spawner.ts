@@ -29,6 +29,11 @@ import { filesystem, path } from "./effect/app-node-platform"
 
 const toError = (err: unknown): Error => (err instanceof globalThis.Error ? err : new globalThis.Error(String(err)))
 
+function toNodeEncoding(encoding: ChildProcess.Encoding | undefined): BufferEncoding | undefined {
+  if (encoding === "utf-16le") return "utf16le"
+  return encoding
+}
+
 const toTag = (err: NodeJS.ErrnoException): PlatformError.SystemErrorTag => {
   switch (err.code) {
     case "ENOENT":
@@ -232,7 +237,7 @@ export const make = Effect.gen(function* () {
           evaluate: () => proc.stdin!,
           onError: (err) => toPlatformError("fromWritable(stdin)", toError(err), command),
           endOnDone: cfg.endOnDone,
-          encoding: cfg.encoding,
+          encoding: toNodeEncoding(cfg.encoding),
         })
       }
       if (Stream.isStream(cfg.stream)) return Effect.as(Effect.forkScoped(Stream.run(cfg.stream, sink)), sink)

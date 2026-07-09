@@ -272,6 +272,7 @@ test("prompt chrome renders yolo mode and goal badge", async () => {
     const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal · 2/7"))
     expect(frame).toContain("yolo")
     expect(frame).toContain("goal · 2/7")
+    expect(frame.split("\n").find((line) => line.includes("yolo"))?.indexOf("yolo")).toBeGreaterThan(40)
   } finally {
     app.renderer.destroy()
   }

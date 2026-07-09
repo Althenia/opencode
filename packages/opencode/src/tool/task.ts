@@ -14,6 +14,8 @@ import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -49,6 +51,12 @@ const BaseParameterFields = {
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
   }),
   command: Schema.optional(Schema.String).annotate({ description: "The command that triggered this task" }),
+  provider: Schema.optional(Schema.String).annotate({
+    description: "Provider ID to use for this subagent. Must be provided with model.",
+  }),
+  model: Schema.optional(Schema.String).annotate({
+    description: "Model ID to use for this subagent. Must be provided with provider and may contain slashes.",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -164,7 +172,18 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
-      const model = next.model ?? {
+      if ((params.provider && !params.model) || (!params.provider && params.model)) {
+        return yield* Effect.fail(new Error("Task model override requires both provider and model"))
+      }
+
+      const explicitModel = params.provider && params.model
+        ? {
+            providerID: ProviderV2.ID.make(params.provider),
+            modelID: ModelV2.ID.make(params.model),
+          }
+        : undefined
+
+      const model = explicitModel ?? next.model ?? {
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
       }
@@ -192,7 +211,7 @@ export const TaskTool = Tool.define(
             modelID: model.modelID,
             providerID: model.providerID,
           },
-          variant: next.model ? undefined : variant,
+          variant: explicitModel || next.model ? undefined : variant,
           agent: next.name,
           parts,
         })

@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { TextareaRenderable } from "@opentui/core"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import { mkdir } from "node:fs/promises"
@@ -30,31 +29,59 @@ import { FrecencyProvider } from "../../src/component/prompt/frecency"
 import { Prompt, type PromptRef } from "../../src/component/prompt"
 import { PromptHistoryProvider } from "../../src/component/prompt/history"
 import { PromptStashProvider } from "../../src/component/prompt/stash"
+import { Sidebar } from "../../src/routes/session/sidebar"
 import { createPluginRuntime, PluginRuntimeProvider } from "../../src/plugin/runtime"
 import { DialogProvider, useDialog } from "../../src/ui/dialog"
 import { ToastProvider } from "../../src/ui/toast"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../src/keymap"
 
-test("/goal with inline text sets yolo and starts supervision without sending a prompt", async () => {
+test("/goal asks the agent to create or update the goal todo list", async () => {
   const calls: Array<{ method: string; body?: unknown }> = []
   const app = await mountGoalPrompt(async (url, request) => {
     if (url.pathname === "/api/session/session-test/goal/start") {
       calls.push({ method: "goalStart", body: request ? await request.json() : undefined })
       return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
     }
-    if (url.pathname === "/api/session/session-test/message") {
-      calls.push({ method: "prompt" })
+    if (url.pathname === "/session/session-test/message") {
+      calls.push({ method: "prompt", body: request ? await request.json() : undefined })
       return json({ data: {} })
     }
   })
 
   try {
     await waitFor(() => !!app.promptRef)
-    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal", parts: [] })
     app.promptRef?.submit()
-    await waitFor(() => calls.length === 1 && app.local.permission.mode === "auto")
+    await waitFor(() => calls.length === 1)
 
-    expect(calls).toEqual([{ method: "goalStart", body: { goal: "ship task 6" } }])
+    expect(calls[0]?.method).toBe("prompt")
+    expect(JSON.stringify(calls[0]?.body)).toContain("create or update the goal todo list")
+    expect(app.local.permission.mode).toBe("auto")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("/goal with text passes the text as context for the agent", async () => {
+  const calls: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname === "/session/session-test/message") {
+      calls.push(request ? await request.json() : undefined)
+      return json({ data: {} })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal focus on auth and tests", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => calls.length === 1)
+
+    expect(JSON.stringify(calls[0])).toContain("create or update the goal todo list")
+    expect(JSON.stringify(calls[0])).toContain("focus on auth and tests")
+    expect(app.local.permission.mode).toBe("auto")
   } finally {
     app.renderer.destroy()
   }
@@ -82,49 +109,46 @@ test("goal start switches to yolo before the server responds", async () => {
   }
 })
 
-test("/goal-mode alias starts supervision", async () => {
+test("/goal-mode alias asks the agent to create or update goals", async () => {
   const calls: unknown[] = []
   const app = await mountGoalPrompt(async (url, request) => {
-    if (url.pathname === "/api/session/session-test/goal/start") {
+    if (url.pathname === "/session/session-test/message") {
       calls.push(request ? await request.json() : undefined)
-      return json({ data: { goal: "alias goal", active: true, iteration: 1, cap: 25 } })
+      return json({ data: {} })
     }
   })
 
   try {
     await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
     app.promptRef?.set({ input: "/goal-mode alias goal", parts: [] })
     await app.promptRef?.submit()
-    await waitFor(() => app.local.permission.mode === "auto")
-    await Bun.sleep(50)
+    await waitFor(() => calls.length === 1)
 
-    expect(calls).toEqual([{ goal: "alias goal" }])
+    expect(JSON.stringify(calls[0])).toContain("create or update the goal todo list")
+    expect(JSON.stringify(calls[0])).toContain("alias goal")
   } finally {
     app.renderer.destroy()
   }
 })
 
-test("/goal with no text opens DialogPrompt and starts with the entered text", async () => {
+test("/goal with no text does not open a popup", async () => {
   const calls: unknown[] = []
   const app = await mountGoalPrompt(async (url, request) => {
     if (url.pathname === "/api/session/session-test/goal/start") {
       calls.push(request ? await request.json() : undefined)
-      return json({ data: { goal: "from dialog", active: true, iteration: 1, cap: 7 } })
+      return json({ data: { goal: "unexpected", active: true, iteration: 1, cap: 7 } })
     }
+    if (url.pathname === "/session/session-test/message") return json({ data: {} })
   })
 
   try {
     await waitFor(() => !!app.promptRef)
     app.promptRef?.set({ input: "/goal", parts: [] })
-    app.promptRef?.submit()
-    await waitFor(() => app.renderer.currentFocusedEditor instanceof TextareaRenderable)
-    const textarea = app.renderer.currentFocusedEditor
-    if (!(textarea instanceof TextareaRenderable)) throw new Error("expected focused dialog textarea")
-    textarea.setText("from dialog")
-    app.mockInput.pressEnter()
-    await waitFor(() => app.local.permission.mode === "auto")
+    await app.promptRef?.submit()
+    await Bun.sleep(50)
 
-    expect(calls).toEqual([{ goal: "from dialog" }])
+    expect(calls).toEqual([])
   } finally {
     app.renderer.destroy()
   }
@@ -172,6 +196,27 @@ test("status polling renders goal iteration and returned cap", async () => {
   }
 })
 
+test("status polling renders active goal in the sidebar", async () => {
+  const app = await mountGoalPrompt(
+    (url) => {
+      if (url.pathname === "/api/session/session-test/goal/status") {
+        return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
+      }
+    },
+    { sidebar: true },
+  )
+
+  try {
+    await app.goal.status()
+    const frame = await captureFrame(app, (frame) => frame.includes("Goal") && frame.includes("ship task 6"))
+    expect(frame).toContain("Goal")
+    expect(frame).toContain("ship task 6")
+    expect(frame).toContain("2/7")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("failed goal start does not switch permission mode", async () => {
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/api/session/session-test/goal/start") {
@@ -196,6 +241,7 @@ test("failed goal start does not switch permission mode", async () => {
 
 async function mountGoalPrompt(
   handler: (url: URL, request?: Request) => Response | undefined | Promise<Response | undefined>,
+  options: { sidebar?: boolean } = {},
 ) {
   const tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
@@ -217,7 +263,7 @@ async function mountGoalPrompt(
     goal: ReturnType<typeof useGoal>
   }
   const app = await testRender(
-    () => <Harness root={tmp.path} fetch={fetch} events={events.source} state={state} />,
+    () => <Harness root={tmp.path} fetch={fetch} events={events.source} state={state} sidebar={options.sidebar} />,
     { width: 80, height: 24 },
   )
   await app.renderOnce()
@@ -235,6 +281,7 @@ function Harness(props: {
     dialog?: ReturnType<typeof useDialog>
     goal?: ReturnType<typeof useGoal>
   }
+  sidebar?: boolean
 }) {
   const renderer = useRenderer()
   const config = createTuiResolvedConfig({ plugin_enabled: {} })
@@ -251,7 +298,7 @@ function Harness(props: {
       <ExitProvider exit={() => {}}>
         <ClipboardProvider>
           <OpencodeKeymapProvider keymap={keymap}>
-            <ArgsProvider>
+            <ArgsProvider model="test/model">
               <KVProvider>
                 <ToastProvider>
                   <RouteProvider initialRoute={{ type: "session", sessionID: "session-test" }}>
@@ -279,6 +326,7 @@ function Harness(props: {
                                                           props.state.promptRef = ref
                                                         }}
                                                       />
+                                                      {props.sidebar && <Sidebar sessionID="session-test" />}
                                                     </LocationProvider>
                                                   </EditorContextProvider>
                                                 </PromptRefProvider>
@@ -321,7 +369,19 @@ function PromptSyncData(props: {
   props.state.dialog = useDialog()
   props.state.goal = useGoal()
   onMount(() => {
+    sync.set("session", [
+      {
+        id: "session-test",
+        title: "Goal session",
+        slug: "session-test",
+        projectID: "project-test",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      },
+    ])
     sync.set("agent", [{ name: "Build", mode: "primary", hidden: false, permission: [], options: {} }])
+    sync.set("provider_default", { test: "model" })
     sync.set("provider", [
       {
         id: "test",
