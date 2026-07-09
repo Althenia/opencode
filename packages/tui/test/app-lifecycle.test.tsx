@@ -1,15 +1,42 @@
 import { expect, mock, test } from "bun:test"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { createTestRenderer } from "@opentui/core/testing"
-import { testRender } from "@opentui/solid"
+import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
+import { testRender, useRenderer } from "@opentui/solid"
 import { Effect } from "effect"
+import { mkdir } from "node:fs/promises"
+import path from "node:path"
+import { onCleanup, onMount } from "solid-js"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Global } from "@opencode-ai/core/global"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 import { TestTuiContexts } from "./fixture/tui-environment"
+import { tmpdir } from "./fixture/fixture"
 import { ArgsProvider } from "../src/context/args"
-import { PermissionProvider, usePermission } from "../src/context/permission"
+import { ClipboardProvider } from "../src/context/clipboard"
+import { DataProvider } from "../src/context/data"
+import { EditorContextProvider } from "../src/context/editor"
+import { ExitProvider } from "../src/context/exit"
+import { KVProvider } from "../src/context/kv"
+import { LocalProvider } from "../src/context/local"
+import { LocationProvider } from "../src/context/location"
+import { PermissionProvider } from "../src/context/permission"
+import { ProjectProvider } from "../src/context/project"
+import { PromptRefProvider } from "../src/context/prompt"
+import { RouteProvider } from "../src/context/route"
+import { SDKProvider } from "../src/context/sdk"
+import { SyncProvider, useSync } from "../src/context/sync"
+import { ThemeProvider } from "../src/context/theme"
+import { TuiConfigProvider } from "../src/config"
+import { FrecencyProvider } from "../src/component/prompt/frecency"
+import { Prompt } from "../src/component/prompt"
+import { PromptHistoryProvider } from "../src/component/prompt/history"
+import { PromptStashProvider } from "../src/component/prompt/stash"
+import { createPluginRuntime, PluginRuntimeProvider } from "../src/plugin/runtime"
+import { DialogProvider } from "../src/ui/dialog"
+import { ToastProvider } from "../src/ui/toast"
+import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../src/keymap"
 
 test("SIGHUP clears title and disposes scoped resources once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
@@ -132,48 +159,150 @@ test("app.exit prints the session epilogue after scoped cleanup", async () => {
 })
 
 test("command palette renders yolo mode", async () => {
-  const app = await testRender(
-    () => (
-      <TestTuiContexts>
-        <box>
-          <text>Disable yolo mode</text>
-        </box>
-      </TestTuiContexts>
-    ),
-    { width: 80, height: 24 },
-  )
+  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const calls = createFetch(undefined, events)
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
 
   try {
-    await app.renderOnce()
-    expect(app.captureCharFrame()).toContain("Disable yolo mode")
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: {},
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    api?.keymap.dispatchCommand("command.palette.show")
+    expect(await captureFrame(setup, (frame) => frame.includes("Enable yolo mode"))).toContain("Enable yolo mode")
+    api?.keymap.dispatchCommand("app.exit")
+    await task
   } finally {
-    app.renderer.destroy()
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
   }
 })
 
 test("prompt chrome renders yolo mode", async () => {
+  await using tmp = await tmpdir()
+  await mkdir(path.join(tmp.path, "state"), { recursive: true })
+  await Bun.write(path.join(tmp.path, "state", "kv.json"), "{}")
+  const events = createEventSource()
+  const calls = createFetch(undefined, events)
   const app = await testRender(
-    () => (
-      <TestTuiContexts>
-        <ArgsProvider auto={true}>
-          <PermissionProvider>
-            <PromptBadgeProbe />
-          </PermissionProvider>
-        </ArgsProvider>
-      </TestTuiContexts>
-    ),
+    () => <PromptHarness root={tmp.path} fetch={calls.fetch} events={events.source} />,
     { width: 80, height: 24 },
   )
 
   try {
-    await app.renderOnce()
-    expect(app.captureCharFrame()).toContain("yolo")
+    expect(await captureFrame(app, (frame) => frame.includes("yolo"))).toContain("yolo")
   } finally {
     app.renderer.destroy()
   }
 })
 
-function PromptBadgeProbe() {
-  const permission = usePermission()
-  return <text>{permission.mode === "auto" ? "yolo" : "normal"}</text>
+function PromptHarness(props: { root: string; fetch: typeof fetch; events: ReturnType<typeof createEventSource>["source"] }) {
+  const renderer = useRenderer()
+  const config = createTuiResolvedConfig({ plugin_enabled: {} })
+  const keymap = createDefaultOpenTuiKeymap(renderer)
+  const pluginRuntime = createPluginRuntime()
+  const off = registerOpencodeKeymap(keymap, renderer, config)
+  onCleanup(off)
+
+  return (
+    <TestTuiContexts
+      directory={directory}
+      paths={{
+        cwd: directory,
+        home: props.root,
+        state: path.join(props.root, "state"),
+        worktree: props.root,
+      }}
+    >
+      <ExitProvider exit={() => {}}>
+        <ClipboardProvider>
+          <OpencodeKeymapProvider keymap={keymap}>
+            <ArgsProvider auto={true}>
+              <KVProvider>
+                <ToastProvider>
+                  <RouteProvider>
+                    <TuiConfigProvider config={config}>
+                      <PluginRuntimeProvider value={pluginRuntime}>
+                        <SDKProvider url="http://test" directory={directory} fetch={props.fetch} events={props.events}>
+                          <PermissionProvider>
+                            <ProjectProvider>
+                              <SyncProvider>
+                                <DataProvider>
+                                  <ThemeProvider mode="dark">
+                                    <LocalProvider>
+                                      <PromptSyncData />
+                                      <PromptStashProvider>
+                                        <DialogProvider>
+                                          <FrecencyProvider>
+                                            <PromptHistoryProvider>
+                                              <PromptRefProvider>
+                                                <EditorContextProvider>
+                                                  <LocationProvider>
+                                                    <Prompt />
+                                                  </LocationProvider>
+                                                </EditorContextProvider>
+                                              </PromptRefProvider>
+                                            </PromptHistoryProvider>
+                                          </FrecencyProvider>
+                                        </DialogProvider>
+                                      </PromptStashProvider>
+                                    </LocalProvider>
+                                  </ThemeProvider>
+                                </DataProvider>
+                              </SyncProvider>
+                            </ProjectProvider>
+                          </PermissionProvider>
+                        </SDKProvider>
+                      </PluginRuntimeProvider>
+                    </TuiConfigProvider>
+                  </RouteProvider>
+                </ToastProvider>
+              </KVProvider>
+            </ArgsProvider>
+          </OpencodeKeymapProvider>
+        </ClipboardProvider>
+      </ExitProvider>
+    </TestTuiContexts>
+  )
+}
+
+function PromptSyncData() {
+  const sync = useSync()
+  onMount(() => {
+    sync.set("agent", [{ name: "Build", mode: "primary", hidden: false, permission: [], options: {} }])
+  })
+  return undefined
+}
+
+async function captureFrame(setup: Awaited<ReturnType<typeof createTestRenderer>>, matches: (frame: string) => boolean) {
+  for (let i = 0; i < 200; i++) {
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    if (matches(frame)) return frame
+    await Bun.sleep(10)
+  }
+  return setup.captureCharFrame()
 }
