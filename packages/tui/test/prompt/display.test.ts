@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { displayCharAt, displaySlice, mentionTriggerIndex } from "../../src/prompt/display"
+import {
+  displayCharAt,
+  displaySkillReference,
+  displaySlice,
+  mentionTriggerIndex,
+  skillReferenceTriggerIndex,
+} from "../../src/prompt/display"
 
 describe("prompt display", () => {
   test("uses display-width offsets for mentions", () => {
@@ -29,5 +35,17 @@ describe("prompt display", () => {
     expect(mentionTriggerIndex("hello@")).toBeUndefined()
     expect(mentionTriggerIndex("foo@bar.com")).toBeUndefined()
     expect(mentionTriggerIndex("中文 @src file")).toBeUndefined()
+  })
+
+  test("uses display-width offsets for skill references", () => {
+    expect(skillReferenceTriggerIndex("$")).toBe(0)
+    expect(skillReferenceTriggerIndex("test me $")).toBe(8)
+    expect(skillReferenceTriggerIndex("test me $format hello", Bun.stringWidth("test me $format"))).toBe(8)
+    expect(skillReferenceTriggerIndex("price$format")).toBeUndefined()
+    expect(skillReferenceTriggerIndex("test $format hello")).toBeUndefined()
+  })
+
+  test("replaces skill reference prefix with an icon marker", () => {
+    expect(displaySkillReference("$dispatching-parallel-agents")).toBe("✦ dispatching-parallel-agents")
   })
 })

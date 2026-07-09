@@ -38,6 +38,7 @@ type PromptPopoverProps = {
   setAtActive: (id: string) => void
   onAtSelect: (item: AtOption) => void
   slashFlat: SlashCommand[]
+  slashPrefix: "/" | "$"
   slashActive?: string
   setSlashActive: (id: string) => void
   onSlashSelect: (item: SlashCommand) => void
@@ -288,8 +289,8 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
             >
               <For each={props.slashFlat}>
                 {(cmd) => {
-                  const keybind = () => props.commandKeybind(cmd.id)
-                  const keybindParts = () => props.commandKeybindParts(cmd.id)
+                  const keybind = () => (props.slashPrefix === "/" ? props.commandKeybind(cmd.id) : undefined)
+                  const keybindParts = () => (props.slashPrefix === "/" ? props.commandKeybindParts(cmd.id) : [])
                   return (
                     <button
                       data-slash-id={cmd.id}
@@ -314,7 +315,8 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
                             "text-text-strong": !props.newLayoutDesigns,
                           }}
                         >
-                          /{cmd.trigger}
+                          {props.slashPrefix}
+                          {cmd.trigger}
                         </span>
                         <Show when={cmd.description}>
                           <span

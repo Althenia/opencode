@@ -234,6 +234,7 @@ export function Prompt(props: PromptProps) {
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
+  const skillStyleId = syntax().getStyleId("extmark.skill")!
   let promptPartTypeId = 0
   const event = useEvent()
 
@@ -1734,6 +1735,7 @@ export function Prompt(props: PromptProps) {
         value={store.prompt.input}
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
+        skillStyleId={skillStyleId}
         promptPartTypeId={() => promptPartTypeId}
       />
     </>

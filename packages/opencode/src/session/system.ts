@@ -71,6 +71,7 @@ const layer = Layer.effect(
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
+            `When using tools or commands, run independent work in parallel whenever possible. Primary agents should also parallelize independent subagent work; subagents must not spawn subagents.`,
           ].join("\n"),
           references.length === 0
             ? undefined

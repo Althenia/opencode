@@ -60,7 +60,7 @@ describe("getSessionContext", () => {
     const ctx = getSessionContext(messages, providers)
 
     expect(ctx?.message.id).toBe("a2")
-    expect(ctx?.usage).toBe(50)
+    expect(ctx?.usage).toBe(35)
     expect(ctx?.providerLabel).toBe("OpenAI")
     expect(ctx?.modelLabel).toBe("GPT-4.1")
   })

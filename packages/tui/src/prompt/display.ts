@@ -46,3 +46,19 @@ export function mentionTriggerIndex(value: string, offset = promptOffsetWidth(va
     return promptOffsetWidth(text.slice(0, index))
   }
 }
+
+export function skillReferenceTriggerIndex(value: string, offset = promptOffsetWidth(value)) {
+  const text = displaySlice(value, 0, offset)
+  const index = text.lastIndexOf("$")
+  if (index === -1) return
+
+  const before = index === 0 ? undefined : text[index - 1]
+  const query = text.slice(index)
+  if ((before === undefined || /\s/.test(before)) && !/\s/.test(query)) {
+    return promptOffsetWidth(text.slice(0, index))
+  }
+}
+
+export function displaySkillReference(value: string) {
+  return value.startsWith("$") ? `✦ ${value.slice(1)}` : value
+}

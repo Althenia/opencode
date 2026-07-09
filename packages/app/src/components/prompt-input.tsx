@@ -68,6 +68,7 @@ import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { createPromptInputTransientState } from "./prompt-input/transient-state"
+import { findSkillReferenceTrigger, type SkillReferenceTrigger } from "./prompt-input/skill-reference"
 import { showToast } from "@/utils/toast"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
@@ -219,6 +220,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   let slashPopoverRef!: HTMLDivElement
   let restoreEndOnFocus = true
   let savedCursor: number | null = null
+  let skillReferenceTrigger: SkillReferenceTrigger | undefined
 
   const mirror = { input: false }
   const inset = 56
@@ -554,7 +556,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
   ])
 
-  const closePopover = () => setStore({ popover: null, slashMenu: false, slashMenuQuery: "" })
+  const closePopover = () => {
+    skillReferenceTrigger = undefined
+    setStore({ popover: null, slashPrefix: "/", slashMenu: false, slashMenuQuery: "" })
+  }
 
   const resetHistoryNavigation = (force = false) => {
     if (!force && (store.historyIndex < 0 || store.applyingHistory)) return
@@ -795,14 +800,37 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       source: cmd.source,
     }))
 
-    return [...custom, ...builtin]
+    const commands = [...custom, ...builtin]
+    if (store.slashPrefix === "$") return commands.filter((cmd) => cmd.type === "custom" && cmd.source === "skill")
+    return commands
   })
 
   const handleSlashSelect = (cmd: SlashCommand | undefined) => {
     if (!cmd) return
     const menu = store.slashMenu
+    const prefix = store.slashPrefix
+    const trigger = skillReferenceTrigger
     closePopover()
     const images = imageAttachments()
+
+    if (prefix === "$") {
+      if (!trigger || cmd.type !== "custom" || cmd.source !== "skill") return
+      editorRef.focus()
+      const selection = window.getSelection()
+      if (!selection || selection.rangeCount === 0) return
+      const range = selection.getRangeAt(0)
+      setRangeEdge(editorRef, range, "start", trigger.start)
+      setRangeEdge(editorRef, range, "end", trigger.end)
+      const text = document.createTextNode(`$${cmd.trigger}`)
+      range.deleteContents()
+      range.insertNode(text)
+      range.setStartAfter(text)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      handleInput()
+      return
+    }
 
     if (cmd.type === "custom") {
       const text = `/${cmd.trigger} `
@@ -1082,13 +1110,20 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (!shellMode) {
       const atMatch = rawText.substring(0, cursorPosition).match(/@(\S*)$/)
       const slashMatch = rawText.match(/^\/(\S*)$/)
+      const skillMatch = findSkillReferenceTrigger(rawText, cursorPosition)
 
       if (atMatch) {
+        skillReferenceTrigger = undefined
         atOnInput(atMatch[1])
-        setStore({ popover: "at", slashMenu: false, slashMenuQuery: "" })
+        setStore({ popover: "at", slashPrefix: "/", slashMenu: false, slashMenuQuery: "" })
+      } else if (skillMatch) {
+        skillReferenceTrigger = skillMatch
+        slashOnInput(skillMatch.query)
+        setStore({ popover: "slash", slashPrefix: "$", slashMenu: false, slashMenuQuery: "" })
       } else if (slashMatch) {
+        skillReferenceTrigger = undefined
         slashOnInput(slashMatch[1])
-        setStore({ popover: "slash", slashMenu: false, slashMenuQuery: "" })
+        setStore({ popover: "slash", slashPrefix: "/", slashMenu: false, slashMenuQuery: "" })
       } else {
         closePopover()
       }
@@ -1190,11 +1225,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       if (!populated) {
         if (!addPart({ type: "text", content: "/", start: 0, end: 0 })) return
         slashOnInput("")
-        setStore({ popover: "slash", slashMenu: false, slashMenuQuery: "" })
+        setStore({ popover: "slash", slashPrefix: "/", slashMenu: false, slashMenuQuery: "" })
         return
       }
       slashOnInput("")
-      setStore({ popover: "slash", slashMenu: true, slashMenuQuery: "" })
+      setStore({ popover: "slash", slashPrefix: "/", slashMenu: true, slashMenuQuery: "" })
     })
   }
 
@@ -1202,7 +1237,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     requestAnimationFrame(() => {
       if (!addPart({ type: "text", content: "@", start: 0, end: 0 })) return
       atOnInput("")
-      setStore({ popover: "at", slashMenu: false, slashMenuQuery: "" })
+      setStore({ popover: "at", slashPrefix: "/", slashMenu: false, slashMenuQuery: "" })
     })
   }
 
@@ -1585,6 +1620,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         setAtActive={setAtActive}
         onAtSelect={handleAtSelect}
         slashFlat={slashFlat()}
+        slashPrefix={store.slashPrefix}
         slashActive={slashActive() ?? undefined}
         setSlashActive={setSlashActive}
         onSlashSelect={handleSlashSelect}

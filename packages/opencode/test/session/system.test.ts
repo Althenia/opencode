@@ -8,6 +8,7 @@ import { Permission } from "../../src/permission"
 import { SystemPrompt } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
 import { testEffect } from "../lib/effect"
+import { ProviderTest } from "../fake/provider"
 
 const skills: Skill.Info[] = [
   {
@@ -83,6 +84,17 @@ const it = testEffect(
 )
 
 describe("session.system", () => {
+  it.instance("environment instructs parallel tool and command use without nested subagents", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const output = yield* prompt.environment(ProviderTest.model())
+
+      expect(output.join("\n")).toContain(
+        "When using tools or commands, run independent work in parallel whenever possible. Primary agents should also parallelize independent subagent work; subagents must not spawn subagents.",
+      )
+    }),
+  )
+
   it.effect("skills output is sorted by name and stable across calls", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service

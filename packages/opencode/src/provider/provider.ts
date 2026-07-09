@@ -34,6 +34,132 @@ import { ProviderError } from "./error"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
+const CLINEPASS_PROVIDER: ModelsDev.Provider = {
+  id: "clinepass",
+  name: "ClinePass",
+  env: ["CLINE_API_KEY"],
+  npm: "@ai-sdk/openai-compatible",
+  api: "https://api.cline.bot/api/v1",
+  models: {
+    "cline-pass/glm-5.2": {
+      id: "cline-pass/glm-5.2",
+      name: "GLM-5.2",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 1.4, output: 4.4, cache_read: 0.26 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/kimi-k2.7-code": {
+      id: "cline-pass/kimi-k2.7-code",
+      name: "Kimi K2.7 Code",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 0.95, output: 4, cache_read: 0.19 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/kimi-k2.6": {
+      id: "cline-pass/kimi-k2.6",
+      name: "Kimi K2.6",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 0.95, output: 4, cache_read: 0.16 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/deepseek-v4-pro": {
+      id: "cline-pass/deepseek-v4-pro",
+      name: "DeepSeek V4 Pro",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 1.74, output: 3.48, cache_read: 0.0145 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/deepseek-v4-flash": {
+      id: "cline-pass/deepseek-v4-flash",
+      name: "DeepSeek V4 Flash",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 0.14, output: 0.28, cache_read: 0.0028 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/mimo-v2.5": {
+      id: "cline-pass/mimo-v2.5",
+      name: "MiMo-V2.5",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 0.14, output: 0.28, cache_read: 0.0028 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/mimo-v2.5-pro": {
+      id: "cline-pass/mimo-v2.5-pro",
+      name: "MiMo-V2.5-Pro",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 1.74, output: 3.48, cache_read: 0.0145 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/minimax-m3": {
+      id: "cline-pass/minimax-m3",
+      name: "MiniMax M3",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 0.3, output: 1.2, cache_read: 0.06 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/qwen3.7-max": {
+      id: "cline-pass/qwen3.7-max",
+      name: "Qwen3.7 Max",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 2.5, output: 7.5, cache_read: 0.5, cache_write: 3.125 },
+      limit: { context: 0, output: 0 },
+    },
+    "cline-pass/qwen3.7-plus": {
+      id: "cline-pass/qwen3.7-plus",
+      name: "Qwen3.7 Plus",
+      release_date: "",
+      attachment: false,
+      reasoning: false,
+      temperature: true,
+      tool_call: true,
+      cost: {
+        input: 0.4,
+        output: 1.6,
+        cache_read: 0.04,
+        cache_write: 0.5,
+        context_over_200k: { input: 1.2, output: 4.8, cache_read: 0.12, cache_write: 1.5 },
+      },
+      limit: { context: 0, output: 0 },
+    },
+  },
+}
+
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
   if (!res.body) return res
@@ -1318,7 +1444,7 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelsDev = yield* modelsDevSvc.get()
+        const modelsDev: Record<string, ModelsDev.Provider> = { ...(yield* modelsDevSvc.get()), clinepass: CLINEPASS_PROVIDER }
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
 

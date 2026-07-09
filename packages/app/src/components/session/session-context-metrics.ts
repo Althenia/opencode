@@ -44,7 +44,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
   const limit = model?.limit.context
-  const total = tokenTotal(message)
+  const contextTokens = message.tokens.input + message.tokens.cache.read + message.tokens.cache.write
 
   return {
     message,
@@ -54,7 +54,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
     modelLabel: model?.name ?? message.modelID,
     limit,
     input: message.tokens.input,
-    usage: limit ? Math.round((total / limit) * 100) : null,
+    usage: limit ? Math.round((contextTokens / limit) * 100) : null,
   }
 }
 

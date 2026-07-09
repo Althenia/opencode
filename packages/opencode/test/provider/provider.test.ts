@@ -121,6 +121,22 @@ it.instance("provider loaded from env variable", () =>
   }),
 )
 
+it.instance("ClinePass provider loaded from API key", () =>
+  Effect.gen(function* () {
+    yield* setProcessEnv("CLINE_API_KEY", "test-api-key")
+    const providers = yield* list
+    const provider = providers[ProviderV2.ID.make("clinepass")]
+    expect(provider).toBeDefined()
+    expect(provider.source).toBe("env")
+    expect(provider.models["cline-pass/qwen3.7-max"].api.url).toBe("https://api.cline.bot/api/v1")
+    expect(provider.models["cline-pass/qwen3.7-max"].api.npm).toBe("@ai-sdk/openai-compatible")
+    expect(provider.models["cline-pass/qwen3.7-max"].cost.input).toBe(2.5)
+    expect(provider.models["cline-pass/qwen3.7-max"].cost.output).toBe(7.5)
+    expect(provider.models["cline-pass/qwen3.7-max"].cost.cache.read).toBe(0.5)
+    expect(provider.models["cline-pass/qwen3.7-max"].cost.cache.write).toBe(3.125)
+  }),
+)
+
 it.instance(
   "provider loaded from config with apiKey option",
   Effect.gen(function* () {

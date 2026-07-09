@@ -1660,6 +1660,19 @@ describe("SessionNs.getUsage", () => {
     expect(result.cost).toBe(3 + 1.5)
   })
 
+  test("estimates OpenAI cost when model metadata has no price", () => {
+    const model = createModel({ context: 300_000, output: 128_000 })
+    model.providerID = ProviderV2.ID.make("openai")
+    model.id = ModelV2.ID.make("gpt-5.5")
+
+    const result = SessionNs.getUsage({
+      model,
+      usage: usage({ inputTokens: 1_000_000, outputTokens: 1_000_000, totalTokens: 2_000_000 }),
+    })
+
+    expect(result.cost).toBe(35)
+  })
+
   test("uses authoritative Copilot billed cost when provided", () => {
     const result = SessionNs.getUsage({
       model: createModel({

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { expandTrackedPastedText, stripPromptPartIDs } from "../../src/prompt/part"
+import { buildGoalPrompt, expandTrackedPastedText, stripPromptPartIDs } from "../../src/prompt/part"
 
 describe("prompt part", () => {
   test("strips persisted IDs from reused parts", () => {
@@ -49,5 +49,13 @@ describe("prompt part", () => {
         },
       ]),
     ).toBe(`keep ${marker} then alpha\nbeta\ngamma tail`)
+  })
+
+  test("builds goal prompts from expanded pasted text", () => {
+    const marker = "[Pasted ~2 lines]"
+    const input = `/goal ${marker}`
+    const expanded = expandTrackedPastedText(input, [{ start: 6, end: 6 + marker.length, text: "alpha\nbeta" }])
+
+    expect(buildGoalPrompt(expanded)).toContain("Context from user: alpha\nbeta")
   })
 })
