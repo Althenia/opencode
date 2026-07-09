@@ -59,14 +59,16 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       return Object.assign(client, {
         sessions: {
           goalStart: (input: GoalStartInput) =>
-            request<GoalStatus>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/start`, {
+            request<{ readonly data: GoalStatus }>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/start`, {
               method: "POST",
               body: JSON.stringify({ goal: input.goal }),
-            }),
+            }).then((response) => response.data),
           goalStop: (input: GoalSessionInput) =>
             request<void>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/stop`, { method: "POST" }),
           goalStatus: (input: GoalSessionInput) =>
-            request<GoalStatus | null>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/status`),
+            request<{ readonly data: GoalStatus | null }>(
+              `/api/session/${encodeURIComponent(input.sessionID)}/goal/status`,
+            ).then((response) => response.data),
         },
       })
     }
