@@ -366,39 +366,39 @@
 - [ ] **Step 2: Run package-scoped typechecks**
 
   Run: `bun typecheck` (from `packages/schema`)
-  
+
   Run: `bun typecheck` (from `packages/client`)
-  
+
   Run: `bun typecheck` (from `packages/core`)
-  
+
   Run: `bun typecheck` (from `packages/protocol`)
-  
+
   Run: `bun typecheck` (from `packages/server`)
-  
+
   Run: `bun typecheck` (from `packages/tui`)
-  
+
   Run: `bun typecheck` (from `packages/opencode`)
 
 - [ ] **Step 3: Run the targeted tests again**
 
   Run: `bun test test/question.test.ts` (from `packages/core`)
-  
+
   Run: `bun test test/util/question.test.ts` (from `packages/tui`)
-  
+
   Run: `bun test test/cli/cmd/tui/sync.test.tsx` (from `packages/tui`)
-  
+
   Run: `bun test test/session-goal.test.ts` (from `packages/core`)
-  
+
   Run: `bun test test/server/httpapi-goal.test.ts` (from `packages/opencode`)
-  
+
   Run: `bun test test/context/goal.test.tsx` (from `packages/tui`)
-  
+
   Run: `bun test test/app-lifecycle.test.tsx` (from `packages/tui`)
 
 - [ ] **Step 4: Capture the final diff for review**
 
   Run: `git status --short`
-  
+
   Run: `git diff --stat`
 
 ### Acceptance Criteria
