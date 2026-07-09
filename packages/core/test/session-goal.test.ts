@@ -150,7 +150,7 @@ describe("GoalSupervisor", () => {
   it.effect("observes a turn that ends before prompt returns", () =>
     Effect.gen(function* () {
       const events = yield* makeEvents
-      const fake = makePublishingPromptSession(events, ["GOAL COMPLETE\nYES"])
+      const fake = makePublishingPromptSession(events, ["GOAL COMPLETE", "YES"])
       const goals = yield* GoalSupervisor.make.pipe(
         Effect.provideService(SessionV2.Service, fake.service),
         Effect.provideService(EventV2.Service, events),
@@ -158,8 +158,10 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "finish" })
       yield* Effect.yieldNow
+      yield* Effect.yieldNow
 
-      expect(fake.prompts).toHaveLength(1)
+      expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]?.prompt.text).toContain("Answer only YES or NO")
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, goal: "finish", iteration: 1 })
     }),
   )
@@ -185,7 +187,7 @@ describe("GoalSupervisor", () => {
 
   it.effect("re-prompts after completed turns until the verified goal is done", () =>
     Effect.gen(function* () {
-      const fake = makeSession(["not yet", "GOAL COMPLETE\nYES"])
+      const fake = makeSession(["not yet", "GOAL COMPLETE", "YES"])
       const events = yield* makeEvents
       const goals = yield* GoalSupervisor.make.pipe(
         Effect.provideService(SessionV2.Service, fake.service),
@@ -198,8 +200,11 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
       yield* turnEnded(events)
       yield* Effect.yieldNow
+      yield* turnEnded(events)
+      yield* Effect.yieldNow
 
-      expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts).toHaveLength(3)
+      expect(fake.prompts[2]?.prompt.text).toContain("Answer only YES or NO")
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, goal: "finish", iteration: 2 })
     }),
   )
@@ -247,7 +252,7 @@ describe("GoalSupervisor", () => {
 
   it.effect("verify gate requires YES as its own answer before stopping", () =>
     Effect.gen(function* () {
-      const fake = makeSession(["GOAL COMPLETE\nnot YES yet", "GOAL COMPLETE\nYES"])
+      const fake = makeSession(["GOAL COMPLETE", "NO", "GOAL COMPLETE", "YES"])
       const events = yield* makeEvents
       const goals = yield* GoalSupervisor.make.pipe(
         Effect.provideService(SessionV2.Service, fake.service),
@@ -258,11 +263,21 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
       yield* turnEnded(events)
       yield* Effect.yieldNow
+      yield* turnEnded(events)
+      yield* Effect.yieldNow
       expect(yield* goals.status(sessionID)).toMatchObject({ active: true, iteration: 2 })
+      yield* turnEnded(events)
+      yield* Effect.yieldNow
       yield* turnEnded(events)
       yield* Effect.yieldNow
 
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, iteration: 2 })
+      expect(fake.prompts.map((prompt) => prompt.prompt.text.includes("Answer only YES or NO"))).toEqual([
+        false,
+        true,
+        false,
+        true,
+      ])
     }),
   )
 })

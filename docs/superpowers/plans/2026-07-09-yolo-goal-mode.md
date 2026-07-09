@@ -36,7 +36,7 @@
   Extend `packages/core/test/question.test.ts` with an option that includes `recommended: true`, then assert the asked request still contains that field when the question service publishes it.
 
   Run: `bun test test/question.test.ts`
-  
+
   Expected: FAIL before the schema change because the option shape does not carry `recommended`.
 
 - [ ] **Step 2: Add the schema field**
@@ -60,7 +60,7 @@
 - [ ] **Step 4: Verify the contract**
 
   Run: `bun typecheck` (from `packages/schema`)
-  
+
   Run: `bun typecheck` (from `packages/client`)
 
 - [ ] **Step 5: Commit the task once green**
@@ -91,7 +91,7 @@
   - custom-only questions fall back to `['']`
 
   Run: `bun test test/util/question.test.ts`
-  
+
   Expected: FAIL until `autoAnswer` exists.
 
 - [ ] **Step 2: Implement the helper**
@@ -149,7 +149,7 @@
   Update `packages/tui/test/app-lifecycle.test.tsx` to assert the copy shown in the palette and prompt chrome uses `yolo`, not `auto`.
 
   Run: `bun test test/app-lifecycle.test.tsx`
-  
+
   Expected: FAIL until the copy changes.
 
 - [ ] **Step 2: Rename the palette command title**
@@ -163,7 +163,7 @@
 - [ ] **Step 4: Verify the UI package**
 
   Run: `bun test test/app-lifecycle.test.tsx`
-  
+
   Run: `bun typecheck` (from `packages/tui`)
 
 - [ ] **Step 5: Commit the task once green**
@@ -194,7 +194,7 @@
   - the verify gate requires `YES` before stopping
 
   Run: `bun test test/session-goal.test.ts`
-  
+
   Expected: FAIL until the service exists.
 
 - [ ] **Step 2: Implement the service layer**
@@ -214,7 +214,7 @@
 - [ ] **Step 4: Verify the core package**
 
   Run: `bun test test/session-goal.test.ts`
-  
+
   Run: `bun typecheck` (from `packages/core`)
 
 - [ ] **Step 5: Commit the task once green**
@@ -241,7 +241,7 @@
   Create `packages/opencode/test/server/httpapi-goal.test.ts` with a fake goal service and assert the three endpoints call the right service methods and return the expected status payload through the HttpApi wiring.
 
   Run: `bun test test/server/httpapi-goal.test.ts`
-  
+
   Expected: FAIL until the handlers exist.
 
 - [ ] **Step 2: Extend the session protocol group**
@@ -262,11 +262,11 @@
 - [ ] **Step 5: Verify the exposed surface**
 
   Run: `bun test test/server/httpapi-goal.test.ts` (from `packages/opencode`)
-  
+
   Run: `bun typecheck` (from `packages/protocol`)
-  
+
   Run: `bun typecheck` (from `packages/server`)
-  
+
   Run: `bun typecheck` (from `packages/client`)
 
 - [ ] **Step 6: Commit the task once green**
@@ -298,7 +298,7 @@
   - status polling renders `goal · <n>/<cap>` when active
 
   Run: `bun test test/context/goal.test.tsx`
-  
+
   Expected: FAIL until the context and command wiring exist.
 
 - [ ] **Step 2: Add the goal context**
@@ -332,9 +332,9 @@
 - [ ] **Step 6: Verify the TUI package**
 
   Run: `bun test test/context/goal.test.tsx`
-  
+
   Run: `bun test test/app-lifecycle.test.tsx`
-  
+
   Run: `bun typecheck` (from `packages/tui`)
 
 - [ ] **Step 7: Commit the task once green**

@@ -60,6 +60,28 @@ test("/goal with inline text sets yolo and starts supervision without sending a 
   }
 })
 
+test("goal start switches to yolo before the server responds", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    const start = app.goal.start("ship task 6")
+    await waitFor(() => app.local.permission.mode === "auto")
+    resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    await start
+
+    expect(app.local.permission.mode).toBe("auto")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("/goal with no text opens DialogPrompt and starts with the entered text", async () => {
   const calls: unknown[] = []
   const app = await mountGoalPrompt(async (url, request) => {

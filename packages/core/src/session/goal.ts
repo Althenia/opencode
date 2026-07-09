@@ -83,7 +83,9 @@ export const make = Effect.gen(function* () {
       ),
     )
 
-  const verified = (text: string) => text.includes("GOAL COMPLETE") && /^\s*YES\s*$/im.test(text)
+  const isReadyForVerification = (text: string) => text.includes("GOAL COMPLETE")
+
+  const verified = (text: string) => /^\s*YES\s*$/i.test(text)
 
   const promptText = (state: GoalState) =>
     [
@@ -92,18 +94,17 @@ export const make = Effect.gen(function* () {
       "When the goal is complete, include GOAL COMPLETE and answer YES to verify completion.",
     ].join("\n")
 
-  const beginTurn = Effect.fn("GoalSupervisor.beginTurn")(function* (sessionID: SessionSchema.ID) {
-    const current = goals.get(sessionID)?.state
-    if (!current?.active) return undefined
-    if (current.iteration >= current.cap) {
-      yield* setState(sessionID, (state) => ({ ...state, active: false }))
-      return undefined
-    }
-    const state = yield* setState(sessionID, (state) => ({ ...state, iteration: state.iteration + 1 }))
-    if (!state) return undefined
+  const verificationPromptText = (state: GoalState) =>
+    [
+      `Goal: ${state.goal}`,
+      "Re-read the goal and the latest assistant response.",
+      "Is the goal fully complete? Answer only YES or NO.",
+    ].join("\n")
+
+  const promptAndWait = Effect.fn("GoalSupervisor.promptAndWait")(function* (sessionID: SessionSchema.ID, prompt: string) {
     const wait = yield* waitForTurn(sessionID).pipe(Effect.forkIn(scope))
     yield* Effect.yieldNow
-    yield* sessions.prompt({ sessionID, prompt: { text: promptText(state) }, delivery: "steer", resume: true }).pipe(
+    yield* sessions.prompt({ sessionID, prompt: { text: prompt }, delivery: "steer", resume: true }).pipe(
       Effect.catch((error: PromptError) =>
         Effect.gen(function* () {
           yield* Fiber.interrupt(wait)
@@ -114,11 +115,28 @@ export const make = Effect.gen(function* () {
     return wait
   })
 
+  const beginTurn = Effect.fn("GoalSupervisor.beginTurn")(function* (sessionID: SessionSchema.ID) {
+    const current = goals.get(sessionID)?.state
+    if (!current?.active) return undefined
+    if (current.iteration >= current.cap) {
+      yield* setState(sessionID, (state) => ({ ...state, active: false }))
+      return undefined
+    }
+    const state = yield* setState(sessionID, (state) => ({ ...state, iteration: state.iteration + 1 }))
+    if (!state) return undefined
+    return yield* promptAndWait(sessionID, promptText(state))
+  })
+
   const completeTurn = Effect.fn("GoalSupervisor.completeTurn")(function* (
     sessionID: SessionSchema.ID,
     wait: Fiber.Fiber<void, unknown>,
   ) {
     yield* Fiber.join(wait)
+    if (!isReadyForVerification(yield* latestAssistantText(sessionID))) return true
+    const current = goals.get(sessionID)?.state
+    if (!current?.active) return false
+    const verifyWait = yield* promptAndWait(sessionID, verificationPromptText(current))
+    yield* Fiber.join(verifyWait)
     if (verified(yield* latestAssistantText(sessionID))) {
       yield* setState(sessionID, (state) => ({ ...state, active: false }))
       return false

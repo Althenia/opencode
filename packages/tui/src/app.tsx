@@ -952,8 +952,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "permission.mode",
         title: local.permission.mode === "auto" ? "Disable yolo mode" : "Enable yolo mode",
         category: "System",
-        run: () => {
+        run: async () => {
+          const disablingYolo = local.permission.mode === "auto"
           local.permission.toggle()
+          if (disablingYolo) await goal.stop()
           dialog.clear()
         },
       },

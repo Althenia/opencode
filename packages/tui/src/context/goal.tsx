@@ -26,9 +26,15 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     async function start(goal: string) {
       const id = sessionID()
       if (!id) return
-      const result = await sdk.client.sessions.goalStart({ sessionID: id, goal })
+      const previous = permission.mode
       permission.set("auto")
-      setCurrent(result.active ? result : undefined)
+      try {
+        const result = await sdk.client.sessions.goalStart({ sessionID: id, goal })
+        setCurrent(result.active ? result : undefined)
+      } catch (error) {
+        permission.set(previous)
+        throw error
+      }
     }
 
     async function stop() {

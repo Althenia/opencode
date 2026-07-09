@@ -202,6 +202,57 @@ test("command palette renders yolo mode", async () => {
   }
 })
 
+test("disabling yolo mode stops active goal supervision", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  let stopped = false
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/session/dummy/goal/stop") {
+      stopped = true
+      return new Response(null, { status: 204 })
+    }
+  }, events)
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { auto: true, continue: true },
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    api?.keymap.dispatchCommand("permission.mode")
+    await waitFor(() => stopped)
+    api?.keymap.dispatchCommand("app.exit")
+    await task
+
+    expect(stopped).toBe(true)
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("prompt chrome renders yolo mode and goal badge", async () => {
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
@@ -314,4 +365,12 @@ async function captureFrame(setup: Awaited<ReturnType<typeof createTestRenderer>
     await Bun.sleep(10)
   }
   return setup.captureCharFrame()
+}
+
+async function waitFor(check: () => boolean) {
+  for (let i = 0; i < 100; i++) {
+    if (check()) return
+    await Bun.sleep(10)
+  }
+  expect(check()).toBe(true)
 }
