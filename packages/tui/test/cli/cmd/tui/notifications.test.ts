@@ -4,7 +4,7 @@ import type { Event, PermissionRequest, QuestionRequest, Session } from "@openco
 import type { TuiAttentionNotifyInput } from "@opencode-ai/plugin/tui"
 import { createTuiPluginApi } from "../../../fixture/tui-plugin"
 
-async function setup() {
+async function setup(pending: { questions?: QuestionRequest[]; permissions?: PermissionRequest[] } = {}) {
   const notifications: TuiAttentionNotifyInput[] = []
   const handlers = new Map<Event["type"], ((event: Event) => void)[]>()
   const session = (id: string, title: string, parentID?: string): Session => ({
@@ -49,6 +49,9 @@ async function setup() {
       state: {
         session: {
           get: (sessionID: string) => sessions[sessionID],
+          question: (sessionID: string) => (pending.questions ?? []).filter((item) => item.sessionID === sessionID),
+          permission: (sessionID: string) =>
+            (pending.permissions ?? []).filter((item) => item.sessionID === sessionID),
         },
       },
     }),
@@ -99,7 +102,10 @@ const permissionNotification: TuiAttentionNotifyInput = {
 
 describe("internal notifications TUI plugin", () => {
   test("notifies for question and permission requests with blurred notifications and always-on sounds", async () => {
-    const harness = await setup()
+    const harness = await setup({
+      questions: [question("question-1")],
+      permissions: [permission("permission-1")],
+    })
 
     harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1") })
     harness.emit({ id: "event-2", type: "permission.asked", properties: permission("permission-1") })
@@ -107,8 +113,20 @@ describe("internal notifications TUI plugin", () => {
     expect(harness.notifications).toEqual([questionNotification, permissionNotification])
   })
 
-  test("dedupes pending questions and permissions until they are resolved", async () => {
+  test("does not notify for question and permission requests absent from pending state", async () => {
     const harness = await setup()
+
+    harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1") })
+    harness.emit({ id: "event-2", type: "permission.asked", properties: permission("permission-1") })
+
+    expect(harness.notifications).toEqual([])
+  })
+
+  test("dedupes pending questions and permissions until they are resolved", async () => {
+    const harness = await setup({
+      questions: [question("question-1")],
+      permissions: [permission("permission-1")],
+    })
 
     harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1") })
     harness.emit({ id: "event-2", type: "question.asked", properties: question("question-1") })
@@ -166,7 +184,7 @@ describe("internal notifications TUI plugin", () => {
   })
 
   test("uses sound-only notifications and subagent_done sound for subagent sessions", async () => {
-    const harness = await setup()
+    const harness = await setup({ questions: [question("question-1", "subagent")] })
 
     harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1", "subagent") })
     harness.emit({

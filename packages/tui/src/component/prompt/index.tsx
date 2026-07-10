@@ -102,8 +102,6 @@ const money = new Intl.NumberFormat("en-US", {
   currency: "USD",
 })
 
-const GOAL_PROMPT = "Analyze this session and create or update the goal todo list. Keep it concise and actionable."
-
 const DRAFT_RETENTION_MIN_CHARS = 20
 
 function randomIndex(count: number) {
@@ -972,8 +970,7 @@ export function Prompt(props: PromptProps) {
     if (toggleGoal) {
       clearPrompt()
       props.onSubmit?.()
-      if (goal.current()) await goal.stop()
-      else await goal.start(GOAL_PROMPT)
+      await goal.toggle()
       return true
     }
 
@@ -1489,7 +1486,9 @@ export function Prompt(props: PromptProps) {
                     <text fg={fadeColor(theme.success, agentMetaAlpha())}>yolo</text>
                   </Show>
                   <Show when={store.mode === "normal" && goal.current()}>
-                    <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>goal</text>
+                    <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>
+                      goal · {goal.current()?.iteration}/{goal.current()?.cap}
+                    </text>
                   </Show>
                   {props.right}
                 </box>

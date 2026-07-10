@@ -701,6 +701,7 @@ export type QuestionOption = {
    * Explanation of choice
    */
   description: string
+  recommended?: boolean
 }
 
 export type QuestionInfo = {
@@ -2718,6 +2719,13 @@ export type ServiceUnavailableError = {
   service?: string
 }
 
+export type SessionGoalState = {
+  goal: string
+  active: boolean
+  iteration: number
+  cap: number
+}
+
 export type MessageNotFoundError = {
   _tag: "MessageNotFoundError"
   sessionID: string
@@ -3131,6 +3139,7 @@ export type QuestionV2Option = {
    * Explanation of choice
    */
   description: string
+  recommended?: boolean
 }
 
 export type QuestionV2Info = {
@@ -11668,6 +11677,121 @@ export type V2SessionWaitResponses = {
 }
 
 export type V2SessionWaitResponse = V2SessionWaitResponses[keyof V2SessionWaitResponses]
+
+export type V2SessionGoalStartData = {
+  body: {
+    goal: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/goal/start"
+}
+
+export type V2SessionGoalStartErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2SessionGoalStartError = V2SessionGoalStartErrors[keyof V2SessionGoalStartErrors]
+
+export type V2SessionGoalStartResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionGoalState
+  }
+}
+
+export type V2SessionGoalStartResponse = V2SessionGoalStartResponses[keyof V2SessionGoalStartResponses]
+
+export type V2SessionGoalStopData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/goal/stop"
+}
+
+export type V2SessionGoalStopErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionGoalStopError = V2SessionGoalStopErrors[keyof V2SessionGoalStopErrors]
+
+export type V2SessionGoalStopResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionGoalStopResponse = V2SessionGoalStopResponses[keyof V2SessionGoalStopResponses]
+
+export type V2SessionGoalStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/goal/status"
+}
+
+export type V2SessionGoalStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionGoalStatusError = V2SessionGoalStatusErrors[keyof V2SessionGoalStatusErrors]
+
+export type V2SessionGoalStatusResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionGoalState | null
+  }
+}
+
+export type V2SessionGoalStatusResponse = V2SessionGoalStatusResponses[keyof V2SessionGoalStatusResponses]
 
 export type V2SessionRevertStageData = {
   body: {

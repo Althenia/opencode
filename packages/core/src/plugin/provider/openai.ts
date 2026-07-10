@@ -151,6 +151,45 @@ const headless = {
   refresh: (value) => refresh(headlessMethodID, value),
 } satisfies IntegrationOAuthMethodRegistration
 
+const pricing = {
+  "gpt-5.6": [
+    { input: 5, output: 30, cache: { read: 0.5, write: 6.25 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 10,
+      output: 45,
+      cache: { read: 1, write: 12.5 },
+    },
+  ],
+  "gpt-5.6-sol": [
+    { input: 5, output: 30, cache: { read: 0.5, write: 6.25 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 10,
+      output: 45,
+      cache: { read: 1, write: 12.5 },
+    },
+  ],
+  "gpt-5.6-terra": [
+    { input: 2.5, output: 15, cache: { read: 0.25, write: 3.125 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 5,
+      output: 22.5,
+      cache: { read: 0.5, write: 6.25 },
+    },
+  ],
+  "gpt-5.6-luna": [
+    { input: 1, output: 6, cache: { read: 0.1, write: 1.25 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 2,
+      output: 9,
+      cache: { read: 0.2, write: 2.5 },
+    },
+  ],
+} satisfies Record<string, ModelV2.Info["cost"]>
+
 export const OpenAIPlugin = define({
   id: "openai",
   effect: Effect.fn(function* (ctx) {
@@ -161,8 +200,16 @@ export const OpenAIPlugin = define({
     yield* ctx.catalog.transform(
       Effect.fn(function* (evt) {
         for (const item of evt.provider.list()) {
+          if (item.provider.id !== ProviderV2.ID.openai) continue
           if (item.provider.api.type !== "aisdk") continue
           if (item.provider.api.package !== "@ai-sdk/openai") continue
+          for (const [modelID, cost] of Object.entries(pricing)) {
+            const id = ModelV2.ID.make(modelID)
+            if (!item.models.has(id)) continue
+            evt.model.update(item.provider.id, id, (model) => {
+              model.cost = cost
+            })
+          }
           if (!item.models.has(ModelV2.ID.make("gpt-5-chat-latest"))) continue
           evt.model.update(item.provider.id, ModelV2.ID.make("gpt-5-chat-latest"), (model) => {
             // OpenAIPlugin sends OpenAI models through Responses; this alias is a

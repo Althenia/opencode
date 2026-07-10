@@ -8,6 +8,9 @@ import { SDKProvider } from "../../../../src/context/sdk"
 import { SyncProvider, useSync } from "../../../../src/context/sync"
 import { PermissionProvider } from "../../../../src/context/permission"
 import { ExitProvider } from "../../../../src/context/exit"
+import { GoalProvider, useGoal } from "../../../../src/context/goal"
+import { RouteProvider, useRoute } from "../../../../src/context/route"
+import { ToastProvider, useToast } from "../../../../src/ui/toast"
 import { createEventSource, createFetch, type FetchHandler, directory } from "../../../fixture/tui-sdk"
 import { TestTuiContexts } from "../../../fixture/tui-environment"
 export { createEventSource, createFetch, directory, eventSource, json, worktree } from "../../../fixture/tui-sdk"
@@ -20,25 +23,51 @@ export async function wait(fn: () => boolean, timeout = 2000) {
   }
 }
 
-type Ctx = { kv: ReturnType<typeof useKV>; project: ReturnType<typeof useProject>; sync: ReturnType<typeof useSync> }
+type Ctx = {
+  goal: ReturnType<typeof useGoal>
+  kv: ReturnType<typeof useKV>
+  project: ReturnType<typeof useProject>
+  route: ReturnType<typeof useRoute>
+  sync: ReturnType<typeof useSync>
+  toast: ReturnType<typeof useToast>
+}
 
-export async function mount(override?: FetchHandler, state?: string) {
+export async function mount(override?: FetchHandler, state?: string, options?: { auto?: boolean; sessionID?: string }) {
   const calls = createFetch(override)
   const events = createEventSource()
+  const requests: Request[] = []
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    requests.push(request.clone())
+    return calls.fetch(request)
+  }) as typeof globalThis.fetch
   let sync!: ReturnType<typeof useSync>
   let project!: ReturnType<typeof useProject>
+  let route!: ReturnType<typeof useRoute>
   let kv!: ReturnType<typeof useKV>
+  let goal!: ReturnType<typeof useGoal>
+  let toast!: ReturnType<typeof useToast>
   let done!: () => void
   const ready = new Promise<void>((resolve) => {
     done = resolve
   })
 
   function Probe() {
-    const ctx: Ctx = { kv: useKV(), project: useProject(), sync: useSync() }
+    const ctx: Ctx = {
+      goal: useGoal(),
+      kv: useKV(),
+      project: useProject(),
+      route: useRoute(),
+      sync: useSync(),
+      toast: useToast(),
+    }
     onMount(() => {
       sync = ctx.sync
       project = ctx.project
+      route = ctx.route
       kv = ctx.kv
+      goal = ctx.goal
+      toast = ctx.toast
       done()
     })
     return <box />
@@ -46,19 +75,27 @@ export async function mount(override?: FetchHandler, state?: string) {
 
   const app = await testRender(() => (
     <TestTuiContexts paths={state ? { state } : undefined}>
-      <ArgsProvider>
+      <ArgsProvider auto={options?.auto}>
         <KVProvider>
-          <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
-            <PermissionProvider>
-              <ProjectProvider>
-                <ExitProvider exit={() => {}}>
-                  <SyncProvider>
-                    <Probe />
-                  </SyncProvider>
-                </ExitProvider>
-              </ProjectProvider>
-            </PermissionProvider>
-          </SDKProvider>
+          <ToastProvider>
+            <RouteProvider
+              initialRoute={options?.sessionID ? { type: "session", sessionID: options.sessionID } : undefined}
+            >
+              <SDKProvider url="http://test" directory={directory} fetch={fetch} events={events.source}>
+                <PermissionProvider>
+                  <GoalProvider>
+                    <ProjectProvider>
+                      <ExitProvider exit={() => {}}>
+                        <SyncProvider>
+                          <Probe />
+                        </SyncProvider>
+                      </ExitProvider>
+                    </ProjectProvider>
+                  </GoalProvider>
+                </PermissionProvider>
+              </SDKProvider>
+            </RouteProvider>
+          </ToastProvider>
         </KVProvider>
       </ArgsProvider>
     </TestTuiContexts>
@@ -66,5 +103,5 @@ export async function mount(override?: FetchHandler, state?: string) {
 
   await ready
   await wait(() => sync.status === "complete")
-  return { app, emit: events.emit, kv, project, sync, session: calls.session }
+  return { app, emit: events.emit, goal, kv, project, requests, route, sync, session: calls.session, toast }
 }

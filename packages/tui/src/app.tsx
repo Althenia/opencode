@@ -965,14 +965,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "goal",
         slashAliases: ["goal-mode"],
         run: async () => {
-          const status = goal.current() ?? (await goal.status())
-          if (status?.active) {
-            await goal.stop()
-            dialog.clear()
-            return
-          }
-          promptRef.current?.set({ input: "/goal", parts: [] })
-          promptRef.current?.focus()
+          await goal.toggle()
           dialog.clear()
         },
       },

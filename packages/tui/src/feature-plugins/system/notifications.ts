@@ -33,6 +33,7 @@ const tui: TuiPlugin = async (api) => {
   const permissions = new Set<string>()
 
   api.event.on("question.asked", (event) => {
+    if (!api.state.session.question(event.properties.sessionID).some((item) => item.id === event.properties.id)) return
     if (questions.has(event.properties.id)) return
     questions.add(event.properties.id)
     notify(api, event.properties.sessionID, "Question needs input", "question")
@@ -47,6 +48,7 @@ const tui: TuiPlugin = async (api) => {
   })
 
   api.event.on("permission.asked", (event) => {
+    if (!api.state.session.permission(event.properties.sessionID).some((item) => item.id === event.properties.id)) return
     if (permissions.has(event.properties.id)) return
     permissions.add(event.properties.id)
     notify(api, event.properties.sessionID, "Permission needs input", "permission")

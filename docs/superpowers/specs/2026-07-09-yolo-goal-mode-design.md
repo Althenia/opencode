@@ -1,18 +1,19 @@
 # Yolo Mode & `/goal` Autonomous Agent — Design
 
-Date: 2026-07-09
-Status: Approved (design)
+Date: 2026-07-09 (revised 2026-07-10)
+Status: Approved (revised design)
 
 ## Goal
 
 Add a Codex-style autonomous "yolo / goal" capability to opencode:
 
 - **Phase A — Yolo mode**: extend the existing permission auto-approve (`--auto` / `--yolo`)
-  to also auto-answer the agent's interactive *questions*, so the agent never blocks on
-  permissions or questions.
-- **Phase B — `/goal` command**: a slash command that sets a high-level goal, enables yolo,
-  and runs a recursive **GoalSupervisor** that keeps the agent driving toward the goal
-  (planning, executing, delegating to sub-agents, self-verifying) until the goal is met.
+  to also auto-answer selectable interactive *questions*. Free-text/custom-only questions
+  remain pending unless Goal mode is active.
+- **Phase B — Goal mode**: bare `/goal`, bare `/goal-mode`, and the command-palette Goal
+  action toggle supervision through the shared Goal context. The recursive
+  **GoalSupervisor** keeps the agent driving toward the goal (planning, executing,
+  delegating to sub-agents, self-verifying) until the goal is met.
 
 This spec covers **Phase A + Phase B only** (shippable MVP). Phases C/D are outlined as
 follow-ups.
@@ -24,11 +25,23 @@ follow-ups.
 ### A.1 Behavior
 When `permission.mode === "auto"` is active (via `--auto` / `--yolo` flag or the Ctrl+P
 palette toggle), the TUI already auto-replies `permission.asked` events. This phase adds the
-same treatment for `question.asked` events: the question is answered automatically and the
-blocking `QuestionPrompt` never renders.
+same treatment for selectable `question.asked` events: the question is answered
+automatically and the blocking `QuestionPrompt` never renders. Ordinary Yolo
+free-text/custom-only questions remain pending for user input; Yolo does not submit an
+empty-string answer. While Goal mode is active, free-text/custom-only questions are answered
+exactly:
+
+> Use your best judgment from the goal and current context, then continue.
+
+If an automatic permission or question reply fails, the TUI restores the request to pending
+state and shows the warning toast `Automatic reply failed; user input is required.` This
+toast is the explicit failure notification; the automatic-reply failure path does not send a
+second OS notification. The existing notification plugin remains pending-only, and
+successfully auto-handled requests stay quiet.
 
 ### A.2 Schema change — `recommended` option
-File: `packages/sdk/js/src/v2/gen/types.gen.ts` (`QuestionOption`, ~line 695).
+Files: `packages/schema/src/v1/question.ts` (`QuestionV1.Option`) and
+`packages/schema/src/question.ts` (`QuestionV2.Option`).
 
 Add an optional marker so the asking agent can nominate a default:
 
@@ -40,29 +53,44 @@ export type QuestionOption = {
 }
 ```
 
-Add the field to the SDK **schema source** (the definition that generates
-`types.gen.ts`), then regenerate the SDK types via the repo codegen (`bun run generate` from
-`packages/client` after Protocol/SDK changes — see AGENTS.md). Do **not** edit the generated
-`types.gen.ts` directly; it is overwritten on regen. No server/HttpApi change is required
-because the field is optional and already carried by `QuestionInfo.options`.
+Both V1 and V2 option contracts carry the optional marker. After changing the V1 schema,
+regenerate the legacy JavaScript SDK from the repository root with
+`./packages/sdk/js/script/build.ts`. Do **not** edit generated SDK files directly; they are
+overwritten on regeneration. The build script also applies guarded patches for the required
+flat Goal start payload and nullable Goal status response until the upstream generator
+preserves those protocol shapes directly. This optional field is already carried by
+`QuestionInfo.options`, so no Protocol/Server `HttpApi` or `packages/client` generation
+change is required.
 
 ### A.3 Auto-answer logic (TUI)
 File: `packages/tui/src/context/sync.tsx`, the `question.asked` case (~line 237).
 
-Mirror the existing `permission.asked` auto-reply. Build answers and reply, then `break`
-**before** storing the request (so `QuestionPrompt`, which only renders when
-`questions().length > 0`, never appears):
+Mirror the existing `permission.asked` auto-reply. Build answers before replying. If every
+question has an automatic answer, reply without storing the request (so `QuestionPrompt`,
+which only renders when `questions().length > 0`, never appears). If any question in the
+request is free-text/custom-only and Goal mode is inactive, store the whole request for user
+input:
 
 ```ts
 case "question.asked": {
   const request = event.properties
   if (permission.mode === "auto") {
-    const answers = request.questions.map((q) => autoAnswer(q))
+    const fallback = goal.active(request.sessionID)
+      ? "Use your best judgment from the goal and current context, then continue."
+      : undefined
+    const answers = request.questions.map((q) => autoAnswer(q, fallback))
+    if (answers.some((answer) => answer === undefined)) {
+      upsertQuestion(request)
+      break
+    }
     void sdk.client.question.reply({
       requestID: request.id,
       directory,
       workspace,
-      answers,
+      answers: answers.filter((answer): answer is string[] => answer !== undefined),
+    }, { throwOnError: true }).catch(() => {
+      upsertQuestion(request)
+      warnAutomaticReplyFailed()
     })
     break
   }
@@ -70,22 +98,30 @@ case "question.asked": {
 }
 ```
 
-Answer builder (new helper in `sync.tsx` or `util/`):
+Answer builder (`packages/tui/src/util/question.ts`):
 
 ```ts
-function autoAnswer(q: QuestionInfo): string[] {
+function autoAnswer(q: QuestionInfo, fallback?: string): string[] | undefined {
   const opts = q.options ?? []
-  if (opts.length === 0) return [""]            // custom-only: best-effort unblock
+  if (opts.length === 0) return fallback === undefined ? undefined : [fallback]
   const recommended = opts.filter((o) => o.recommended)
   const pick = recommended.length > 0 ? recommended : opts
-  if (q.multiple) return pick.map((o) => o.label)   // accept full set
-  return [pick[0].label]                             // first / first-recommended
+  if (q.multiple) return pick.map((o) => o.label)
+  return [pick[0].label]
 }
 ```
 
 Notes:
-- `multiple: true` → answer with **all** (recommended-or-all) option labels.
-- No options (custom-only) → answer `""` to unblock without inventing text.
+- Selectable single-choice questions use the first recommended option, or the first option
+  when none is recommended.
+- `multiple: true` uses all recommended option labels when present, otherwise all option
+  labels.
+- No options (free-text/custom-only) returns no automatic answer in ordinary Yolo mode and
+  uses the exact Goal fallback only while Goal mode is active.
+- A failed automatic permission or question reply restores the pending request and displays
+  the warning toast requiring user input; this path does not send a second OS notification.
+- Per-session/request in-flight guards coalesce duplicate asked events, clear on matching
+  replies or rejections, and prevent late transport failures from restoring resolved requests.
 - `sdk.client.question.reply` accepts `{ requestID, directory?, workspace?, answers? }`
   (confirmed in `packages/sdk/js/src/v2/gen/sdk.gen.ts`).
 
@@ -99,28 +135,30 @@ Notes:
   **No new flag.**
 
 ### A.5 Testing
-- Unit test for `autoAnswer`: recommended selection, first-option fallback, multiple-choice
-  returns all labels, no-options returns `[""]`.
-- `sync.tsx` reducer test: in `auto` mode a `question.asked` triggers a `question.reply`
-  call and stores nothing (prompt stays hidden).
+- Unit tests for `autoAnswer`: recommended selection, first-option fallback,
+  multiple-choice recommended/all semantics, no automatic answer for custom-only questions,
+  and the exact Goal fallback when supplied.
+- `sync.tsx` reducer tests: selectable Yolo questions reply and remain absent from pending
+  state; ordinary custom-only and mixed requests remain pending; active Goal mode replies to
+  custom-only questions with the exact fallback.
+- Failure tests restore rejected automatic permission and question replies to pending state
+  and show a warning requiring user input.
+- Notification tests cover pending-only delivery: pending requests notify, while requests
+  absent from pending state remain quiet.
 
 ---
 
 ## Phase B — `/goal` Command + GoalSupervisor
 
-### B.1 Slash command `/goal [text]`
-Register a palette command in `packages/tui/src/app.tsx` (mirror `session.new` → `/new`)
-with `slashName: "goal"`, `slashAliases: ["goal-mode"]`. Handler:
-1. If no `text`, open a small prompt dialog to capture the goal.
-2. `local.permission.set("auto")` — turn on yolo (Phase A).
-3. Persist the goal via `GoalSupervisor.start({ sessionID, goal })` (B.3).
-4. Submit the first prompt wrapping the user's text with a goal instruction:
+### B.1 Goal mode controls
+Register one palette command in `packages/tui/src/app.tsx` with `slashName: "goal"` and
+`slashAliases: ["goal-mode"]`. Bare `/goal` and bare `/goal-mode` toggle supervision
+immediately through the shared Goal context. The command-palette Goal action calls the same
+toggle immediately and does not prefill the prompt.
 
-> Goal: <text>. Create a plan as todos, then execute autonomously. Delegate to sub-agents
-> (general / explore) when useful. Do not stop until the goal is met; when met, end your
-> message with the exact line `GOAL COMPLETE`.
-
-`/goal stop` (or toggling yolo off) calls `GoalSupervisor.stop({ sessionID })`.
+Starting through the toggle uses the shared Goal context's default goal prompt and enables
+Yolo mode. Stopping through the toggle calls the existing Goal stop API. `/goal <text>` and
+`/goal stop` are ordinary prompts sent to the agent; they are not Goal control syntax.
 
 ### B.2 Goal state
 `GoalSupervisor` (B.3) holds per-session state keyed by `sessionID`:
@@ -142,7 +180,8 @@ interface Interface {
 Behavior:
 - `start` sets `active = true`, `iteration = 0`, enables the session's auto-approve posture
   (relies on the TUI yolo mode for the interactive MVP; see B.6 limitation), and submits the
-  first goal prompt (B.1 step 4) via `SessionV2.prompt({ sessionID, prompt, delivery: "steer", resume: true })`.
+  first goal prompt via
+  `SessionV2.prompt({ sessionID, prompt, delivery: "steer", resume: true })`.
 - A background fiber (`Effect.forkScoped` inside the `InstanceState.make` closure) subscribes
   to the session's durable event stream. When the agent's **turn completes** (final assistant
   message with no pending tool calls / session idle), it runs the stop-condition check (B.4).
@@ -168,8 +207,9 @@ hits the cap, it stops and surfaces a "goal not reached" notice. Hard blockers (
 error, permission denied while not in yolo) also stop it.
 
 ### B.5 TUI surface
-- Prompt-bar indicator (next to the yolo badge): `goal · <n>/25` while active.
-- `/goal stop` cancels; toggling yolo off also cancels.
+- Prompt-bar indicator (next to the yolo badge): `goal · <iteration>/<cap>` while active.
+- Bare `/goal`, bare `/goal-mode`, and the command-palette Goal action toggle supervision.
+- Toggling yolo off also cancels active Goal supervision.
 
 ### B.6 Known limitation (follow-up, not in this spec)
 For the MVP the supervisor assumes the **TUI is connected and in yolo mode**, so permission
@@ -184,6 +224,11 @@ hardening follow-up.
   - stops at the iteration cap if the sentinel never appears.
   - verify gate requires `YES` before stopping (a `NO` triggers another re-prompt).
   - `stop` interrupts the loop.
+- TUI Goal context tests verify bare `/goal` and `/goal-mode` toggle immediately, while
+  `/goal <text>` and `/goal stop` are submitted as ordinary prompts.
+- App lifecycle tests verify the command-palette action toggles immediately without prompt
+  prefill and disabling Yolo stops active Goal supervision.
+- Prompt rendering tests verify the active badge is `goal · <iteration>/<cap>`.
 
 ---
 
@@ -202,5 +247,5 @@ hardening follow-up.
   message with no pending tool calls, or a session-idle event).
 - `recommended` requires the asking agent to set it; until agents do, behavior falls back to
   first-option (safe default).
-- Auto-answering custom-only questions with `""` may be rejected by the server for some
-  question shapes; monitor and adjust fallback if needed.
+- Automatic reply failures return the request to pending state, so the user can answer it
+  after the warning instead of losing the request.

@@ -82,7 +82,14 @@ const historyTypesPatched = generatedTypes.replace(
 if (historyTypesPatched === generatedTypes) {
   throw new Error("Session history numeric query patch did not apply")
 }
-await Bun.write("./src/v2/gen/types.gen.ts", historyTypesPatched)
+const goalStatusTypesPatched = historyTypesPatched.replace(
+  /(export type V2SessionGoalStatusResponses = \{[\s\S]*?200: \{\s*data: )SessionGoalState([;,]\s*\})/,
+  "$1SessionGoalState | null$2",
+)
+if (goalStatusTypesPatched === historyTypesPatched) {
+  throw new Error("Session goal nullable status patch did not apply")
+}
+await Bun.write("./src/v2/gen/types.gen.ts", goalStatusTypesPatched)
 
 const generatedSdk = await Bun.file("./src/v2/gen/sdk.gen.ts").text()
 const historySdkPatched = generatedSdk.replace(
@@ -92,7 +99,14 @@ const historySdkPatched = generatedSdk.replace(
 if (historySdkPatched === generatedSdk) {
   throw new Error("Session history numeric SDK patch did not apply")
 }
-await Bun.write("./src/v2/gen/sdk.gen.ts", historySdkPatched)
+const goalStartSdkPatched = historySdkPatched.replace(
+  /(Start session goal[\s\S]*?parameters: \{\s*sessionID: string[;,]\s*goal)\?: string/,
+  "$1: string",
+)
+if (goalStartSdkPatched === historySdkPatched) {
+  throw new Error("Session goal required start payload patch did not apply")
+}
+await Bun.write("./src/v2/gen/sdk.gen.ts", goalStartSdkPatched)
 
 // Patch a @hey-api/openapi-ts codegen bug: SseFn incorrectly passes the
 // endpoint's TError into the second generic of ServerSentEventsResult, which

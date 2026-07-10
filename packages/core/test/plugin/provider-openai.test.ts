@@ -14,6 +14,45 @@ import { PluginTestLayer } from "./fixture"
 
 const it = testEffect(PluginTestLayer)
 
+const pricing = {
+  "gpt-5.6": [
+    { input: 5, output: 30, cache: { read: 0.5, write: 6.25 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 10,
+      output: 45,
+      cache: { read: 1, write: 12.5 },
+    },
+  ],
+  "gpt-5.6-sol": [
+    { input: 5, output: 30, cache: { read: 0.5, write: 6.25 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 10,
+      output: 45,
+      cache: { read: 1, write: 12.5 },
+    },
+  ],
+  "gpt-5.6-terra": [
+    { input: 2.5, output: 15, cache: { read: 0.25, write: 3.125 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 5,
+      output: 22.5,
+      cache: { read: 0.5, write: 6.25 },
+    },
+  ],
+  "gpt-5.6-luna": [
+    { input: 1, output: 6, cache: { read: 0.1, write: 1.25 } },
+    {
+      tier: { type: "context", size: 272_000 },
+      input: 2,
+      output: 9,
+      cache: { read: 0.2, write: 2.5 },
+    },
+  ],
+} as const
+
 const addPlugin = Effect.fn(function* () {
   const plugin = yield* PluginV2.Service
   const aisdk = yield* AISDK.Service
@@ -128,6 +167,53 @@ describe("OpenAIPlugin", () => {
       })
       expect(calls).toEqual([])
       expect(result.language).toBeUndefined()
+    }),
+  )
+
+  it.effect("applies GPT-5.6 pricing to existing official OpenAI models", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      yield* catalog.transform((catalog) => {
+        const provider = ProviderV2.Info.make({
+          ...ProviderV2.Info.empty(ProviderV2.ID.openai),
+          api: { type: "aisdk", package: "@ai-sdk/openai" },
+        })
+        catalog.provider.update(provider.id, (draft) => {
+          draft.api = provider.api
+        })
+        for (const modelID of Object.keys(pricing)) {
+          catalog.model.update(provider.id, ModelV2.ID.make(modelID), (model) => {
+            model.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
+          })
+        }
+      })
+      yield* addPlugin()
+      for (const [modelID, cost] of Object.entries(pricing)) {
+        expect(required(yield* catalog.model.get(ProviderV2.ID.openai, ModelV2.ID.make(modelID))).cost).toEqual(cost)
+      }
+    }),
+  )
+
+  it.effect("does not apply GPT-5.6 pricing to custom providers", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const providerID = ProviderV2.ID.make("custom-openai")
+      const modelID = ModelV2.ID.make("gpt-5.6")
+      const cost = [{ input: 99, output: 98, cache: { read: 97, write: 96 } }]
+      yield* catalog.transform((catalog) => {
+        const provider = ProviderV2.Info.make({
+          ...ProviderV2.Info.empty(providerID),
+          api: { type: "aisdk", package: "@ai-sdk/openai" },
+        })
+        catalog.provider.update(provider.id, (draft) => {
+          draft.api = provider.api
+        })
+        catalog.model.update(provider.id, modelID, (model) => {
+          model.cost = cost
+        })
+      })
+      yield* addPlugin()
+      expect(required(yield* catalog.model.get(providerID, modelID)).cost).toEqual(cost)
     }),
   )
 

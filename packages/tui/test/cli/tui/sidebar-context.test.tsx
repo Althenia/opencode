@@ -54,6 +54,7 @@ test("sidebar context expands token details", async () => {
     expect(frame).toContain("Cache read 20")
     expect(frame).toContain("Cache write 5")
     expect(frame).toContain("Total 200")
+    expect(frame).toContain("Max 1,000")
     expect(frame).toContain("20% used")
     expect(frame).toContain("Cache 13%")
   } finally {
@@ -68,9 +69,46 @@ test("sidebar context can render collapsed summary", async () => {
     await app.renderOnce()
     const frame = app.captureCharFrame()
     expect(frame).toContain("Context")
-    expect(frame).toContain("200 tokens")
+    expect(frame).toContain("200 / 1,000 tokens")
     expect(frame).toContain("20% used")
     expect(frame).not.toContain("Input 100")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("sidebar context preserves expanded total without a model limit", async () => {
+  const app = await testRender(() => (
+    <SidebarContextView
+      api={{ ...api, state: { ...api.state, provider: [] } } as unknown as TuiPluginApi}
+      session_id="session-test"
+    />
+  ))
+
+  try {
+    await app.renderOnce()
+    const frame = app.captureCharFrame()
+    expect(frame).toContain("Total 200")
+    expect(frame).not.toContain("Max ")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("sidebar context preserves collapsed summary without a model limit", async () => {
+  const app = await testRender(() => (
+    <SidebarContextView
+      api={{ ...api, state: { ...api.state, provider: [] } } as unknown as TuiPluginApi}
+      session_id="session-test"
+      defaultCollapsed
+    />
+  ))
+
+  try {
+    await app.renderOnce()
+    const frame = app.captureCharFrame()
+    expect(frame).toContain("200 tokens")
+    expect(frame).not.toContain("200 /")
   } finally {
     app.renderer.destroy()
   }

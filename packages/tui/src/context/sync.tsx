@@ -33,6 +33,10 @@ import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
 import { autoAnswer } from "../util/question"
+import { useGoal } from "./goal"
+import { useToast } from "../ui/toast"
+
+const GOAL_QUESTION_FALLBACK = "Use your best judgment from the goal and current context, then continue."
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -62,6 +66,8 @@ export const {
     const startup = useTuiStartup()
     const kv = useKV()
     const permission = usePermission()
+    const goal = useGoal()
+    const toast = useToast()
     const [store, setStore] = createStore<{
       status: "loading" | "partial" | "complete"
       provider: Provider[]
@@ -138,6 +144,38 @@ export const {
       vcs: undefined,
     })
 
+    function upsertPermission(request: PermissionRequest) {
+      const requests = store.permission[request.sessionID]
+      if (!requests) return setStore("permission", request.sessionID, [request])
+      const match = search(requests, request.id, (item) => item.id)
+      if (match.found) return setStore("permission", request.sessionID, match.index, reconcile(request))
+      setStore(
+        "permission",
+        request.sessionID,
+        produce((draft) => {
+          draft.splice(match.index, 0, request)
+        }),
+      )
+    }
+
+    function upsertQuestion(request: QuestionRequest) {
+      const requests = store.question[request.sessionID]
+      if (!requests) return setStore("question", request.sessionID, [request])
+      const match = search(requests, request.id, (item) => item.id)
+      if (match.found) return setStore("question", request.sessionID, match.index, reconcile(request))
+      setStore(
+        "question",
+        request.sessionID,
+        produce((draft) => {
+          draft.splice(match.index, 0, request)
+        }),
+      )
+    }
+
+    function warnAutomaticReplyFailed() {
+      toast.show({ variant: "warning", message: "Automatic reply failed; user input is required." })
+    }
+
     const event = useEvent()
     const project = useProject()
     const sdk = useSDK()
@@ -145,6 +183,24 @@ export const {
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
     const hydratingSessions = new Map<string, { messages: Set<string>; parts: Set<string> }>()
+    const automaticPermissionReplies = new Map<string, Set<string>>()
+    const automaticQuestionReplies = new Map<string, Set<string>>()
+
+    function beginAutomaticReply(replies: Map<string, Set<string>>, sessionID: string, requestID: string) {
+      const requests = replies.get(sessionID)
+      if (requests?.has(requestID)) return false
+      if (requests) requests.add(requestID)
+      else replies.set(sessionID, new Set([requestID]))
+      return true
+    }
+
+    function endAutomaticReply(replies: Map<string, Set<string>>, sessionID: string, requestID: string) {
+      const requests = replies.get(sessionID)
+      if (!requests) return false
+      const removed = requests.delete(requestID)
+      if (requests.size === 0) replies.delete(sessionID)
+      return removed
+    }
     const touchMessage = (sessionID: string, messageID: string) => {
       hydratingSessions.get(sessionID)?.messages.add(messageID)
     }
@@ -174,6 +230,7 @@ export const {
           void bootstrap()
           break
         case "permission.replied": {
+          endAutomaticReply(automaticPermissionReplies, event.properties.sessionID, event.properties.requestID)
           const requests = store.permission[event.properties.sessionID]
           if (!requests) break
           const match = search(requests, event.properties.requestID, (r) => r.id)
@@ -190,37 +247,37 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
+          const pending = store.permission[request.sessionID]
+          if (pending && search(pending, request.id, (item) => item.id).found) {
+            upsertPermission(request)
+            break
+          }
           if (permission.mode === "auto") {
-            void sdk.client.permission.reply({
-              requestID: request.id,
-              reply: "once",
-              directory,
-              workspace,
-            })
+            if (!beginAutomaticReply(automaticPermissionReplies, request.sessionID, request.id)) break
+            void sdk.client.permission
+              .reply(
+                {
+                  requestID: request.id,
+                  reply: "once",
+                  directory,
+                  workspace,
+                },
+                { throwOnError: true },
+              )
+              .catch(() => {
+                if (!endAutomaticReply(automaticPermissionReplies, request.sessionID, request.id)) return
+                upsertPermission(request)
+                warnAutomaticReplyFailed()
+              })
             break
           }
-          const requests = store.permission[request.sessionID]
-          if (!requests) {
-            setStore("permission", request.sessionID, [request])
-            break
-          }
-          const match = search(requests, request.id, (r) => r.id)
-          if (match.found) {
-            setStore("permission", request.sessionID, match.index, reconcile(request))
-            break
-          }
-          setStore(
-            "permission",
-            request.sessionID,
-            produce((draft) => {
-              draft.splice(match.index, 0, request)
-            }),
-          )
+          upsertPermission(request)
           break
         }
 
         case "question.replied":
         case "question.rejected": {
+          endAutomaticReply(automaticQuestionReplies, event.properties.sessionID, event.properties.requestID)
           const requests = store.question[event.properties.sessionID]
           if (!requests) break
           const match = search(requests, event.properties.requestID, (r) => r.id)
@@ -237,32 +294,37 @@ export const {
 
         case "question.asked": {
           const request = event.properties
+          const pending = store.question[request.sessionID]
+          if (pending && search(pending, request.id, (item) => item.id).found) {
+            upsertQuestion(request)
+            break
+          }
           if (permission.mode === "auto") {
-            void sdk.client.question.reply({
-              requestID: request.id,
-              directory,
-              workspace,
-              answers: request.questions.map((question) => autoAnswer(question)),
-            })
+            const fallback = goal.active(request.sessionID) ? GOAL_QUESTION_FALLBACK : undefined
+            const answers = request.questions.map((question) => autoAnswer(question, fallback))
+            if (answers.some((answer) => answer === undefined)) {
+              upsertQuestion(request)
+              break
+            }
+            if (!beginAutomaticReply(automaticQuestionReplies, request.sessionID, request.id)) break
+            void sdk.client.question
+              .reply(
+                {
+                  requestID: request.id,
+                  directory,
+                  workspace,
+                  answers: answers.filter((answer): answer is string[] => answer !== undefined),
+                },
+                { throwOnError: true },
+              )
+              .catch(() => {
+                if (!endAutomaticReply(automaticQuestionReplies, request.sessionID, request.id)) return
+                upsertQuestion(request)
+                warnAutomaticReplyFailed()
+              })
             break
           }
-          const requests = store.question[request.sessionID]
-          if (!requests) {
-            setStore("question", request.sessionID, [request])
-            break
-          }
-          const match = search(requests, request.id, (r) => r.id)
-          if (match.found) {
-            setStore("question", request.sessionID, match.index, reconcile(request))
-            break
-          }
-          setStore(
-            "question",
-            request.sessionID,
-            produce((draft) => {
-              draft.splice(match.index, 0, request)
-            }),
-          )
+          upsertQuestion(request)
           break
         }
 
@@ -275,6 +337,9 @@ export const {
           break
 
         case "session.deleted": {
+          automaticPermissionReplies.delete(event.properties.info.id)
+          automaticQuestionReplies.delete(event.properties.info.id)
+          goal.clear(event.properties.info.id)
           const result = search(store.session, event.properties.info.id, (s) => s.id)
           if (result.found) {
             setStore(

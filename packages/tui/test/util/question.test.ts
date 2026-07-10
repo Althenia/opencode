@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { autoAnswer } from "../../src/util/question"
 
 describe("util.question", () => {
-  test("returns an empty answer when there are no options", () => {
-    expect(autoAnswer({ question: "Pick one", header: "Pick", options: [] })).toEqual([""])
+  test("returns undefined when there are no options", () => {
+    expect(autoAnswer({ question: "Pick one", header: "Pick", options: [] })).toBeUndefined()
   })
 
   test("prefers recommended options and keeps all picked labels for multiple questions", () => {
@@ -61,7 +61,16 @@ describe("util.question", () => {
     ).toEqual(["A"])
   })
 
-  test("falls back to an empty answer for custom-only questions", () => {
-    expect(autoAnswer({ question: "Custom", header: "Custom" })).toEqual([""])
+  test("returns undefined for custom-only questions", () => {
+    expect(autoAnswer({ question: "Custom", header: "Custom", options: [] })).toBeUndefined()
+  })
+
+  test("uses the provided fallback for custom-only questions", () => {
+    expect(
+      autoAnswer(
+        { question: "Custom", header: "Custom", options: [] },
+        "Use your best judgment from the goal and current context, then continue.",
+      ),
+    ).toEqual(["Use your best judgment from the goal and current context, then continue."])
   })
 })

@@ -28,6 +28,7 @@ export function SidebarContextView(props: { api: TuiPluginApi; session_id: strin
         cacheWrite: 0,
         cache: 0,
         total: 0,
+        max: null,
         percent: null,
         cachePercent: 0,
       }
@@ -45,6 +46,7 @@ export function SidebarContextView(props: { api: TuiPluginApi; session_id: strin
       cacheWrite: last.tokens.cache.write,
       cache,
       total,
+      max: model?.limit.context ?? null,
       percent: model?.limit.context ? Math.round((total / model.limit.context) * 100) : null,
       cachePercent: total ? Math.round((cache / total) * 100) : 0,
     }
@@ -61,7 +63,10 @@ export function SidebarContextView(props: { api: TuiPluginApi; session_id: strin
         when={!collapsed()}
         fallback={
           <>
-            <text fg={theme().textMuted}>{state().total.toLocaleString()} tokens</text>
+            <text fg={theme().textMuted}>
+              {state().total.toLocaleString()}
+              {state().max ? ` / ${state().max?.toLocaleString()}` : ""} tokens
+            </text>
             <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
           </>
         }
@@ -72,6 +77,9 @@ export function SidebarContextView(props: { api: TuiPluginApi; session_id: strin
         <text fg={theme().textMuted}>Cache read {state().cacheRead.toLocaleString()}</text>
         <text fg={theme().textMuted}>Cache write {state().cacheWrite.toLocaleString()}</text>
         <text fg={theme().textMuted}>Total {state().total.toLocaleString()}</text>
+        <Show when={state().max} keyed>
+          {(max) => <text fg={theme().textMuted}>Max {max.toLocaleString()}</text>}
+        </Show>
         <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
         <text fg={theme().textMuted}>Cache {state().cachePercent}%</text>
       </Show>

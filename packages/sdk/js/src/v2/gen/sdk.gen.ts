@@ -345,6 +345,12 @@ import type {
   V2SessionEventsResponses,
   V2SessionGetErrors,
   V2SessionGetResponses,
+  V2SessionGoalStartErrors,
+  V2SessionGoalStartResponses,
+  V2SessionGoalStatusErrors,
+  V2SessionGoalStatusResponses,
+  V2SessionGoalStopErrors,
+  V2SessionGoalStopResponses,
   V2SessionHistoryErrors,
   V2SessionHistoryResponses,
   V2SessionInterruptErrors,
@@ -5083,6 +5089,81 @@ export class Agent extends HeyApiClient {
   }
 }
 
+export class Goal extends HeyApiClient {
+  /**
+   * Start session goal
+   *
+   * Start supervised goal execution for a session.
+   */
+  public start<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      goal: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "body", key: "goal" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2SessionGoalStartResponses, V2SessionGoalStartErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/goal/start",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Stop session goal
+   *
+   * Stop supervised goal execution for a session.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).post<V2SessionGoalStopResponses, V2SessionGoalStopErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/goal/stop",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get session goal status
+   *
+   * Retrieve the current supervised goal state for a session.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionGoalStatusResponses, V2SessionGoalStatusErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/goal/status",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Revert extends HeyApiClient {
   /**
    * Stage session revert
@@ -5855,6 +5936,11 @@ export class Session3 extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _goal?: Goal
+  get goal(): Goal {
+    return (this._goal ??= new Goal({ client: this.client }))
   }
 
   private _revert?: Revert

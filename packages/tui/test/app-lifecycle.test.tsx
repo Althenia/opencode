@@ -253,6 +253,80 @@ test("disabling yolo mode stops active goal supervision", async () => {
   }
 })
 
+test("goal palette command starts inactive supervision immediately", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  let startedGoal = false
+  let prompted = false
+  const calls = createFetch((url) => {
+    if (url.pathname === "/session/dummy") {
+      return json({
+        id: "dummy",
+        title: "Demo session",
+        slug: "dummy",
+        projectID: "project",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      })
+    }
+    if (url.pathname === "/api/session/dummy/goal/status") {
+      return json({ data: null })
+    }
+    if (url.pathname === "/api/session/dummy/goal/start") {
+      startedGoal = true
+      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
+    }
+    if (url.pathname === "/session/dummy/message" && url.searchParams.has("limit")) {
+      return json({ data: [] })
+    }
+    if (url.pathname === "/session/dummy/message") {
+      prompted = true
+      return json({ data: {} })
+    }
+  }, events)
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { auto: true, continue: true },
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    api?.keymap.dispatchCommand("goal.start")
+    await waitFor(() => startedGoal)
+    expect(prompted).toBe(false)
+    api?.keymap.dispatchCommand("app.exit")
+    await task
+
+    expect(startedGoal).toBe(true)
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("goal palette command toggles active supervision off", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
@@ -325,8 +399,7 @@ test("prompt chrome renders yolo mode and goal badge", async () => {
   try {
     const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal"))
     expect(frame).toContain("yolo")
-    expect(frame).toMatch(/yolo\s+goal/)
-    expect(frame).not.toContain("goal ·")
+    expect(frame).toMatch(/yolo\s+goal · 2\/7/)
     expect(frame.split("\n").find((line) => line.includes("yolo"))?.indexOf("yolo")).toBeGreaterThan(40)
   } finally {
     app.renderer.destroy()
