@@ -212,7 +212,7 @@ export function Prompt(props: PromptProps) {
   const move = usePromptMove({ projectID: project.project, sessionID: () => props.sessionID })
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
-  const hasRightContent = createMemo(() => Boolean(props.right) || local.permission.mode === "auto" || goal.current())
+  const hasRightContent = createMemo(() => Boolean(props.right) || local.permission.mode === "auto" || goal.selected())
 
   function promptModelWarning() {
     toast.show({
@@ -1065,7 +1065,29 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
-    if (store.mode === "shell") {
+    const command = inputText.startsWith("/")
+      ? sync.data.command.find((item) => item.name === inputText.split("\n")[0].split(" ")[0].slice(1))
+      : undefined
+    const startsGoal =
+      store.mode === "normal" &&
+      goal.selected(sessionID) &&
+      !goal.answering(sessionID) &&
+      !command &&
+      !inputText.startsWith("/goal ") &&
+      !inputText.startsWith("/goal-mode ")
+
+    if (startsGoal && (nonTextParts.length > 0 || editorParts.length > 0)) {
+      toast.show({
+        variant: "warning",
+        message: "Remove attachments or editor context before starting Goal mode.",
+      })
+      return false
+    }
+
+    if (startsGoal) {
+      move.startSubmit()
+      await goal.start(inputText)
+    } else if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({
         sessionID,
@@ -1078,8 +1100,7 @@ export function Prompt(props: PromptProps) {
       })
       setStore("mode", "normal")
     } else if (
-      inputText.startsWith("/") &&
-      sync.data.command.some((x) => x.name === inputText.split("\n")[0].split(" ")[0].slice(1))
+      command
     ) {
       move.startSubmit()
       // Parse command from first line, preserve multi-line content in arguments
@@ -1483,12 +1504,10 @@ export function Prompt(props: PromptProps) {
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center">
                   <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
-                    <text fg={fadeColor(theme.success, agentMetaAlpha())}>yolo</text>
+                    <text fg={fadeColor(theme.error, agentMetaAlpha())}>yolo</text>
                   </Show>
-                  <Show when={store.mode === "normal" && goal.current()}>
-                    <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>
-                      goal · {goal.current()?.iteration}/{goal.current()?.cap}
-                    </text>
+                  <Show when={store.mode === "normal" && goal.selected()}>
+                    <text fg={fadeColor(theme.warning, agentMetaAlpha())}>goal</text>
                   </Show>
                   {props.right}
                 </box>

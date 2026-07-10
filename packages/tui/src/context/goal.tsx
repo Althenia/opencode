@@ -1,11 +1,8 @@
 import { createEffect, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
-import { usePermission } from "./permission"
 import { useRoute } from "./route"
 import { useSDK } from "./sdk"
-
-const DEFAULT_GOAL = "Analyze this session and create or update the goal todo list. Keep it concise and actionable."
 
 export type GoalStatus = {
   goal: string
@@ -19,13 +16,12 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
   init: () => {
     const sdk = useSDK()
     const route = useRoute()
-    const permission = usePermission()
     const [statuses, setStatuses] = createStore<Record<string, GoalStatus | undefined>>({})
+    const [selections, setSelections] = createStore<Record<string, boolean | undefined>>({})
+    const [starting, setStarting] = createStore<Record<string, boolean | undefined>>({})
     const queues = new Map<string, Promise<void>>()
     const generations = new Map<string, number>()
-    let permissionBaseline = permission.mode
-    let outstandingStarts = 0
-    let startSucceeded = false
+    const outstandingStarts = new Map<string, number>()
 
     function serialize<T>(sessionID: string, operation: () => Promise<T>) {
       const result = (queues.get(sessionID) ?? Promise.resolve())
@@ -54,33 +50,36 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       return statuses[sessionID]?.active === true
     }
 
+    function selected(id = sessionID()) {
+      return id ? selections[id] === true : false
+    }
+
+    function answering(id: string) {
+      return starting[id] === true || active(id)
+    }
+
     function generation(sessionID: string) {
       return generations.get(sessionID) ?? 0
     }
 
-    function beginStart() {
-      if (outstandingStarts === 0) {
-        permissionBaseline = permission.mode
-        startSucceeded = false
-      }
-      outstandingStarts++
-      permission.set("auto")
+    function beginStart(id: string) {
+      outstandingStarts.set(id, (outstandingStarts.get(id) ?? 0) + 1)
+      setStarting(id, true)
+    }
+
+    function endStart(id: string) {
+      const count = (outstandingStarts.get(id) ?? 1) - 1
+      if (count > 0) return outstandingStarts.set(id, count)
+      outstandingStarts.delete(id)
+      setStarting(id, undefined)
     }
 
     async function requestStart(id: string, goal: string, version: number) {
-      try {
-        if (generation(id) !== version) return
-        const result = await sdk.client.sessions.goalStart({ sessionID: id, goal })
-        if (generation(id) !== version) return
-        startSucceeded = true
-        setStatuses(id, result.active ? result : undefined)
-      } finally {
-        outstandingStarts--
-        if (outstandingStarts === 0) {
-          if (!startSucceeded) permission.set(permissionBaseline)
-          startSucceeded = false
-        }
-      }
+      if (generation(id) !== version) return
+      const result = await sdk.client.sessions.goalStart({ sessionID: id, goal })
+      if (generation(id) !== version) return
+      setSelections(id, true)
+      setStatuses(id, result)
     }
 
     async function requestStop(id: string, version: number) {
@@ -94,20 +93,28 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       if (generation(id) !== version) return
       const result = await sdk.client.sessions.goalStatus({ sessionID: id })
       if (generation(id) !== version) return
-      setStatuses(id, result?.active ? result : undefined)
+      if (selections[id] === false) {
+        setStatuses(id, undefined)
+        return result ?? undefined
+      }
+      if (result && (result.active || result.iteration >= result.cap)) setSelections(id, true)
+      setStatuses(
+        id,
+        result && (selected(id) || result.active)
+          ? result
+          : undefined,
+      )
       return result ?? undefined
     }
 
-    async function start(goal: string) {
-      const id = sessionID()
+    async function start(goal: string, id = sessionID()) {
       if (!id) return
       const version = generation(id)
-      beginStart()
-      return serialize(id, () => requestStart(id, goal, version))
+      beginStart(id)
+      return serialize(id, () => requestStart(id, goal, version)).finally(() => endStart(id))
     }
 
-    async function stop() {
-      const id = sessionID()
+    async function stop(id = sessionID()) {
       if (!id) return
       const version = generation(id)
       return serialize(id, () => requestStop(id, version))
@@ -130,17 +137,32 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       const version = generation(id)
       return serialize(id, async () => {
         if (generation(id) !== version) return
-        const status = statuses[id] ?? (await requestStatus(id, version))
+        if (!selected(id)) {
+          setSelections(id, true)
+          return
+        }
+        const status = statuses[id]
+        if (status && (status.active || status.iteration >= status.cap)) await requestStop(id, version)
         if (generation(id) !== version) return
-        if (status?.active) return requestStop(id, version)
-        beginStart()
-        return requestStart(id, DEFAULT_GOAL, version)
+        setSelections(id, false)
+        setStatuses(id, undefined)
       })
     }
 
     function clear(sessionID: string) {
       generations.set(sessionID, generation(sessionID) + 1)
       setStatuses(sessionID, undefined)
+      setSelections(sessionID, undefined)
+      setStarting(sessionID, undefined)
+      outstandingStarts.delete(sessionID)
+    }
+
+    function deselect(sessionID: string) {
+      generations.set(sessionID, generation(sessionID) + 1)
+      setStatuses(sessionID, undefined)
+      setSelections(sessionID, false)
+      setStarting(sessionID, undefined)
+      outstandingStarts.delete(sessionID)
     }
 
     createEffect(() => {
@@ -160,7 +182,10 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     return {
       current,
       active,
+      answering,
+      selected,
       clear,
+      deselect,
       start,
       stop,
       status,

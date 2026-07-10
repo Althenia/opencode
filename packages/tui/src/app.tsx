@@ -59,6 +59,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
+import { DialogSelect } from "./ui/dialog-select"
 import { ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
@@ -541,6 +542,74 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     })
   })
 
+  const exhaustedGoals = new Set<string>()
+  let exhaustedDialog: unknown
+  let exhaustedDialogSessionID: string | undefined
+  createEffect(() => {
+    const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
+    if (exhaustedDialog && exhaustedDialogSessionID !== sessionID) {
+      if (dialog.stack.at(-1)?.element === exhaustedDialog) dialog.clear()
+      exhaustedDialog = undefined
+      exhaustedDialogSessionID = undefined
+    }
+    if (sessionID && goal.answering(sessionID)) {
+      for (const key of exhaustedGoals) {
+        if (key.startsWith(`${sessionID}:`)) exhaustedGoals.delete(key)
+      }
+      return
+    }
+    const status = goal.current()
+    if (
+      !sessionID ||
+      !status ||
+      !goal.selected(sessionID) ||
+      goal.answering(sessionID) ||
+      status.active ||
+      status.iteration < status.cap
+    ) {
+      return
+    }
+    const key = `${sessionID}:${status.goal}:${status.iteration}:${status.cap}`
+    if (exhaustedGoals.has(key)) return
+    exhaustedGoals.add(key)
+    const goalText = status.goal
+    const view = () => (
+      <DialogSelect
+        title="Goal iteration limit reached"
+        skipFilter
+        options={[
+          { title: "Continue", value: "continue", description: "Restart the same goal" },
+          { title: "Revise", value: "revise", description: "Revise the goal prompt" },
+          { title: "Stop", value: "stop", description: "Stop goal mode" },
+        ]}
+        onSelect={(option) => {
+          if (route.data.type !== "session" || route.data.sessionID !== sessionID) {
+            dialog.clear()
+            return
+          }
+          dialog.clear()
+          exhaustedDialog = undefined
+          exhaustedDialogSessionID = undefined
+          if (option.value === "continue") {
+            exhaustedGoals.delete(key)
+            void goal.start(goalText, sessionID)
+            return
+          }
+          if (option.value === "revise") {
+            void goal.stop(sessionID).then(() => {
+              if (route.data.type === "session" && route.data.sessionID === sessionID) promptRef.current?.focus()
+            })
+            return
+          }
+          void goal.stop(sessionID).then(() => goal.deselect(sessionID))
+        }}
+      />
+    )
+    exhaustedDialog = view
+    exhaustedDialogSessionID = sessionID
+    dialog.replace(view)
+  })
+
   createEffect(
     on(
       () => sync.status === "complete" && sync.data.provider.length === 0,
@@ -951,16 +1020,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "permission.mode",
         title: local.permission.mode === "auto" ? "Disable yolo mode" : "Enable yolo mode",
         category: "System",
-        run: async () => {
-          const disablingYolo = local.permission.mode === "auto"
+        run: () => {
           local.permission.toggle()
-          if (disablingYolo) await goal.stop()
           dialog.clear()
         },
       },
       {
         name: "goal.start",
-        title: goal.current() ? "Stop goal mode" : "Start goal mode",
+        title: goal.selected() ? "Stop goal mode" : "Start goal mode",
         category: "Session",
         slashName: "goal",
         slashAliases: ["goal-mode"],

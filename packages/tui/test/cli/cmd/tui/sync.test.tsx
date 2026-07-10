@@ -184,7 +184,7 @@ describe("tui sync", () => {
         if (url.pathname === "/question/question-goal/reply") return new Response("true")
       },
       tmp.path,
-      { auto: true, sessionID: "session" },
+      { sessionID: "session" },
     )
 
     try {
@@ -195,6 +195,65 @@ describe("tui sync", () => {
       const request = requests.find((request) => new URL(request.url).pathname === "/question/question-goal/reply")!
       expect(await request.json()).toMatchObject({ answers: [[fallback]] })
       expect(sync.data.question.session).toBeUndefined()
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("auto answers questions while a goal is starting without enabling yolo", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    let resolveStart!: (response: Response) => void
+    const { app, emit, goal, requests, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/api/session/session/goal/status") return json({ data: null })
+        if (url.pathname === "/api/session/session/goal/start") {
+          return new Promise<Response>((resolve) => {
+            resolveStart = resolve
+          })
+        }
+        if (url.pathname === "/question/question-starting/reply") return new Response("true")
+      },
+      tmp.path,
+      { sessionID: "session" },
+    )
+
+    try {
+      const start = goal.start("ship")
+      await wait(() => resolveStart !== undefined)
+      emit(questionEvent("question-starting"))
+      await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-starting/reply"))
+
+      const request = requests.find((request) => new URL(request.url).pathname === "/question/question-starting/reply")!
+      expect(await request.json()).toMatchObject({ answers: [[fallback]] })
+      expect(sync.data.question.session).toBeUndefined()
+      resolveStart(json({ data: { goal: "ship", active: true, iteration: 1, cap: 7 } }))
+      await start
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("goal mode leaves permissions pending when yolo is off", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const { app, emit, goal, requests, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/api/session/session/goal/status") return json({ data: null })
+        if (url.pathname === "/api/session/session/goal/start") {
+          return json({ data: { goal: "ship", active: true, iteration: 1, cap: 7 } })
+        }
+      },
+      tmp.path,
+      { sessionID: "session" },
+    )
+
+    try {
+      await goal.start("ship")
+      emit(permissionEvent("permission-goal"))
+      await wait(() => sync.data.permission.session?.length === 1)
+
+      expect(requests.some((request) => new URL(request.url).pathname === "/permission/permission-goal/reply")).toBe(false)
     } finally {
       app.renderer.destroy()
     }

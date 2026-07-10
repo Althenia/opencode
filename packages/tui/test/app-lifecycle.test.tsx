@@ -202,7 +202,7 @@ test("command palette renders yolo mode", async () => {
   }
 })
 
-test("disabling yolo mode stops active goal supervision", async () => {
+test("disabling yolo mode does not stop active goal supervision", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -242,18 +242,18 @@ test("disabling yolo mode stops active goal supervision", async () => {
 
     await ready
     api?.keymap.dispatchCommand("permission.mode")
-    await waitFor(() => stopped)
+    await Bun.sleep(50)
     api?.keymap.dispatchCommand("app.exit")
     await task
 
-    expect(stopped).toBe(true)
+    expect(stopped).toBe(false)
   } finally {
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
     mock.restore()
   }
 })
 
-test("goal palette command starts inactive supervision immediately", async () => {
+test("goal palette command selects goal mode without starting supervision", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -315,12 +315,12 @@ test("goal palette command starts inactive supervision immediately", async () =>
 
     await ready
     api?.keymap.dispatchCommand("goal.start")
-    await waitFor(() => startedGoal)
+    await Bun.sleep(50)
     expect(prompted).toBe(false)
     api?.keymap.dispatchCommand("app.exit")
     await task
 
-    expect(startedGoal).toBe(true)
+    expect(startedGoal).toBe(false)
   } finally {
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
     mock.restore()
@@ -381,7 +381,160 @@ test("goal palette command toggles active supervision off", async () => {
   }
 })
 
-test("prompt chrome renders yolo mode and goal badge", async () => {
+test("exhausted goal shows Continue, Revise, and Stop even in yolo mode", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const provider = { id: "test", name: "test", source: "custom", env: [], options: {}, models: {} }
+  const goalMutations: string[] = []
+  const calls = createFetch((url) => {
+    if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
+    if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
+    if (url.pathname === "/session/dummy") {
+      return json({
+        id: "dummy",
+        title: "Demo session",
+        slug: "dummy",
+        projectID: "project",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      })
+    }
+    if (url.pathname === "/session/other") {
+      return json({
+        id: "other",
+        title: "Other session",
+        slug: "other",
+        projectID: "project",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      })
+    }
+    if (url.pathname === "/api/session/dummy/goal/status") {
+      return json({ data: { goal: "ship task 6", active: false, iteration: 7, cap: 7 } })
+    }
+    if (url.pathname === "/api/session/other/goal/status") return json({ data: null })
+    if (url.pathname.endsWith("/goal/start") || url.pathname.endsWith("/goal/stop")) {
+      goalMutations.push(url.pathname)
+      return url.pathname.endsWith("/goal/stop")
+        ? new Response(null, { status: 204 })
+        : json({ data: { goal: "unexpected", active: true, iteration: 1, cap: 7 } })
+    }
+    if (url.pathname === "/session/other/message") return json({ data: [] })
+    if (url.pathname === "/session/other/todo" || url.pathname === "/session/other/diff") return json({ data: [] })
+  }, events)
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { auto: true, continue: true },
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    const frame = await captureFrame(setup, (value) => value.includes("Goal iteration limit reached"))
+    expect(frame).toContain("Continue")
+    expect(frame).toContain("Revise")
+    expect(frame).toContain("Stop")
+    expect(frame).toContain("Goal iteration limit reached")
+    api?.route.navigate("session", { sessionID: "other" })
+    const switched = await captureFrame(setup, (value) => !value.includes("Goal iteration limit reached"))
+    expect(switched).not.toContain("Goal iteration limit reached")
+    expect(goalMutations).toEqual([])
+    api?.keymap.dispatchCommand("app.exit")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("an active final goal attempt does not show the exhaustion dialog", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const provider = { id: "test", name: "test", source: "custom", env: [], options: {}, models: {} }
+  const calls = createFetch((url) => {
+    if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
+    if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
+    if (url.pathname === "/session/dummy") {
+      return json({
+        id: "dummy",
+        title: "Demo session",
+        slug: "dummy",
+        projectID: "project",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      })
+    }
+    if (url.pathname === "/api/session/dummy/goal/status") {
+      return json({ data: { goal: "ship task 6", active: true, iteration: 7, cap: 7 } })
+    }
+  }, events)
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { auto: true, continue: true },
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    const frame = await captureFrame(setup, (value) => value.includes("goal"))
+    expect(frame).not.toContain("Goal iteration limit reached")
+    expect(frame).not.toContain("Continue")
+    expect(frame).not.toContain("Revise")
+    expect(frame).not.toContain("Stop")
+    api?.keymap.dispatchCommand("app.exit")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("prompt chrome renders yolo then goal without a counter", async () => {
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
   await Bun.write(path.join(tmp.path, "state", "kv.json"), "{}")
@@ -399,7 +552,8 @@ test("prompt chrome renders yolo mode and goal badge", async () => {
   try {
     const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal"))
     expect(frame).toContain("yolo")
-    expect(frame).toMatch(/yolo\s+goal · 2\/7/)
+    expect(frame).toMatch(/yolo\s+goal/)
+    expect(frame).not.toContain("2/7")
     expect(frame.split("\n").find((line) => line.includes("yolo"))?.indexOf("yolo")).toBeGreaterThan(40)
   } finally {
     app.renderer.destroy()

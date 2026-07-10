@@ -299,8 +299,8 @@ export const {
             upsertQuestion(request)
             break
           }
-          if (permission.mode === "auto") {
-            const fallback = goal.active(request.sessionID) ? GOAL_QUESTION_FALLBACK : undefined
+          if (permission.mode === "auto" || goal.answering(request.sessionID)) {
+            const fallback = goal.answering(request.sessionID) ? GOAL_QUESTION_FALLBACK : undefined
             const answers = request.questions.map((question) => autoAnswer(question, fallback))
             if (answers.some((answer) => answer === undefined)) {
               upsertQuestion(request)
