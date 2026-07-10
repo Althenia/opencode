@@ -1692,6 +1692,29 @@ describe("SessionNs.getUsage", () => {
     expect(result.cost).toBe(35)
   })
 
+  test.each([
+    ["gpt-5.6", 31, 55],
+    ["gpt-5.6-sol", 31, 55],
+    ["gpt-5.6-terra", 15.5, 27.5],
+    ["gpt-5.6-luna", 6.2, 11],
+  ])("estimates OpenAI %s cost when model metadata has no price", (id, expectedLowContext, expectedHighContext) => {
+    const model = createModel({ context: 400_000, output: 128_000 })
+    model.providerID = ProviderV2.ID.make("openai")
+    model.id = ModelV2.ID.make(id)
+
+    const lowContext = SessionNs.getUsage({
+      model,
+      usage: usage({ inputTokens: 200_000, outputTokens: 1_000_000, totalTokens: 1_200_000 }),
+    })
+    const highContext = SessionNs.getUsage({
+      model,
+      usage: usage({ inputTokens: 1_000_000, outputTokens: 1_000_000, totalTokens: 2_000_000 }),
+    })
+
+    expect(lowContext.cost).toBe(expectedLowContext)
+    expect(highContext.cost).toBe(expectedHighContext)
+  })
+
   test("uses authoritative Copilot billed cost when provided", () => {
     const result = SessionNs.getUsage({
       model: createModel({

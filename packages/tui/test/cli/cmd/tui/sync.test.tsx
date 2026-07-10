@@ -4,7 +4,7 @@ import { tmpdir } from "../../../fixture/fixture"
 import { json, mount, wait } from "./sync-fixture"
 import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 
-const fallback = "Use your best judgment from the goal and current context, then continue."
+const fallback = "Use your best judgment from the current goal and context, then continue."
 
 function questionEvent(
   id: string,
@@ -140,33 +140,47 @@ describe("tui sync", () => {
     }
   })
 
-  test("keeps custom-only questions pending in ordinary yolo mode", async () => {
+  test("uses the autonomous fallback for custom-only questions in yolo mode", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
-    const { app, emit, requests, sync } = await mount(undefined, tmp.path, { auto: true })
+    const { app, emit, requests, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/question/question-custom/reply") return new Response("true")
+      },
+      tmp.path,
+      { auto: true },
+    )
 
     try {
       emit(questionEvent("question-custom"))
-      await wait(() => sync.data.question.session?.length === 1)
+      await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-custom/reply"))
 
-      expect(requests.some((request) => new URL(request.url).pathname === "/question/question-custom/reply")).toBe(false)
-      expect(sync.data.question.session?.[0]?.id).toBe("question-custom")
+      const request = requests.find((request) => new URL(request.url).pathname === "/question/question-custom/reply")!
+      expect(await request.json()).toMatchObject({ answers: [[fallback]] })
+      expect(sync.data.question.session).toBeUndefined()
     } finally {
       app.renderer.destroy()
     }
   })
 
-  test("keeps the whole request pending when any yolo question needs user input", async () => {
+  test("answers every yolo question without user input", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
-    const { app, emit, requests, sync } = await mount(undefined, tmp.path, { auto: true })
+    const { app, emit, requests, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/question/question-mixed/reply") return new Response("true")
+      },
+      tmp.path,
+      { auto: true },
+    )
 
     try {
       emit(questionEvent("question-mixed", [{ label: "A", description: "A" }], true))
-      await wait(() => sync.data.question.session?.length === 1)
+      await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-mixed/reply"))
 
-      expect(sync.data.question.session?.[0]?.questions).toHaveLength(2)
-      expect(requests.some((request) => new URL(request.url).pathname === "/question/question-mixed/reply")).toBe(false)
+      const request = requests.find((request) => new URL(request.url).pathname === "/question/question-mixed/reply")!
+      expect(await request.json()).toMatchObject({ answers: [["A"], [fallback]] })
+      expect(sync.data.question.session).toBeUndefined()
     } finally {
       app.renderer.destroy()
     }
@@ -259,7 +273,7 @@ describe("tui sync", () => {
     }
   })
 
-  test("does not use another session's active goal fallback", async () => {
+  test("uses yolo fallback outside the active goal session", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const { app, emit, goal, requests, route, sync } = await mount(
@@ -268,6 +282,7 @@ describe("tui sync", () => {
         if (url.pathname === "/api/session/session-a/goal/start") {
           return json({ data: { goal: "ship", active: true, iteration: 1, cap: 7 } })
         }
+        if (url.pathname === "/question/question-session-b/reply") return new Response("true")
       },
       tmp.path,
       { auto: true, sessionID: "session-a" },
@@ -277,11 +292,11 @@ describe("tui sync", () => {
       await goal.start("ship")
       route.navigate({ type: "session", sessionID: "session-b" })
       emit(questionEvent("question-session-b", undefined, false, "session-b"))
-      await wait(() => sync.data.question["session-b"]?.length === 1)
+      await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-session-b/reply"))
 
-      expect(requests.some((request) => new URL(request.url).pathname === "/question/question-session-b/reply")).toBe(
-        false,
-      )
+      const request = requests.find((request) => new URL(request.url).pathname === "/question/question-session-b/reply")!
+      expect(await request.json()).toMatchObject({ answers: [[fallback]] })
+      expect(sync.data.question["session-b"]).toBeUndefined()
       expect(goal.active("session-a")).toBe(true)
       expect(goal.active("session-b")).toBe(false)
     } finally {

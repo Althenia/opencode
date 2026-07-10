@@ -378,15 +378,16 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
     },
   }
 
+  const cost =
+    input.model.cost && (input.model.cost.input > 0 || input.model.cost.output > 0)
+      ? input.model.cost
+      : openAICost(input.model)
   const contextTokens = inputTokens
   const costInfo =
-    input.model.cost?.tiers
+    cost?.tiers
       ?.filter((item) => item.tier.type === "context" && contextTokens > item.tier.size)
       .sort((a, b) => b.tier.size - a.tier.size)[0] ??
-    (input.model.cost?.experimentalOver200K && contextTokens > 200_000
-      ? input.model.cost.experimentalOver200K
-      : input.model.cost)
-  const pricedCostInfo = costInfo && (costInfo.input > 0 || costInfo.output > 0) ? costInfo : openAICost(input.model)
+    (cost?.experimentalOver200K && contextTokens > 200_000 ? cost.experimentalOver200K : cost)
   const totalNanoAiu = input.metadata?.["copilot"]?.["totalNanoAiu"]
   const cacheReadCost = input.model.api.npm === "@ai-sdk/cerebras" ? costInfo?.input : costInfo?.cache?.read
   return {
@@ -395,13 +396,13 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
         ? new Decimal(totalNanoAiu).div(100_000_000_000).toNumber()
         : safe(
             new Decimal(0)
-              .add(new Decimal(tokens.input).mul(pricedCostInfo?.input ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.output).mul(pricedCostInfo?.output ?? 0).div(1_000_000))
+              .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
+              .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
               .add(new Decimal(tokens.cache.read).mul(cacheReadCost ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.cache.write).mul(pricedCostInfo?.cache?.write ?? 0).div(1_000_000))
+              .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
               // TODO: update models.dev to have better pricing model, for now:
               // charge reasoning tokens at the same rate as output tokens
-              .add(new Decimal(tokens.reasoning).mul(pricedCostInfo?.output ?? 0).div(1_000_000))
+              .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
               .toNumber(),
           ),
     tokens,
@@ -411,6 +412,22 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
 function openAICost(model: Provider.Model): Provider.Model["cost"] | undefined {
   if (model.providerID !== "openai") return
   const id = model.id.toLowerCase()
+  const gpt56 = (input: number, output: number, read: number, write: number) => ({
+    input,
+    output,
+    cache: { read, write },
+    tiers: [
+      {
+        tier: { type: "context" as const, size: 272_000 },
+        input: input * 2,
+        output: output * 1.5,
+        cache: { read: read * 2, write: write * 2 },
+      },
+    ],
+  })
+  if (id.startsWith("gpt-5.6-terra")) return gpt56(2.5, 15, 0.25, 3.125)
+  if (id.startsWith("gpt-5.6-luna")) return gpt56(1, 6, 0.1, 1.25)
+  if (id.startsWith("gpt-5.6")) return gpt56(5, 30, 0.5, 6.25)
   if (id.startsWith("gpt-5.5")) return { input: 5, output: 30, cache: { read: 0.5, write: 5 } }
   if (id.startsWith("gpt-5.4-mini")) return { input: 0.75, output: 4.5, cache: { read: 0.075, write: 0.75 } }
   if (id.startsWith("gpt-5.4")) return { input: 2.5, output: 15, cache: { read: 0.25, write: 2.5 } }

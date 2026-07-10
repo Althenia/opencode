@@ -36,7 +36,7 @@ import { autoAnswer } from "../util/question"
 import { useGoal } from "./goal"
 import { useToast } from "../ui/toast"
 
-const GOAL_QUESTION_FALLBACK = "Use your best judgment from the goal and current context, then continue."
+const AUTONOMOUS_QUESTION_FALLBACK = "Use your best judgment from the current goal and context, then continue."
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -300,8 +300,7 @@ export const {
             break
           }
           if (permission.mode === "auto" || goal.answering(request.sessionID)) {
-            const fallback = goal.answering(request.sessionID) ? GOAL_QUESTION_FALLBACK : undefined
-            const answers = request.questions.map((question) => autoAnswer(question, fallback))
+            const answers = request.questions.map((question) => autoAnswer(question, AUTONOMOUS_QUESTION_FALLBACK))
             if (answers.some((answer) => answer === undefined)) {
               upsertQuestion(request)
               break

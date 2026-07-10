@@ -196,6 +196,8 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts[0]).toMatchObject({ sessionID, delivery: "steer", resume: true })
       expect(fake.prompts[0]?.id).toBeDefined()
       expect(fake.prompts[0]?.prompt.text).toContain("ship task 4")
+      expect(fake.prompts[0]?.prompt.text).toContain("Use todowrite to maintain a goal-oriented task list")
+      expect(fake.prompts[0]?.prompt.text).toContain("Do not ask the user for approval or clarification")
       expect(fake.prompts[0]?.prompt.text).not.toContain("Iteration")
     }),
   )

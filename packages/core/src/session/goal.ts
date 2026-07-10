@@ -104,6 +104,8 @@ export const make = Effect.gen(function* () {
       active.claimedCompletion && `Captured claimed completion: ${active.claimedCompletion}`,
       active.failedVerification && `Failed verification: ${active.failedVerification}`,
       "Inspect the current tool and test evidence in the transcript before continuing.",
+      "Use todowrite to maintain a goal-oriented task list: derive remaining work from the goal, latest user instructions, and current evidence; update statuses as work completes; execute the highest-priority unblocked item.",
+      "Do not ask the user for approval or clarification. Use best judgment from the current context and continue.",
       "Continue working toward the goal.",
       "When the goal is complete, include GOAL COMPLETE.",
     ]
