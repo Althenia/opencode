@@ -63,6 +63,317 @@ test("/goal selects goal mode without starting a run or changing yolo", async ()
   }
 })
 
+test("/goal accepts the immediate next prompt while goal status is pending", async () => {
+  let resolveStatus!: (response: Response) => void
+  const calls: Array<{ method: string; body?: unknown }> = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname === "/api/session/session-test/goal/status") {
+      return new Promise<Response>((resolve) => {
+        resolveStatus = resolve
+      })
+    }
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      calls.push({ method: "goalStart", body: request ? await request.json() : undefined })
+      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await waitFor(() => resolveStatus !== undefined)
+    app.promptRef?.set({ input: "/goal", parts: [] })
+    await app.promptRef?.submit()
+    await waitFor(() => app.promptRef?.current.input === "")
+    await Bun.sleep(0)
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    await app.promptRef?.submit()
+    expect(app.promptRef?.current.input).toBe("")
+    resolveStatus(json({ data: null }))
+    await waitFor(() => calls.length === 1)
+
+    expect(calls[0]?.method).toBe("goalStart")
+    expect(calls[0]?.body).toMatchObject({ goal: "ship task 6" })
+  } finally {
+    resolveStatus?.(json({ data: null }))
+    app.renderer.destroy()
+  }
+})
+
+test("goal prompt clears before start resolves and preserves a later draft", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    const submit = app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+
+    expect(app.promptRef?.current.input).toBe("")
+    app.promptRef?.set({ input: "later draft", parts: [] })
+    await submit
+    resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    await waitFor(() => app.goal.active("session-test"))
+
+    expect(app.promptRef?.current.input).toBe("later draft")
+  } finally {
+    resolveStart?.(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    app.renderer.destroy()
+  }
+})
+
+test("failed goal prompt restores the submitted text when no later draft exists", async () => {
+  let resolveStart!: (response: Response) => void
+  const starts: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      starts.push(request ? await request.json() : undefined)
+      if (starts.length > 1) {
+        return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
+      }
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    const submit = app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+    await submit
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.promptRef?.current.input).toBe("ship task 6")
+    expect(app.toast.currentToast?.variant).toBe("error")
+    app.promptRef?.submit()
+    await waitFor(() => starts.length === 2)
+
+    expect(starts[1]).toMatchObject({ goal: "ship task 6" })
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("failed goal prompt preserves a later draft and shows the error", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    const submit = app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+    app.promptRef?.set({ input: "later draft", parts: [] })
+    await submit
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.promptRef?.current.input).toBe("later draft")
+    expect(app.toast.currentToast?.variant).toBe("error")
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("failed goal prompt preserves a parts-only later draft", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+    app.promptRef?.set({
+      input: "",
+      parts: [
+        {
+          type: "file",
+          mime: "image/png",
+          filename: "image.png",
+          url: "data:image/png;base64,eA==",
+          source: {
+            type: "file",
+            path: "image.png",
+            text: { start: 0, end: 9, value: "[Image 1]" },
+          },
+        },
+      ],
+    })
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.promptRef?.current.input).toBe("")
+    expect(app.promptRef?.current.parts).toHaveLength(1)
+    expect(app.promptRef?.current.parts[0]).toMatchObject({ type: "file", filename: "image.png" })
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("failed goal start does not restore over a later submission", async () => {
+  let resolveStart!: (response: Response) => void
+  const prompts: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+    if (url.pathname === "/session/session-test/message") {
+      prompts.push(request ? await request.json() : undefined)
+      return json({ data: {} })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+    app.promptRef?.set({ input: "later submission", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => prompts.length === 1)
+    expect(app.promptRef?.current.input).toBe("")
+
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(prompts[0]).toMatchObject({ parts: [{ type: "text", text: "later submission" }] })
+    expect(app.promptRef?.current.input).toBe("")
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("destroyed prompt consumes a pending goal start failure", async () => {
+  let resolveStart!: (response: Response) => void
+  let destroyed = false
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+
+    app.renderer.destroy()
+    destroyed = true
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await Bun.sleep(20)
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    if (!destroyed) app.renderer.destroy()
+  }
+})
+
+test("failed goal prompt does not restore after deselection", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+    const toggle = app.goal.toggle()
+
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+    await toggle
+
+    expect(app.goal.selected("session-test")).toBe(false)
+    expect(app.promptRef?.current.input).toBe("")
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("failed goal prompt does not restore after off and on", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+    const off = app.goal.toggle()
+    const on = app.goal.toggle()
+
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+    await Promise.all([off, on])
+
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.promptRef?.current.input).toBe("")
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
 test("/goal with text is sent as a normal prompt", async () => {
   const calls: Array<{ method: string; body?: unknown }> = []
   const app = await mountGoalPrompt(async (url, request) => {
@@ -208,6 +519,76 @@ test("goal start does not switch yolo before the server responds", async () => {
 
     expect(app.local.permission.mode).toBe("normal")
   } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("goal start after deselection immediately owns selection", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    app.goal.deselect("session-test")
+    const start = app.goal.start("ship task 6")
+    await waitFor(() => resolveStart !== undefined)
+
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.goal.answering("session-test")).toBe(true)
+    resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    await start
+
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.goal.active("session-test")).toBe(true)
+  } finally {
+    resolveStart?.(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    app.renderer.destroy()
+  }
+})
+
+test("pending start toggle updates selection and answering immediately", async () => {
+  let resolveStart!: (response: Response) => void
+  let resolveStop!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+    if (url.pathname === "/api/session/session-test/goal/stop") {
+      return new Promise<Response>((resolve) => {
+        resolveStop = resolve
+      })
+    }
+  })
+
+  try {
+    const start = app.goal.start("ship task 6")
+    await waitFor(() => resolveStart !== undefined)
+    const off = app.goal.toggle()
+    expect(app.goal.selected("session-test")).toBe(false)
+    expect(app.goal.answering("session-test")).toBe(false)
+
+    const on = app.goal.toggle()
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.goal.answering("session-test")).toBe(true)
+
+    resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    await start
+    await waitFor(() => resolveStop !== undefined)
+    resolveStop(new Response(null, { status: 204 }))
+    await Promise.all([off, on])
+
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.goal.answering("session-test")).toBe(false)
+  } finally {
+    resolveStart?.(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    resolveStop?.(new Response(null, { status: 204 }))
     app.renderer.destroy()
   }
 })
@@ -554,6 +935,32 @@ test("overlapping toggles serialize selection without starting or stopping a run
     expect(stops).toBe(0)
     expect(app.goal.selected("session-test")).toBe(false)
     expect(app.goal.current()).toBeUndefined()
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("overlapping selected goal toggles preserve selection parity", async () => {
+  let stops = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return json({ data: { goal: "ship", active: true, iteration: 1, cap: 7 } })
+    }
+    if (url.pathname === "/api/session/session-test/goal/stop") {
+      stops++
+      return new Response(null, { status: 204 })
+    }
+  })
+
+  try {
+    await app.goal.start("ship")
+    expect(app.goal.selected("session-test")).toBe(true)
+    const first = app.goal.toggle()
+    const second = app.goal.toggle()
+    await Promise.all([first, second])
+
+    expect(stops).toBe(1)
+    expect(app.goal.selected("session-test")).toBe(true)
   } finally {
     app.renderer.destroy()
   }

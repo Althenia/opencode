@@ -21,6 +21,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     const [starting, setStarting] = createStore<Record<string, boolean | undefined>>({})
     const queues = new Map<string, Promise<void>>()
     const generations = new Map<string, number>()
+    const selectionRevisions = new Map<string, number>()
     const outstandingStarts = new Map<string, number>()
 
     function serialize<T>(sessionID: string, operation: () => Promise<T>) {
@@ -55,11 +56,21 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     }
 
     function answering(id: string) {
-      return starting[id] === true || active(id)
+      return selected(id) && (starting[id] === true || active(id))
     }
 
     function generation(sessionID: string) {
       return generations.get(sessionID) ?? 0
+    }
+
+    function revision(id = sessionID()) {
+      return id ? (selectionRevisions.get(id) ?? 0) : 0
+    }
+
+    function advanceRevision(id: string) {
+      const next = revision(id) + 1
+      selectionRevisions.set(id, next)
+      return next
     }
 
     function beginStart(id: string) {
@@ -78,7 +89,6 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       if (generation(id) !== version) return
       const result = await sdk.client.sessions.goalStart({ sessionID: id, goal })
       if (generation(id) !== version) return
-      setSelections(id, true)
       setStatuses(id, result)
     }
 
@@ -109,6 +119,8 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
 
     async function start(goal: string, id = sessionID()) {
       if (!id) return
+      advanceRevision(id)
+      setSelections(id, true)
       const version = generation(id)
       beginStart(id)
       return serialize(id, () => requestStart(id, goal, version)).finally(() => endStart(id))
@@ -134,22 +146,28 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     async function toggle() {
       const id = sessionID()
       if (!id) return
+      const ownership = advanceRevision(id)
+      const next = !selected(id)
+      setSelections(id, next)
+      if (next) return
       const version = generation(id)
       return serialize(id, async () => {
         if (generation(id) !== version) return
-        if (!selected(id)) {
-          setSelections(id, true)
-          return
-        }
         const status = statuses[id]
-        if (status && (status.active || status.iteration >= status.cap)) await requestStop(id, version)
+        if (status && (status.active || status.iteration >= status.cap)) {
+          await requestStop(id, version).catch((error) => {
+            if (generation(id) === version && revision(id) === ownership) setSelections(id, true)
+            throw error
+          })
+        }
         if (generation(id) !== version) return
-        setSelections(id, false)
+        if (revision(id) !== ownership) return
         setStatuses(id, undefined)
       })
     }
 
     function clear(sessionID: string) {
+      advanceRevision(sessionID)
       generations.set(sessionID, generation(sessionID) + 1)
       setStatuses(sessionID, undefined)
       setSelections(sessionID, undefined)
@@ -158,6 +176,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     }
 
     function deselect(sessionID: string) {
+      advanceRevision(sessionID)
       generations.set(sessionID, generation(sessionID) + 1)
       setStatuses(sessionID, undefined)
       setSelections(sessionID, false)
@@ -183,6 +202,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       current,
       active,
       answering,
+      revision,
       selected,
       clear,
       deselect,

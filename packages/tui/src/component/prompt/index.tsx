@@ -144,6 +144,7 @@ let stashed: { prompt: PromptInfo; cursor: number } | undefined
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
   let anchor: BoxRenderable
+  let submissionEpoch = 0
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = useLeaderActive()
@@ -626,6 +627,7 @@ export function Prompt(props: PromptProps) {
   })
 
   onCleanup(() => {
+    submissionEpoch++
     if (store.prompt.input) {
       stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset }
     }
@@ -961,6 +963,7 @@ export function Prompt(props: PromptProps) {
     if (!store.prompt.input) return false
     const agent = local.agent.current()
     if (!agent) return false
+    const acceptedSubmission = ++submissionEpoch
     const trimmed = store.prompt.input.trim()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
@@ -1086,7 +1089,28 @@ export function Prompt(props: PromptProps) {
 
     if (startsGoal) {
       move.startSubmit()
-      await goal.start(inputText)
+      const start = goal.start(inputText)
+      const selectionRevision = goal.revision(sessionID)
+      void start.catch((error) => {
+        if (
+          submissionEpoch === acceptedSubmission &&
+          !input.isDestroyed &&
+          !store.prompt.input &&
+          store.prompt.parts.length === 0 &&
+          goal.selected(sessionID) &&
+          goal.revision(sessionID) === selectionRevision
+        ) {
+          input.setText(inputText)
+          setStore("prompt", { input: inputText, parts: [] })
+          input.gotoBufferEnd()
+        }
+        if (input.isDestroyed) return
+        toast.show({
+          title: "Failed to start Goal",
+          message: errorMessage(error),
+          variant: "error",
+        })
+      })
     } else if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({

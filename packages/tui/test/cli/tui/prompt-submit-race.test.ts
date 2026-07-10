@@ -78,6 +78,7 @@ describe("Prompt.submit race", () => {
 
     // Every submission that did make it through must carry the actual user
     // text, and no submission may have an empty text payload.
+    expect(h.submissions).toHaveLength(1)
     expect(h.submissions.every((s) => s.text === "Hello there.")).toBe(true)
     expect(h.submissions.some((s) => s.text === "")).toBe(false)
   })

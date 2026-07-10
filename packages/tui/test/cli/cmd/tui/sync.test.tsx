@@ -4,7 +4,7 @@ import { tmpdir } from "../../../fixture/fixture"
 import { json, mount, wait } from "./sync-fixture"
 import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 
-const fallback = "Use your best judgment from the current goal and context, then continue."
+const fallback = "Use your best judgment from the goal and current context, then continue."
 
 function questionEvent(
   id: string,
@@ -140,7 +140,7 @@ describe("tui sync", () => {
     }
   })
 
-  test("uses the autonomous fallback for custom-only questions in yolo mode", async () => {
+  test("leaves custom-only questions pending in yolo mode", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const { app, emit, requests, sync } = await mount(
@@ -153,17 +153,15 @@ describe("tui sync", () => {
 
     try {
       emit(questionEvent("question-custom"))
-      await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-custom/reply"))
+      await wait(() => sync.data.question.session?.length === 1)
 
-      const request = requests.find((request) => new URL(request.url).pathname === "/question/question-custom/reply")!
-      expect(await request.json()).toMatchObject({ answers: [[fallback]] })
-      expect(sync.data.question.session).toBeUndefined()
+      expect(requests.some((request) => new URL(request.url).pathname === "/question/question-custom/reply")).toBe(false)
     } finally {
       app.renderer.destroy()
     }
   })
 
-  test("answers every yolo question without user input", async () => {
+  test("leaves mixed questions wholly pending in yolo mode", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const { app, emit, requests, sync } = await mount(
@@ -176,11 +174,9 @@ describe("tui sync", () => {
 
     try {
       emit(questionEvent("question-mixed", [{ label: "A", description: "A" }], true))
-      await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-mixed/reply"))
+      await wait(() => sync.data.question.session?.length === 1)
 
-      const request = requests.find((request) => new URL(request.url).pathname === "/question/question-mixed/reply")!
-      expect(await request.json()).toMatchObject({ answers: [["A"], [fallback]] })
-      expect(sync.data.question.session).toBeUndefined()
+      expect(requests.some((request) => new URL(request.url).pathname === "/question/question-mixed/reply")).toBe(false)
     } finally {
       app.renderer.destroy()
     }
@@ -214,7 +210,7 @@ describe("tui sync", () => {
     }
   })
 
-  test("auto answers questions while a goal is starting without enabling yolo", async () => {
+  test("auto answers mixed questions while a goal is starting without enabling yolo", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     let resolveStart!: (response: Response) => void
@@ -235,11 +231,11 @@ describe("tui sync", () => {
     try {
       const start = goal.start("ship")
       await wait(() => resolveStart !== undefined)
-      emit(questionEvent("question-starting"))
+      emit(questionEvent("question-starting", [{ label: "A", description: "A" }], true))
       await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-starting/reply"))
 
       const request = requests.find((request) => new URL(request.url).pathname === "/question/question-starting/reply")!
-      expect(await request.json()).toMatchObject({ answers: [[fallback]] })
+      expect(await request.json()).toMatchObject({ answers: [["A"], [fallback]] })
       expect(sync.data.question.session).toBeUndefined()
       resolveStart(json({ data: { goal: "ship", active: true, iteration: 1, cap: 7 } }))
       await start
@@ -273,7 +269,7 @@ describe("tui sync", () => {
     }
   })
 
-  test("uses yolo fallback outside the active goal session", async () => {
+  test("leaves custom questions pending in yolo mode outside the active goal session", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const { app, emit, goal, requests, route, sync } = await mount(
@@ -292,11 +288,9 @@ describe("tui sync", () => {
       await goal.start("ship")
       route.navigate({ type: "session", sessionID: "session-b" })
       emit(questionEvent("question-session-b", undefined, false, "session-b"))
-      await wait(() => requests.some((request) => new URL(request.url).pathname === "/question/question-session-b/reply"))
+      await wait(() => sync.data.question["session-b"]?.length === 1)
 
-      const request = requests.find((request) => new URL(request.url).pathname === "/question/question-session-b/reply")!
-      expect(await request.json()).toMatchObject({ answers: [[fallback]] })
-      expect(sync.data.question["session-b"]).toBeUndefined()
+      expect(requests.some((request) => new URL(request.url).pathname === "/question/question-session-b/reply")).toBe(false)
       expect(goal.active("session-a")).toBe(true)
       expect(goal.active("session-b")).toBe(false)
     } finally {
