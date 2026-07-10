@@ -262,7 +262,10 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
     .add(
       HttpApiEndpoint.post("session.goal.start", "/api/session/:sessionID/goal/start", {
         params: { sessionID: Session.ID },
-        payload: Schema.Struct({ goal: Schema.String }),
+        payload: Schema.Struct({
+          goal: Schema.String,
+          messageID: SessionMessage.ID.pipe(Schema.optional),
+        }),
         success: Schema.Struct({ data: GoalState }),
         error: [ConflictError, SessionNotFoundError],
       })

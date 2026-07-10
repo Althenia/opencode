@@ -29,7 +29,9 @@ import { layerWebSocketConstructorGlobal } from "effect/unstable/socket/Socket"
 import { resetDatabase } from "../fixture/db"
 import { testEffect } from "../lib/effect"
 
-const calls: Array<{ method: "start"; sessionID: string; goal: string } | { method: "stop" | "status"; sessionID: string }> = []
+const calls: Array<
+  { method: "start"; sessionID: string; goal: string; messageID?: string } | { method: "stop" | "status"; sessionID: string }
+> = []
 const locationServiceMap = buildLocationServiceMap()
 const serviceLayer = AppNodeBuilder.build(
   LayerNode.group([
@@ -52,7 +54,12 @@ const goalLayer = Layer.succeed(
   GoalSupervisor.Service.of({
     start: (input) =>
       Effect.sync(() => {
-        calls.push({ method: "start", sessionID: input.sessionID, goal: input.goal })
+        calls.push({
+          method: "start",
+          sessionID: input.sessionID,
+          goal: input.goal,
+          ...(input.messageID ? { messageID: input.messageID } : {}),
+        })
         return { goal: input.goal, active: true, iteration: 1, cap: 10 }
       }),
     stop: (sessionID) =>
@@ -118,7 +125,7 @@ describe("goal HttpApi", () => {
           yield* request(`/api/session/${sessionID}/goal/start`, {
             method: "POST",
             headers,
-            body: JSON.stringify({ goal: "ship task 5" }),
+            body: JSON.stringify({ goal: "ship task 5", messageID: "msg_goal_http" }),
           }),
         ),
       ).toEqual({ data: { goal: "ship task 5", active: true, iteration: 1, cap: 10 } })
@@ -132,7 +139,7 @@ describe("goal HttpApi", () => {
       const stopped = yield* request(`/api/session/${sessionID}/goal/stop`, { method: "POST" })
       expect(stopped.status).toBe(204)
       expect(calls).toEqual([
-        { method: "start", sessionID, goal: "ship task 5" },
+        { method: "start", sessionID, goal: "ship task 5", messageID: "msg_goal_http" },
         { method: "status", sessionID },
         { method: "stop", sessionID },
       ])

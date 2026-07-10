@@ -389,6 +389,84 @@ export const {
           break
         }
 
+        case "session.next.prompted": {
+          const text = goal.takePrompted(event.properties.sessionID, event.properties.messageID)
+          if (!text) break
+          const messages = store.message[event.properties.sessionID]
+          const previous = messages?.findLast((message) => message.role === "user")
+          const session = store.session.find((session) => session.id === event.properties.sessionID)
+          const agent = store.agent.find((agent) => agent.name === (previous?.agent ?? session?.agent)) ?? store.agent[0]
+          const info: Message = {
+            id: event.properties.messageID,
+            sessionID: event.properties.sessionID,
+            role: "user",
+            time: { created: event.properties.timestamp },
+            agent: previous?.agent ?? session?.agent ?? agent?.name ?? "build",
+            model: previous?.model ??
+              (session?.model
+                ? { providerID: session.model.providerID, modelID: session.model.id, variant: session.model.variant }
+                : agent?.model ?? { providerID: "", modelID: "" }),
+          }
+          const part: Part = {
+            id: event.properties.messageID,
+            sessionID: event.properties.sessionID,
+            messageID: event.properties.messageID,
+            type: "text",
+            text,
+          }
+          touchMessage(info.sessionID, info.id)
+          if (!messages) setStore("message", info.sessionID, [info])
+          else {
+            const result = search(messages, info.id, (message) => message.id)
+            if (result.found) setStore("message", info.sessionID, result.index, reconcile(info))
+            else {
+              setStore(
+                "message",
+                info.sessionID,
+                produce((draft) => {
+                  draft.splice(result.index, 0, info)
+                }),
+              )
+              const updated = store.message[info.sessionID]
+              if (updated.length > 100) {
+                const oldest = updated[0]
+                batch(() => {
+                  setStore(
+                    "message",
+                    info.sessionID,
+                    produce((draft) => {
+                      draft.shift()
+                    }),
+                  )
+                  setStore(
+                    "part",
+                    produce((draft) => {
+                      delete draft[oldest.id]
+                    }),
+                  )
+                })
+              }
+            }
+          }
+          touchPart(part.sessionID, part.id)
+          const parts = store.part[part.messageID]
+          if (!parts) setStore("part", part.messageID, [part])
+          else {
+            const result = search(parts, part.id, (part) => part.id)
+            if (result.found) setStore("part", part.messageID, result.index, reconcile(part))
+            else {
+              setStore(
+                "part",
+                part.messageID,
+                produce((draft) => {
+                  draft.splice(result.index, 0, part)
+                }),
+              )
+            }
+          }
+          break
+        }
+
         case "message.updated": {
           touchMessage(event.properties.info.sessionID, event.properties.info.id)
           const messages = store.message[event.properties.info.sessionID]

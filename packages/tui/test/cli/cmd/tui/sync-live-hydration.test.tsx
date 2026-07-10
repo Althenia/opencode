@@ -176,6 +176,75 @@ test("hydration does not clear text streamed before it starts", async () => {
   }
 })
 
+test("goal start projects only its original prompted text", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  const { app, emit, goal, requests, sync } = await mount((url) => {
+    if (url.pathname === `/api/session/${sessionID}/goal/start`) {
+      return json({ goal: "captured Goal text", active: true, iteration: 1, cap: 25 })
+    }
+    return undefined
+  }, tmp.path)
+
+  try {
+    await goal.start("captured Goal text", sessionID)
+    const request = requests.find((request) => new URL(request.url).pathname === `/api/session/${sessionID}/goal/start`)
+    const messageID = (await request?.json() as { messageID: string }).messageID
+    emit(
+      global({
+        id: "evt_prompted",
+        type: "session.next.prompted",
+        properties: {
+          sessionID,
+          messageID: "msg_unrelated",
+          timestamp: 3,
+          prompt: { text: "captured Goal text" },
+          delivery: "steer",
+        },
+      }),
+    )
+    await Bun.sleep(20)
+    expect(sync.data.message[sessionID]).toBeUndefined()
+    emit(
+      global({
+        id: "evt_prompted",
+        type: "session.next.prompted",
+        properties: {
+          sessionID,
+          messageID,
+          timestamp: 4,
+          prompt: { text: "unrelated event text" },
+          delivery: "steer",
+        },
+      }),
+    )
+    await wait(() => sync.data.part[messageID]?.[0]?.type === "text")
+    emit(
+      global({
+        id: "evt_continuation",
+        type: "session.next.prompted",
+        properties: {
+          sessionID,
+          messageID: "msg_continuation",
+          timestamp: 5,
+          prompt: { text: "Continue working toward the goal." },
+          delivery: "steer",
+        },
+      }),
+    )
+    await Bun.sleep(20)
+
+    expect(sync.data.message[sessionID]).toEqual([
+      expect.objectContaining({ id: messageID, role: "user", time: { created: 4 } }),
+    ])
+    expect(sync.data.part[messageID]).toEqual([
+      expect.objectContaining({ id: messageID, type: "text", text: "captured Goal text" }),
+    ])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("live messages merged during hydration retain the 100 message window", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")

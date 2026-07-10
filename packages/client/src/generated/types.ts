@@ -492,7 +492,8 @@ export type SessionsWaitOutput = void
 
 export type SessionsGoalStartInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
-  readonly goal: { readonly goal: string }["goal"]
+  readonly goal: { readonly goal: string; readonly messageID?: string | undefined }["goal"]
+  readonly messageID?: { readonly goal: string; readonly messageID?: string | undefined }["messageID"]
 }
 
 export type SessionsGoalStartOutput = {

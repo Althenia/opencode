@@ -1,5 +1,6 @@
 import { createEffect, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
+import { SessionMessage } from "@opencode-ai/core/session/message"
 import { createSimpleContext } from "./helper"
 import { useRoute } from "./route"
 import { useSDK } from "./sdk"
@@ -23,6 +24,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     const generations = new Map<string, number>()
     const selectionRevisions = new Map<string, number>()
     const outstandingStarts = new Map<string, number>()
+    const presentation = new Map<string, { goal: string; messageID: string; revision: number }>()
 
     function serialize<T>(sessionID: string, operation: () => Promise<T>) {
       const result = (queues.get(sessionID) ?? Promise.resolve())
@@ -85,9 +87,9 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       setStarting(id, undefined)
     }
 
-    async function requestStart(id: string, goal: string, version: number) {
+    async function requestStart(id: string, goal: string, messageID: string, version: number) {
       if (generation(id) !== version) return
-      const result = await sdk.client.sessions.goalStart({ sessionID: id, goal })
+      const result = await sdk.client.sessions.goalStart({ sessionID: id, goal, messageID })
       if (generation(id) !== version) return
       setStatuses(id, result)
     }
@@ -119,15 +121,23 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
 
     async function start(goal: string, id = sessionID()) {
       if (!id) return
-      advanceRevision(id)
+      const ownership = advanceRevision(id)
       setSelections(id, true)
       const version = generation(id)
+      const messageID = SessionMessage.ID.create()
+      presentation.set(id, { goal, messageID, revision: ownership })
       beginStart(id)
-      return serialize(id, () => requestStart(id, goal, version)).finally(() => endStart(id))
+      return serialize(id, () => requestStart(id, goal, messageID, version))
+        .catch((error) => {
+          if (presentation.get(id)?.revision === ownership) presentation.delete(id)
+          throw error
+        })
+        .finally(() => endStart(id))
     }
 
     async function stop(id = sessionID()) {
       if (!id) return
+      presentation.delete(id)
       const version = generation(id)
       return serialize(id, () => requestStop(id, version))
     }
@@ -150,6 +160,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       const next = !selected(id)
       setSelections(id, next)
       if (next) return
+      presentation.delete(id)
       const version = generation(id)
       return serialize(id, async () => {
         if (generation(id) !== version) return
@@ -173,6 +184,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       setSelections(sessionID, undefined)
       setStarting(sessionID, undefined)
       outstandingStarts.delete(sessionID)
+      presentation.delete(sessionID)
     }
 
     function deselect(sessionID: string) {
@@ -182,6 +194,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       setSelections(sessionID, false)
       setStarting(sessionID, undefined)
       outstandingStarts.delete(sessionID)
+      presentation.delete(sessionID)
     }
 
     createEffect(() => {
@@ -195,8 +208,18 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       }
       void poll()
       const timer = setInterval(poll, 5000)
-      onCleanup(() => clearInterval(timer))
+      onCleanup(() => {
+        clearInterval(timer)
+        presentation.delete(id)
+      })
     })
+
+    function takePrompted(id: string, messageID: string) {
+      const marker = presentation.get(id)
+      if (!marker || marker.revision !== revision(id) || marker.messageID !== messageID) return
+      presentation.delete(id)
+      return marker.goal
+    }
 
     return {
       current,
@@ -209,6 +232,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       start,
       stop,
       status,
+      takePrompted,
       toggle,
     }
   },

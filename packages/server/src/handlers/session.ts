@@ -223,7 +223,11 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.goal.start",
         Effect.fn(function* (ctx) {
           return {
-            data: yield* goals.start({ sessionID: ctx.params.sessionID, goal: ctx.payload.goal }).pipe(
+            data: yield* goals.start({
+              sessionID: ctx.params.sessionID,
+              goal: ctx.payload.goal,
+              messageID: ctx.payload.messageID,
+            }).pipe(
               Effect.catchTag("Session.NotFoundError", (error) =>
                 Effect.fail(
                   new SessionNotFoundError({

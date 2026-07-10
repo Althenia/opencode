@@ -412,7 +412,7 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/start`,
-            body: { goal: input["goal"] },
+            body: { goal: input["goal"], messageID: input["messageID"] },
             successStatus: 200,
             declaredStatuses: [409, 404, 400, 401],
             empty: false,

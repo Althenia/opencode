@@ -1,6 +1,11 @@
 import { describe, expect } from "bun:test"
-import { DateTime, Deferred, Effect, Fiber, PubSub, Stream } from "effect"
+import { DateTime, Deferred, Effect, Fiber, Layer, LayerMap, PubSub, Stream } from "effect"
 import { EventV2 } from "@opencode-ai/core/event"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
+import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import type { LocationError, LocationServices } from "@opencode-ai/core/location-services"
+import { QuestionV2 } from "@opencode-ai/core/question"
 import { GoalSupervisor } from "@opencode-ai/core/session/goal"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -12,6 +17,8 @@ import { Prompt } from "@opencode-ai/core/session/prompt"
 import { it } from "./lib/effect"
 
 const sessionID = SessionV2.ID.make("ses_goal_test")
+const otherSessionID = SessionV2.ID.make("ses_other_goal_test")
+const location = Location.Ref.make({ directory: AbsolutePath.make("/tmp/opencode-goal-test") })
 const unused = () => Effect.die("unused")
 
 function assistant(text: string): SessionMessage.Assistant {
@@ -27,9 +34,16 @@ function assistant(text: string): SessionMessage.Assistant {
 
 const makeEvents = Effect.gen(function* () {
   const pubsub = yield* PubSub.unbounded<EventV2.Payload>()
-  const publish: EventV2.Interface["publish"] = (definition, data) =>
+  const listeners = new Array<EventV2.Subscriber>()
+  const publish: EventV2.Interface["publish"] = (definition, data, options) =>
     Effect.gen(function* () {
-      const event = { id: EventV2.ID.create(), type: definition.type, data } as EventV2.Payload<typeof definition>
+      const event = {
+        id: EventV2.ID.create(),
+        type: definition.type,
+        ...(options?.location ? { location: options.location } : {}),
+        data,
+      } as EventV2.Payload<typeof definition>
+      yield* Effect.forEach(listeners, (listener) => listener(event), { discard: true })
       yield* PubSub.publish(pubsub, event as EventV2.Payload)
       return event
     })
@@ -37,18 +51,25 @@ const makeEvents = Effect.gen(function* () {
     Stream.fromPubSub(pubsub).pipe(
       Stream.filter((event): event is EventV2.Payload<typeof definition> => event.type === definition.type),
     )
-  return EventV2.Service.of({
+  return Object.assign(EventV2.Service.of({
     publish,
     subscribe,
     all: () => Stream.fromPubSub(pubsub),
     durable: () => Stream.empty,
-    listen: () => Effect.succeed(Effect.void),
+    listen: (listener) =>
+      Effect.sync(() => {
+        listeners.push(listener)
+        return Effect.sync(() => {
+          const index = listeners.indexOf(listener)
+          if (index >= 0) listeners.splice(index, 1)
+        })
+      }),
     project: () => Effect.void,
     replay: () => Effect.void,
     replayAll: () => Effect.succeed(undefined),
     remove: () => Effect.void,
     claim: () => Effect.void,
-  })
+  }), { listenerCount: () => listeners.length })
 })
 
 const makeTrackedEvents = Effect.gen(function* () {
@@ -108,6 +129,57 @@ function makeSession(outputs: string[] = []) {
   return { service, prompts }
 }
 
+function makeQuestions(events: EventV2.Interface) {
+  const pending = new Map<QuestionV2.ID, Deferred.Deferred<ReadonlyArray<QuestionV2.Answer>, QuestionV2.RejectedError>>()
+  const requests = new Map<QuestionV2.ID, QuestionV2.Request>()
+  const replies: QuestionV2.ReplyInput[] = []
+  const service = QuestionV2.Service.of({
+    ask: (input) =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const id = QuestionV2.ID.create()
+          const deferred = yield* Deferred.make<ReadonlyArray<QuestionV2.Answer>, QuestionV2.RejectedError>()
+          const request = { id, ...input }
+          pending.set(id, deferred)
+          requests.set(id, request)
+          return yield* events.publish(QuestionV2.Event.Asked, request, { location }).pipe(
+            Effect.andThen(restore(Deferred.await(deferred))),
+            Effect.ensuring(
+              Effect.sync(() => {
+                pending.delete(id)
+                requests.delete(id)
+              }),
+            ),
+          )
+        }),
+      ),
+    reply: (input) =>
+      Effect.gen(function* () {
+        const deferred = pending.get(input.requestID)
+        if (!deferred) return yield* new QuestionV2.NotFoundError({ requestID: input.requestID })
+        replies.push(input)
+        yield* Deferred.succeed(deferred, input.answers)
+      }),
+    reject: unused,
+    list: () => Effect.sync(() => Array.from(requests.values())),
+  })
+  return { service, pending, replies }
+}
+
+function makeQuestionLocationMap(
+  questions: QuestionV2.Interface,
+  layer: Layer.Layer<LocationServices, LocationError> = Layer.succeed(
+    QuestionV2.Service,
+    questions,
+  ) as unknown as Layer.Layer<LocationServices, LocationError>,
+) {
+  return LayerMap.make<Location.Ref, Layer.Layer<LocationServices, LocationError>>(
+    () => layer,
+  ).pipe(
+    Effect.map(LocationServiceMap.Service.of),
+  )
+}
+
 function makeFailingPromptSession(error: SessionV2.NotFoundError | SessionV2.PromptConflictError) {
   const fake = makeSession()
   const service = SessionV2.Service.of({ ...fake.service, prompt: () => Effect.fail(error) })
@@ -146,6 +218,26 @@ function makeBlockingPromptSession(started: Deferred.Deferred<void>, release: De
   return { service, prompts: fake.prompts }
 }
 
+function makeQuestionAskingPromptSession(questions: QuestionV2.Interface, info: QuestionV2.Info) {
+  const fake = makeSession(["not done"])
+  let asked = false
+  const service = SessionV2.Service.of({
+    ...fake.service,
+    prompt: (input) =>
+      Effect.gen(function* () {
+        const admitted = yield* fake.service.prompt(input)
+        if (!asked) {
+          asked = true
+          yield* questions.ask({ sessionID, questions: [info] }).pipe(
+            Effect.catchTag("QuestionV2.RejectedError", () => Effect.die("question rejected")),
+          )
+        }
+        return admitted
+      }),
+  })
+  return { service, prompts: fake.prompts }
+}
+
 const turnEnded = (events: EventV2.Interface) =>
   events.publish(SessionEvent.Step.Ended, {
     sessionID,
@@ -179,7 +271,185 @@ const promptEvent = (
   })
 
 describe("GoalSupervisor", () => {
-  it.effect("starts active state and emits the first steer prompt", () =>
+  it.effect("leaves questions pending when location provisioning fails", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(
+        questions.service,
+        Layer.effect(QuestionV2.Service, Effect.die("location unavailable")) as unknown as Layer.Layer<
+          LocationServices,
+          LocationError
+        >,
+      )
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      const asking = yield* questions.service
+        .ask({ sessionID, questions: [{ question: "Continue?", header: "Next", options: [] }] })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+
+      expect(yield* questions.service.list()).toHaveLength(1)
+      expect(questions.replies).toEqual([])
+      yield* Fiber.interrupt(asking)
+    }),
+  )
+
+  it.effect("does not reply after a delayed location service outlives its Goal", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const locations = yield* makeQuestionLocationMap(
+        questions.service,
+        Layer.effect(
+          QuestionV2.Service,
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as(QuestionV2.Service.of(questions.service)),
+          ),
+        ) as unknown as Layer.Layer<LocationServices, LocationError>,
+      )
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "first" })
+      const asking = yield* questions.service
+        .ask({ sessionID, questions: [{ question: "Continue?", header: "Next", options: [] }] })
+        .pipe(Effect.forkScoped)
+      yield* Deferred.await(started)
+      yield* goals.start({ sessionID, goal: "replacement" })
+      yield* Deferred.succeed(release, undefined)
+      yield* Effect.yieldNow
+
+      expect(yield* questions.service.list()).toHaveLength(1)
+      expect(questions.replies).toEqual([])
+      yield* Fiber.interrupt(asking)
+    }),
+  )
+
+  it.effect("keeps every recommended option for multiple-selection questions", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      expect(
+        yield* questions.service.ask({
+          sessionID,
+          questions: [
+            {
+              question: "Which tasks?",
+              header: "Tasks",
+              multiple: true,
+              options: [
+                { label: "One", description: "First", recommended: true },
+                { label: "Two", description: "Second", recommended: true },
+                { label: "Three", description: "Third" },
+              ],
+            },
+          ],
+        }),
+      ).toEqual([["One", "Two"]])
+    }),
+  )
+
+  it.effect("settles a recommended V2 question during the first goal prompt", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeQuestionAskingPromptSession(questions.service, {
+        question: "Which approach?",
+        header: "Approach",
+        options: [
+          { label: "Recommended", description: "Use the recommended path", recommended: true },
+          { label: "Alternative", description: "Use another path" },
+        ],
+      })
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+
+      expect(questions.pending.size).toBe(0)
+      expect(questions.replies[0]?.answers).toEqual([["Recommended"]])
+      expect(fake.prompts).toHaveLength(1)
+    }),
+  )
+
+  it.effect("uses the fallback answer for an active V2 question without options", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      expect(
+        yield* questions.service.ask({
+          sessionID,
+          questions: [{ question: "What now?", header: "Next", options: [] }],
+        }),
+      ).toEqual([["Use your best judgment from the goal and current context, then continue."]])
+    }),
+  )
+
+  it.effect("leaves inactive and other-session V2 questions pending", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* goals.stop(sessionID)
+      const inactive = yield* questions.service
+        .ask({ sessionID, questions: [{ question: "Inactive?", header: "State", options: [] }] })
+        .pipe(Effect.forkScoped)
+      const other = yield* questions.service
+        .ask({ sessionID: otherSessionID, questions: [{ question: "Other?", header: "State", options: [] }] })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+
+      expect(yield* questions.service.list()).toHaveLength(2)
+      yield* Fiber.interrupt(inactive)
+      yield* Fiber.interrupt(other)
+    }),
+  )
+
+  it.effect("starts active state and emits the raw goal as the first steer prompt", () =>
     Effect.gen(function* () {
       const fake = makeSession()
       const events = yield* makeEvents
@@ -195,10 +465,31 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts).toHaveLength(1)
       expect(fake.prompts[0]).toMatchObject({ sessionID, delivery: "steer", resume: true })
       expect(fake.prompts[0]?.id).toBeDefined()
-      expect(fake.prompts[0]?.prompt.text).toContain("ship task 4")
-      expect(fake.prompts[0]?.prompt.text).toContain("Use todowrite to maintain a goal-oriented task list")
-      expect(fake.prompts[0]?.prompt.text).toContain("Do not ask the user for approval or clarification")
+      expect(fake.prompts[0]?.prompt.text).toBe("ship task 4")
       expect(fake.prompts[0]?.prompt.text).not.toContain("Iteration")
+    }),
+  )
+
+  it.effect("uses the supplied message ID only for the initial raw-goal prompt", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["not done"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+      const supplied = SessionMessage.ID.create()
+
+      yield* goals.start({ sessionID, goal: "supplied", messageID: supplied })
+      yield* Effect.yieldNow
+      yield* turnEnded(events)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts[0]?.id).toBe(supplied)
+      expect(fake.prompts[0]?.prompt.text).toBe("supplied")
+      expect(fake.prompts[1]?.prompt.text).toContain("Continue working toward the goal.")
+      expect(fake.prompts[1]?.id).toBeDefined()
+      expect(fake.prompts[1]?.id).not.toBe(supplied)
     }),
   )
 
@@ -219,6 +510,7 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts[1]?.prompt.text).toContain("Answer only YES or NO")
       expect(fake.prompts[1]?.prompt.text).toContain("latest user instruction")
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, goal: "finish", iteration: 1 })
+      expect(events.listenerCount()).toBe(0)
     }),
   )
 
@@ -484,6 +776,71 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts).toHaveLength(2)
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, iteration: 2, cap: 2 })
       expect(yield* Deferred.isDone(tracked.finalized)).toBe(true)
+    }),
+  )
+
+  it.effect("retires the question listener after cap exhaustion and registers one for a new goal", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "finished", cap: 0 })
+      yield* Effect.yieldNow
+      expect(events.listenerCount()).toBe(0)
+      const pending = yield* questions.service
+        .ask({ sessionID, questions: [{ question: "Manual?", header: "State", options: [] }] })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+
+      expect(yield* questions.service.list()).toHaveLength(1)
+      yield* goals.start({ sessionID, goal: "restart" })
+      expect(events.listenerCount()).toBe(1)
+      expect(
+        yield* questions.service.ask({
+          sessionID,
+          questions: [
+            {
+              question: "Automatic?",
+              header: "State",
+              options: [{ label: "Yes", description: "Recommended", recommended: true }],
+            },
+          ],
+        }),
+      ).toEqual([["Yes"]])
+      yield* Fiber.interrupt(pending)
+    }),
+  )
+
+  it.effect("retires the question listener after a failed step", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      yield* goals.start({ sessionID, goal: "failed" })
+      yield* turnFailed(events)
+      yield* Effect.yieldNow
+      expect(events.listenerCount()).toBe(0)
+      const pending = yield* questions.service
+        .ask({ sessionID, questions: [{ question: "Manual?", header: "State", options: [] }] })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+
+      expect(yield* questions.service.list()).toHaveLength(1)
+      yield* Fiber.interrupt(pending)
     }),
   )
 
