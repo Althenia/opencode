@@ -21,13 +21,16 @@ const otherSessionID = SessionV2.ID.make("ses_other_goal_test")
 const location = Location.Ref.make({ directory: AbsolutePath.make("/tmp/opencode-goal-test") })
 const unused = () => Effect.die("unused")
 
-function assistant(text: string): SessionMessage.Assistant {
+function assistant(text: string, reasoning?: string): SessionMessage.Assistant {
   return {
     id: SessionMessage.ID.create(),
     type: "assistant",
     agent: "build",
     model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") },
-    content: [{ type: "text", id: "txt", text }],
+    content: [
+      { type: "text", id: "txt", text },
+      ...(reasoning ? [{ type: "reasoning" as const, id: "rsn", text: reasoning }] : []),
+    ],
     time: { created: DateTime.makeUnsafe(1) },
   }
 }
@@ -84,20 +87,27 @@ const makeTrackedEvents = Effect.gen(function* () {
   }
 })
 
-function makeSession(outputs: string[] = []) {
+function makeSession(outputs: Array<string | { text: string; reasoning: string }> = []) {
   const prompts: SessionV2.Interface["prompt"] extends (input: infer Input) => Effect.Effect<unknown, unknown, unknown>
     ? Input[]
     : never[] = []
+  const admitted = new Array<SessionInput.Admitted>()
   let messageReads = 0
+  let promoted = 0
   const service = SessionV2.Service.of({
     list: unused,
     create: unused,
     get: unused,
     messages: () =>
       Effect.sync(() => {
-        const text = outputs[Math.min(messageReads, Math.max(outputs.length - 1, 0))] ?? ""
+        const output = outputs[Math.min(messageReads, Math.max(outputs.length - 1, 0))] ?? ""
         messageReads++
-        return [assistant(text)]
+        return [
+          assistant(
+            typeof output === "string" ? output : output.text,
+            typeof output === "string" ? undefined : output.reasoning,
+          ),
+        ]
       }),
     message: unused,
     context: unused,
@@ -108,7 +118,7 @@ function makeSession(outputs: string[] = []) {
     prompt: (input) =>
       Effect.sync(() => {
         prompts.push(input)
-        return SessionInput.Admitted.make({
+        const result = SessionInput.Admitted.make({
           admittedSeq: prompts.length - 1,
           id: input.id ?? SessionMessage.ID.create(),
           sessionID: input.sessionID,
@@ -116,6 +126,8 @@ function makeSession(outputs: string[] = []) {
           delivery: input.delivery ?? "steer",
           timeCreated: DateTime.makeUnsafe(prompts.length),
         })
+        admitted.push(result)
+        return result
       }),
     shell: unused,
     skill: unused,
@@ -126,7 +138,14 @@ function makeSession(outputs: string[] = []) {
     interrupt: () => Effect.void,
     revert: { stage: unused, clear: unused, commit: unused },
   })
-  return { service, prompts }
+  const promoteNext = (events: EventV2.Interface) =>
+    Effect.suspend(() => {
+      const input = admitted[promoted]
+      if (!input) return Effect.void
+      promoted++
+      return promptEvent(events, SessionEvent.Prompted, input.id, input.prompt.text)
+    })
+  return { service, prompts, promoteNext }
 }
 
 function makeQuestions(events: EventV2.Interface) {
@@ -183,7 +202,7 @@ function makeQuestionLocationMap(
 function makeFailingPromptSession(error: SessionV2.NotFoundError | SessionV2.PromptConflictError) {
   const fake = makeSession()
   const service = SessionV2.Service.of({ ...fake.service, prompt: () => Effect.fail(error) })
-  return { service, prompts: fake.prompts }
+  return { ...fake, service }
 }
 
 function makePublishingPromptSession(events: EventV2.Interface, outputs: string[] = []) {
@@ -194,11 +213,11 @@ function makePublishingPromptSession(events: EventV2.Interface, outputs: string[
       Effect.gen(function* () {
         const admitted = yield* fake.service.prompt(input)
         yield* promptEvent(events, SessionEvent.PromptAdmitted, admitted.id, admitted.prompt.text)
-        yield* turnEnded(events)
+        yield* turnEnded(events, fake)
         return admitted
       }),
   })
-  return { service, prompts: fake.prompts }
+  return { ...fake, service }
 }
 
 function makeBlockingPromptSession(started: Deferred.Deferred<void>, release: Deferred.Deferred<void>) {
@@ -215,7 +234,7 @@ function makeBlockingPromptSession(started: Deferred.Deferred<void>, release: De
       )
     },
   })
-  return { service, prompts: fake.prompts }
+  return { ...fake, service }
 }
 
 function makeQuestionAskingPromptSession(questions: QuestionV2.Interface, info: QuestionV2.Info) {
@@ -235,26 +254,43 @@ function makeQuestionAskingPromptSession(questions: QuestionV2.Interface, info: 
         return admitted
       }),
   })
-  return { service, prompts: fake.prompts }
+  return { ...fake, service }
 }
 
-const turnEnded = (events: EventV2.Interface) =>
+const stepStarted = (events: EventV2.Interface, assistantMessageID = SessionMessage.ID.create()) =>
+  events
+    .publish(SessionEvent.Step.Started, {
+      sessionID,
+      timestamp: DateTime.makeUnsafe(1),
+      assistantMessageID,
+      agent: "build",
+      model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") },
+    })
+    .pipe(Effect.as(assistantMessageID))
+
+const stepEnded = (events: EventV2.Interface, assistantMessageID: SessionMessage.ID) =>
   events.publish(SessionEvent.Step.Ended, {
     sessionID,
     timestamp: DateTime.makeUnsafe(1),
-    assistantMessageID: SessionMessage.ID.create(),
+    assistantMessageID,
     finish: "stop",
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   })
 
-const turnFailed = (events: EventV2.Interface) =>
+const turnEnded = (events: EventV2.Interface, fake: Pick<ReturnType<typeof makeSession>, "promoteNext">) =>
+  fake.promoteNext(events).pipe(Effect.andThen(stepStarted(events)), Effect.flatMap((id) => stepEnded(events, id)))
+
+const stepFailed = (events: EventV2.Interface, assistantMessageID: SessionMessage.ID) =>
   events.publish(SessionEvent.Step.Failed, {
     sessionID,
     timestamp: DateTime.makeUnsafe(1),
-    assistantMessageID: SessionMessage.ID.create(),
+    assistantMessageID,
     error: { type: "unknown", message: "failed" },
   })
+
+const turnFailed = (events: EventV2.Interface, fake: Pick<ReturnType<typeof makeSession>, "promoteNext">) =>
+  fake.promoteNext(events).pipe(Effect.andThen(stepStarted(events)), Effect.flatMap((id) => stepFailed(events, id)))
 
 const promptEvent = (
   events: EventV2.Interface,
@@ -482,7 +518,7 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "supplied", messageID: supplied })
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts[0]?.id).toBe(supplied)
@@ -545,17 +581,265 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "finish" })
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(3)
       expect(fake.prompts[2]?.prompt.text).toContain("Answer only YES or NO")
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, goal: "finish", iteration: 2 })
       expect(yield* Deferred.isDone(tracked.finalized)).toBe(true)
+    }),
+  )
+
+  it.effect("continues after an assistant requests approval", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["I need your approval to continue."])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]?.prompt.text).toContain("The prior assistant response requested user approval.")
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, iteration: 2 })
+    }),
+  )
+
+  it.effect("verifies from visible YES even when hidden reasoning disagrees", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE", { text: "YES", reasoning: "NO" }])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: false, goal: "finish" })
+      expect(fake.prompts).toHaveLength(2)
+    }),
+  )
+
+  it.effect("does not verify from hidden YES when visible text says NO", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE", { text: "NO", reasoning: "YES" }])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, goal: "finish" })
+      expect(fake.prompts).toHaveLength(3)
+    }),
+  )
+
+  it.effect("ignores a completion marker that appears only in hidden reasoning", () =>
+    Effect.gen(function* () {
+      const fake = makeSession([{ text: "still working", reasoning: "GOAL COMPLETE" }])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts[1]?.prompt.text).toContain("Continue working toward the goal.")
+      expect(fake.prompts[1]?.prompt.text).not.toContain("Answer only YES or NO")
+    }),
+  )
+
+  it.effect("detects a visible completion marker beyond bounded prompt evidence", () =>
+    Effect.gen(function* () {
+      const fake = makeSession([`${"x".repeat(1_001)}GOAL COMPLETE`])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts[1]?.prompt.text).toContain("Answer only YES or NO")
+    }),
+  )
+
+  it.effect("ignores a stale step settlement after a replacement start", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "first" })
+      yield* Effect.yieldNow
+      yield* fake.promoteNext(events)
+      const stale = yield* stepStarted(events)
+      yield* Effect.yieldNow
+      yield* goals.start({ sessionID, goal: "replacement" })
+      yield* Effect.yieldNow
+      yield* stepEnded(events, stale)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(2)
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, goal: "replacement", iteration: 1 })
+    }),
+  )
+
+  it.effect("ignores a stale step that starts before the replacement prompt is promoted", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "first" })
+      yield* Effect.yieldNow
+      yield* fake.promoteNext(events)
+      yield* goals.start({ sessionID, goal: "replacement" })
+      yield* Effect.yieldNow
+      const stale = yield* stepStarted(events)
+      yield* stepEnded(events, stale)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(2)
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, goal: "replacement", iteration: 1 })
+    }),
+  )
+
+  it.effect("ignores a pre-steer settlement after the steer is promoted", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* fake.promoteNext(events)
+      const stale = yield* stepStarted(events)
+      const externalID = SessionMessage.ID.create()
+      yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "also update docs")
+      yield* promptEvent(events, SessionEvent.Prompted, externalID, "also update docs")
+      yield* stepEnded(events, stale)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(1)
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, goal: "finish", iteration: 0 })
+    }),
+  )
+
+  it.effect("allows user escalation only for true blocker paths", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["not done"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts[1]?.prompt.text).toContain("configured permission")
+      expect(fake.prompts[1]?.prompt.text).toContain("irrecoverable failure or blocker")
+      expect(fake.prompts[1]?.prompt.text).not.toContain("Do not ask the user")
+    }),
+  )
+
+  it.effect("ignores approval-like language in hidden reasoning", () =>
+    Effect.gen(function* () {
+      const fake = makeSession([{ text: "GOAL COMPLETE", reasoning: "Can I use this approach?" }])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]?.prompt.text).toContain("Answer only YES or NO")
+    }),
+  )
+
+  it.effect("does not reject a confirmation statement", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE. Confirmation: migrations applied."])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]?.prompt.text).toContain("Answer only YES or NO")
+    }),
+  )
+
+  it.effect("rejects approval prose before goal completion verification", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE. Can you approve this?"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]?.prompt.text).toContain("The prior assistant response requested user approval.")
+      expect(fake.prompts[1]?.prompt.text).not.toContain("Answer only YES or NO")
     }),
   )
 
@@ -570,14 +854,14 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "finish" })
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
       const firstContinuation = fake.prompts[1]?.prompt.text
 
       const externalID = SessionMessage.ID.create()
       yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "also update the changelog")
       yield* promptEvent(events, SessionEvent.Prompted, externalID, "also update the changelog")
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
       const secondContinuation = fake.prompts[2]?.prompt.text
 
@@ -599,9 +883,9 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "finish" })
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts[2]?.prompt.text).toContain("GOAL COMPLETE: tests pass but docs are missing")
@@ -621,7 +905,7 @@ describe("GoalSupervisor", () => {
       yield* goals.start({ sessionID, goal: "finish" })
       yield* Effect.yieldNow
       yield* goals.stop(sessionID)
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(1)
@@ -642,13 +926,13 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
       const externalID = SessionMessage.ID.create()
       yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "new goal")
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(1)
 
       yield* promptEvent(events, SessionEvent.Prompted, externalID, "new goal")
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(2)
@@ -670,17 +954,17 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "old goal" })
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
       expect(fake.prompts).toHaveLength(2)
 
       const externalID = SessionMessage.ID.create()
       yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "new goal")
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
       yield* promptEvent(events, SessionEvent.Prompted, externalID, "new goal")
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(yield* goals.status(sessionID)).toMatchObject({ active: true, goal: "old goal", iteration: 1 })
@@ -706,7 +990,7 @@ describe("GoalSupervisor", () => {
       yield* goals.stop(sessionID)
       yield* Deferred.succeed(release, undefined)
       const result = yield* Fiber.join(starting)
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(result.active).toBe(false)
@@ -727,7 +1011,31 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "finish" })
       yield* Effect.yieldNow
-      yield* turnFailed(events)
+      yield* turnFailed(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(1)
+      expect(yield* goals.status(sessionID)).toBeUndefined()
+      expect(yield* Deferred.isDone(tracked.finalized)).toBe(true)
+    }),
+  )
+
+  it.effect("fails the active step when an external steer is admitted but not promoted", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["not done"])
+      const tracked = yield* makeTrackedEvents
+      const events = tracked.service
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* fake.promoteNext(events)
+      const active = yield* stepStarted(events)
+      yield* promptEvent(events, SessionEvent.PromptAdmitted, SessionMessage.ID.create(), "also update docs")
+      yield* stepFailed(events, active)
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(1)
@@ -747,7 +1055,7 @@ describe("GoalSupervisor", () => {
       )
 
       yield* goals.start({ sessionID, goal: "finish", cap: 1 })
-      yield* turnFailed(events)
+      yield* turnFailed(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(1)
@@ -768,9 +1076,9 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "finish", cap: 2 })
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(2)
@@ -831,7 +1139,7 @@ describe("GoalSupervisor", () => {
       )
 
       yield* goals.start({ sessionID, goal: "failed" })
-      yield* turnFailed(events)
+      yield* turnFailed(events, fake)
       yield* Effect.yieldNow
       expect(events.listenerCount()).toBe(0)
       const pending = yield* questions.service
@@ -871,14 +1179,14 @@ describe("GoalSupervisor", () => {
 
       yield* goals.start({ sessionID, goal: "finish" })
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
       expect(yield* goals.status(sessionID)).toMatchObject({ active: true, iteration: 2 })
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
-      yield* turnEnded(events)
+      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, iteration: 2 })

@@ -115,6 +115,29 @@ describe("session.retry.delay", () => {
       })
     }),
   )
+
+  it.instance("policy stops retrying repeated transport header timeouts", () =>
+    Effect.gen(function* () {
+      const error = MessageV2.fromError(new ProviderError.HeaderTimeoutError(10_000), { providerID })
+      let retries = 0
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: retryProvider,
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: () => Effect.sync(() => retries++),
+        }),
+      )
+
+      yield* step(error)
+      const stopped = yield* step(error).pipe(
+        Effect.as(false),
+        Effect.catchCause(() => Effect.succeed(true)),
+      )
+
+      expect(stopped).toBe(true)
+      expect(retries).toBe(1)
+    }),
+  )
 })
 
 describe("session.retry.retryable", () => {

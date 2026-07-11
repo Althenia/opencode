@@ -229,6 +229,30 @@ export const {
         case "server.instance.disposed":
           void bootstrap()
           break
+        case "permission.v2.replied":
+          endAutomaticReply(automaticPermissionReplies, event.properties.sessionID, event.properties.requestID)
+          break
+
+        case "permission.v2.asked": {
+          const request = event.properties
+          if (permission.mode !== "auto") break
+          if (!beginAutomaticReply(automaticPermissionReplies, request.sessionID, request.id)) break
+          void sdk.client.v2.session.permission
+            .reply(
+              {
+                sessionID: request.sessionID,
+                requestID: request.id,
+                reply: "once",
+              },
+              { throwOnError: true },
+            )
+            .catch(() => {
+              if (!endAutomaticReply(automaticPermissionReplies, request.sessionID, request.id)) return
+              warnAutomaticReplyFailed()
+            })
+          break
+        }
+
         case "permission.replied": {
           endAutomaticReply(automaticPermissionReplies, event.properties.sessionID, event.properties.requestID)
           const requests = store.permission[event.properties.sessionID]
@@ -272,6 +296,36 @@ export const {
             break
           }
           upsertPermission(request)
+          break
+        }
+
+        case "question.v2.replied":
+        case "question.v2.rejected":
+          endAutomaticReply(automaticQuestionReplies, event.properties.sessionID, event.properties.requestID)
+          break
+
+        case "question.v2.asked": {
+          const request = event.properties
+          if (goal.answering(request.sessionID)) break
+          if (permission.mode !== "auto") break
+          const answers = request.questions.map((question) => autoAnswer(question))
+          if (answers.some((answer) => answer === undefined)) break
+          if (!beginAutomaticReply(automaticQuestionReplies, request.sessionID, request.id)) break
+          void sdk.client.v2.session.question
+            .reply(
+              {
+                sessionID: request.sessionID,
+                requestID: request.id,
+                questionV2Reply: {
+                  answers: answers.filter((answer): answer is string[] => answer !== undefined),
+                },
+              },
+              { throwOnError: true },
+            )
+            .catch(() => {
+              if (!endAutomaticReply(automaticQuestionReplies, request.sessionID, request.id)) return
+              warnAutomaticReplyFailed()
+            })
           break
         }
 

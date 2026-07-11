@@ -31,6 +31,7 @@ type PromptError = SessionV2.NotFoundError | SessionV2.PromptConflictError
 type GoalEvent =
   | EventV2.Payload<typeof SessionEvent.PromptAdmitted>
   | EventV2.Payload<typeof SessionEvent.Prompted>
+  | EventV2.Payload<typeof SessionEvent.Step.Started>
   | EventV2.Payload<typeof SessionEvent.Step.Ended>
   | EventV2.Payload<typeof SessionEvent.Step.Failed>
 
@@ -49,6 +50,7 @@ type ActiveGoal = {
   latestExternalSteer?: string
   claimedCompletion?: string
   failedVerification?: string
+  rejectedApproval?: string
   readonly scope: Scope.Closeable
   readonly supervisorPrompts: Set<SessionMessage.ID>
 }
@@ -78,23 +80,35 @@ export const make = Effect.gen(function* () {
       return next
     })
 
-  const latestAssistantText = (sessionID: SessionSchema.ID) =>
+  const latestAssistantResult = (sessionID: SessionSchema.ID) =>
     sessions.messages({ sessionID, limit: 1, order: "desc" }).pipe(
-      Effect.map((messages) =>
-        messages
+      Effect.map((messages) => {
+        const content = messages
           .filter((message): message is SessionMessage.Assistant => message.type === "assistant")
           .flatMap((message) => message.content)
-          .filter((content): content is SessionMessage.AssistantText | SessionMessage.AssistantReasoning =>
-            content.type === "text" || content.type === "reasoning",
-          )
-          .map((content) => content.text)
-          .join("\n"),
-      ),
+        return {
+          text: content
+            .filter((content): content is SessionMessage.AssistantText => content.type === "text")
+            .map((content) => content.text)
+            .join("\n"),
+          all: content
+            .filter((content): content is SessionMessage.AssistantText | SessionMessage.AssistantReasoning =>
+              content.type === "text" || content.type === "reasoning",
+            )
+            .map((content) => content.text)
+            .join("\n"),
+        }
+      }),
     )
 
   const isReadyForVerification = (text: string) => text.includes("GOAL COMPLETE")
 
   const verified = (text: string) => /^\s*YES\s*$/i.test(text)
+
+  const isApprovalRequested = (text: string) =>
+    /(?:^|[.!?]\s+)(?:please\s+)?(?:approve|confirm|clarify|sign[ -]?off)\b|\b(?:need|await(?:ing)?|wait(?:ing)?\s+for|require)\s+(?:your\s+)?(?:approval|confirmation|sign[ -]?off)\b|\b(?:do|would|can|could|will|shall|may|should)\s+(?:you|we|i)\b[\s\S]{0,120}\?|\b(?:is|are)\s+(?:it|this|that)\s+(?:okay|ok|acceptable)\b[\s\S]{0,120}\?|\b(?:does|is)\s+this\s+(?:look|seem|sound)\s+(?:good|right|okay|ok)\b[\s\S]{0,120}\?/im.test(
+      text,
+    )
 
   const bounded = (text: string) => text.slice(0, EVIDENCE_LIMIT)
 
@@ -107,9 +121,11 @@ export const make = Effect.gen(function* () {
       active.latestAssistantResult && !active.claimedCompletion && `Latest assistant result: ${active.latestAssistantResult}`,
       active.claimedCompletion && `Captured claimed completion: ${active.claimedCompletion}`,
       active.failedVerification && `Failed verification: ${active.failedVerification}`,
+      active.rejectedApproval &&
+        "The prior assistant response requested user approval. Continue autonomously; the user has pre-approved ordinary decisions. Escalate only for a configured permission request, explicit consent before a destructive operation, or an irrecoverable failure or blocker.",
       "Inspect the current tool and test evidence in the transcript before continuing.",
       "Use todowrite to maintain a goal-oriented task list: derive remaining work from the goal, latest user instructions, and current evidence; update statuses as work completes; execute the highest-priority unblocked item.",
-      "Do not ask the user for approval or clarification. Use best judgment from the current context and continue.",
+      "Handle ordinary approval and clarification autonomously using best judgment. Ask the user only for a configured permission request, explicit consent before a destructive operation, or an irrecoverable failure or blocker that cannot be resolved from the current context.",
       "Continue working toward the goal.",
       "When the goal is complete, include GOAL COMPLETE.",
     ]
@@ -128,6 +144,7 @@ export const make = Effect.gen(function* () {
   const isGoalEvent = (event: EventV2.Payload): event is GoalEvent =>
     event.type === SessionEvent.PromptAdmitted.type ||
     event.type === SessionEvent.Prompted.type ||
+    event.type === SessionEvent.Step.Started.type ||
     event.type === SessionEvent.Step.Ended.type ||
     event.type === SessionEvent.Step.Failed.type
 
@@ -180,6 +197,9 @@ export const make = Effect.gen(function* () {
     queue: Queue.Queue<GoalEvent>,
   ) {
     const pendingExternal = new Set<SessionMessage.ID>()
+    const seenAssistantMessages = new Set<SessionMessage.ID>()
+    let activeAssistantMessageID: SessionMessage.ID | undefined
+    let stepEligible = false
     let turn: "work" | "verification" | "external" = "work"
     while (true) {
       const event = yield* Queue.take(queue)
@@ -192,17 +212,25 @@ export const make = Effect.gen(function* () {
         active.latestExternalSteer = bounded(event.data.prompt.text)
         active.claimedCompletion = undefined
         active.failedVerification = undefined
+        active.rejectedApproval = undefined
         turn = "external"
         continue
       }
 
       if (event.type === SessionEvent.Prompted.type) {
-        if (active.supervisorPrompts.delete(event.data.messageID) || event.data.delivery !== "steer") continue
-        pendingExternal.delete(event.data.messageID)
+        if (event.data.delivery !== "steer") continue
+        if (active.supervisorPrompts.delete(event.data.messageID)) {
+          stepEligible = true
+          continue
+        }
+        if (!pendingExternal.delete(event.data.messageID)) continue
         active.latestExternalSteer = bounded(event.data.prompt.text)
         active.latestAssistantResult = undefined
         active.claimedCompletion = undefined
         active.failedVerification = undefined
+        active.rejectedApproval = undefined
+        activeAssistantMessageID = undefined
+        stepEligible = true
         turn = "external"
         yield* setState(sessionID, owner, (state) => ({
           ...state,
@@ -212,16 +240,34 @@ export const make = Effect.gen(function* () {
         continue
       }
 
+      if (event.type === SessionEvent.Step.Started.type) {
+        if (seenAssistantMessages.has(event.data.assistantMessageID)) continue
+        seenAssistantMessages.add(event.data.assistantMessageID)
+        if (!stepEligible) continue
+        stepEligible = false
+        activeAssistantMessageID = event.data.assistantMessageID
+        continue
+      }
+
       if (event.type === SessionEvent.Step.Failed.type) {
+        if (activeAssistantMessageID !== event.data.assistantMessageID) continue
+        activeAssistantMessageID = undefined
         yield* retire(sessionID, owner, true)
         return
       }
 
-      if (event.type !== SessionEvent.Step.Ended.type || pendingExternal.size > 0) continue
+      if (
+        event.type !== SessionEvent.Step.Ended.type ||
+        pendingExternal.size > 0 ||
+        activeAssistantMessageID !== event.data.assistantMessageID
+      )
+        continue
+      activeAssistantMessageID = undefined
 
       if (turn === "verification") {
-        const verification = bounded(yield* latestAssistantText(sessionID))
-        if (verified(verification)) {
+        const latest = yield* latestAssistantResult(sessionID)
+        const verification = bounded(latest.all)
+        if (verified(latest.text)) {
           yield* retire(sessionID, owner)
           return
         }
@@ -232,8 +278,16 @@ export const make = Effect.gen(function* () {
         continue
       }
 
-      active.latestAssistantResult = bounded(yield* latestAssistantText(sessionID))
-      if (isReadyForVerification(active.latestAssistantResult)) {
+      const latest = yield* latestAssistantResult(sessionID)
+      active.latestAssistantResult = bounded(latest.all)
+      active.rejectedApproval = isApprovalRequested(latest.text) ? active.latestAssistantResult : undefined
+      if (active.rejectedApproval) {
+        active.claimedCompletion = undefined
+        turn = "work"
+        if (!(yield* continueGoal(sessionID, owner))) return
+        continue
+      }
+      if (isReadyForVerification(latest.text)) {
         if (goals.get(sessionID) !== owner || !owner.state.active) return
         active.claimedCompletion = active.latestAssistantResult
         turn = "verification"

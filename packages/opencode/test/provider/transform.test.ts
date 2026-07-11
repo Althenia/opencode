@@ -3401,6 +3401,13 @@ describe("ProviderTransform.variants", () => {
     for (const testCase of [
       { id: "openai/o3-mini", efforts: ["none", "minimal", "low", "medium", "high", "xhigh"] },
       { id: "openai/gpt-5.4", efforts: ["none", "low", "medium", "high", "xhigh"] },
+      { id: "openai/gpt-5.6", efforts: ["none", "low", "medium", "high", "xhigh", "max"] },
+      { id: "openai/gpt-5.6-sol", efforts: ["none", "low", "medium", "high", "xhigh", "max", "ultra"] },
+      { id: "openai/gpt-5.6-terra", efforts: ["none", "low", "medium", "high", "xhigh", "max", "ultra"] },
+      { id: "openai/gpt-5.6-luna", efforts: ["none", "low", "medium", "high", "xhigh", "max", "ultra"] },
+      { id: "openai/gpt-5.6-pro", efforts: ["medium", "high", "xhigh", "max"] },
+      { id: "openai/gpt-5.6-codex", efforts: ["none", "low", "medium", "high", "xhigh", "max"] },
+      { id: "openai/gpt-5.6-chat", efforts: ["medium", "max"] },
       { id: "openai/gpt-5-pro", efforts: ["high"] },
       { id: "openai/gpt-5.5-pro", efforts: ["medium", "high", "xhigh"] },
       { id: "openai/gpt-5.2-codex", efforts: ["low", "medium", "high", "xhigh"] },
@@ -3424,6 +3431,48 @@ describe("ProviderTransform.variants", () => {
         expect(Object.keys(result)).toEqual(testCase.efforts)
       })
     }
+
+    test("GPT-5.6 Sol, Terra, and Luna use the ultra OpenRouter reasoning payload", () => {
+      for (const id of ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "openai/gpt-5.6-luna"]) {
+        const result = ProviderTransform.variants(
+          createMockModel({
+            id: `openrouter/${id}`,
+            providerID: "openrouter",
+            api: { id, url: "https://openrouter.ai", npm: "@openrouter/ai-sdk-provider" },
+          }),
+        )
+        expect(result.ultra).toEqual({ reasoning: { effort: "ultra" } })
+      }
+    })
+
+    test("all GPT-5.6 OpenRouter models use the max reasoning payload", () => {
+      for (const id of ["openai/gpt-5.6", "openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "openai/gpt-5.6-luna", "openai/gpt-5.6-solace"]) {
+        const result = ProviderTransform.variants(
+          createMockModel({
+            id: `openrouter/${id}`,
+            providerID: "openrouter",
+            api: {
+              id,
+              url: "https://openrouter.ai",
+              npm: "@openrouter/ai-sdk-provider",
+            },
+          }),
+        )
+        expect(result.max).toEqual({ reasoning: { effort: "max" } })
+      }
+    })
+
+    test("GPT-5.6 Solace keeps max but not ultra on OpenRouter", () => {
+      const result = ProviderTransform.variants(
+        createMockModel({
+          id: "openrouter/openai/gpt-5.6-solace",
+          providerID: "openrouter",
+          api: { id: "openai/gpt-5.6-solace", url: "https://openrouter.ai", npm: "@openrouter/ai-sdk-provider" },
+        }),
+      )
+      expect(result.ultra).toBeUndefined()
+      expect(result.max).toEqual({ reasoning: { effort: "max" } })
+    })
 
     test("gemini-3 returns widely supported efforts with reasoning", () => {
       const model = createMockModel({
@@ -4105,6 +4154,29 @@ describe("ProviderTransform.variants", () => {
         releaseDate: "2026-04-23",
         efforts: ["none", "low", "medium", "high", "xhigh"],
       },
+      {
+        id: "gpt-5.6",
+        releaseDate: "2026-07-01",
+        efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      },
+      {
+        id: "gpt-5.6-sol",
+        releaseDate: "2026-07-01",
+        efforts: ["none", "low", "medium", "high", "xhigh", "max", "ultra"],
+      },
+      {
+        id: "gpt-5.6-terra",
+        releaseDate: "2026-07-01",
+        efforts: ["none", "low", "medium", "high", "xhigh", "max", "ultra"],
+      },
+      {
+        id: "gpt-5.6-luna",
+        releaseDate: "2026-07-01",
+        efforts: ["none", "low", "medium", "high", "xhigh", "max", "ultra"],
+      },
+      { id: "gpt-5.6-pro", releaseDate: "2026-07-01", efforts: ["medium", "high", "xhigh", "max"] },
+      { id: "gpt-5.6-codex", releaseDate: "2026-07-01", efforts: ["none", "low", "medium", "high", "xhigh", "max"] },
+      { id: "gpt-5.6-chat", releaseDate: "2026-07-01", efforts: ["medium", "max"] },
       { id: "gpt-5.4-pro", releaseDate: "2026-03-05", efforts: ["medium", "high", "xhigh"] },
       { id: "gpt-5.5-pro", releaseDate: "2026-04-23", efforts: ["medium", "high", "xhigh"] },
       { id: "gpt-5-codex", releaseDate: "2025-09-23", efforts: ["low", "medium", "high"] },
@@ -4133,6 +4205,63 @@ describe("ProviderTransform.variants", () => {
         expect(Object.keys(result)).toEqual(testCase.efforts)
       })
     }
+
+    test("GPT-5.6 Sol, Terra, and Luna use the ultra direct OpenAI reasoning payload", () => {
+      for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+        const result = ProviderTransform.variants(
+          createMockModel({
+            id,
+            providerID: "openai",
+            api: { id, url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+            release_date: "2026-07-01",
+          }),
+        )
+        expect(result.ultra).toEqual({
+          reasoningEffort: "ultra",
+          reasoningSummary: "auto",
+          include: ["reasoning.encrypted_content"],
+        })
+      }
+    })
+
+    test("all GPT-5.6 direct OpenAI models use the max reasoning payload", () => {
+      for (const id of ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-solace"]) {
+        const result = ProviderTransform.variants(
+          createMockModel({
+            id,
+            providerID: "openai",
+            api: {
+              id,
+              url: "https://api.openai.com",
+              npm: "@ai-sdk/openai",
+            },
+            release_date: "2026-07-01",
+          }),
+        )
+        expect(result.max).toEqual({
+          reasoningEffort: "max",
+          reasoningSummary: "auto",
+          include: ["reasoning.encrypted_content"],
+        })
+      }
+    })
+
+    test("GPT-5.6 Solace keeps max but not ultra for direct OpenAI", () => {
+      const result = ProviderTransform.variants(
+        createMockModel({
+          id: "gpt-5.6-solace",
+          providerID: "openai",
+          api: { id: "gpt-5.6-solace", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+          release_date: "2026-07-01",
+        }),
+      )
+      expect(result.ultra).toBeUndefined()
+      expect(result.max).toEqual({
+        reasoningEffort: "max",
+        reasoningSummary: "auto",
+        include: ["reasoning.encrypted_content"],
+      })
+    })
 
     test("gpt-50 (lookalike) does not get gpt-5 family treatment", () => {
       const model = createMockModel({

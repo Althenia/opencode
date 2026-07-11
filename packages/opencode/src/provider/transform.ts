@@ -546,6 +546,8 @@ const WIDELY_SUPPORTED_EFFORTS = ["low", "medium", "high"]
 const OPENAI_EFFORTS = ["none", "minimal", ...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
 const OPENAI_GPT5_1_EFFORTS = ["none", ...WIDELY_SUPPORTED_EFFORTS]
 const OPENAI_GPT5_2_PLUS_EFFORTS = [...OPENAI_GPT5_1_EFFORTS, "xhigh"]
+const OPENAI_GPT5_6_EFFORTS = [...OPENAI_GPT5_2_PLUS_EFFORTS, "max"]
+const OPENAI_GPT5_6_ULTRA_EFFORTS = [...OPENAI_GPT5_6_EFFORTS, "ultra"]
 const OPENAI_GPT5_PRO_EFFORTS = ["high"]
 const OPENAI_GPT5_PRO_2_PLUS_EFFORTS = ["medium", "high", "xhigh"]
 const OPENAI_GPT5_CHAT_EFFORTS = ["medium"]
@@ -565,6 +567,8 @@ const OPENAI_XHIGH_EFFORT_RELEASE_DATE = "2025-12-04"
 // Anchored to start-of-string or "/" so it doesn't false-match "gpt-50" or "gpt-5o".
 const GPT5_FAMILY_RE = /(?:^|\/)gpt-5(?:[.-]|$)/
 const GPT5_VERSION_RE = /(?:^|\/)gpt-5[.-](\d+)(?:[.-]|$)/
+const GPT5_6_RE = /(?:^|\/)gpt-5[.-]6(?:[.-]|$)/
+const GPT5_6_ULTRA_RE = /(?:^|\/)gpt-5[.-]6[.-](?:sol|terra|luna)$/
 const GPT5_PRO_RE = /(?:^|\/)gpt-5[.-]?pro(?:[.-]|$)/
 const GPT5_VERSIONED_PRO_RE = /(?:^|\/)gpt-5[.-]\d+[.-]pro(?:[.-]|$)/
 
@@ -574,10 +578,16 @@ function gpt5Version(apiId: string) {
 
 function versionedGpt5ReasoningEfforts(apiId: string) {
   if (GPT5_VERSIONED_PRO_RE.test(apiId)) return OPENAI_GPT5_PRO_2_PLUS_EFFORTS
+  if (GPT5_6_ULTRA_RE.test(apiId)) return OPENAI_GPT5_6_ULTRA_EFFORTS
+  if (GPT5_6_RE.test(apiId)) return OPENAI_GPT5_6_EFFORTS
   const version = gpt5Version(apiId)
   if (version === undefined) return undefined
   if (version === 1) return OPENAI_GPT5_1_EFFORTS
   return OPENAI_GPT5_2_PLUS_EFFORTS
+}
+
+function withGpt5_6Max(apiId: string, efforts: string[]) {
+  return GPT5_6_RE.test(apiId) && !efforts.includes("max") ? [...efforts, "max"] : efforts
 }
 
 function gpt5CodexReasoningEfforts(apiId: string) {
@@ -598,29 +608,32 @@ function gpt5ChatReasoningEfforts(apiId: string) {
 // to strongest.
 function openaiReasoningEfforts(apiId: string, releaseDate: string) {
   const id = apiId.toLowerCase()
-  if (id.includes("deep-research")) return ["medium"]
+  if (id.includes("deep-research")) return withGpt5_6Max(id, ["medium"])
   const chatEfforts = gpt5ChatReasoningEfforts(id)
-  if (chatEfforts) return chatEfforts
-  if (GPT5_PRO_RE.test(id)) return OPENAI_GPT5_PRO_EFFORTS
+  if (chatEfforts) return withGpt5_6Max(id, chatEfforts)
+  if (GPT5_PRO_RE.test(id)) return withGpt5_6Max(id, OPENAI_GPT5_PRO_EFFORTS)
   const codexEfforts = gpt5CodexReasoningEfforts(id)
-  if (codexEfforts) return codexEfforts
+  if (codexEfforts) return withGpt5_6Max(id, codexEfforts)
   const versionedEfforts = versionedGpt5ReasoningEfforts(id)
   // GPT-5.1 replaced GPT-5's `minimal` effort with `none`; GPT-5.2+
   // additionally accepts `xhigh`. Model pages list the supported subset.
-  if (versionedEfforts) return versionedEfforts
+  if (versionedEfforts) return withGpt5_6Max(id, versionedEfforts)
   const efforts = [...WIDELY_SUPPORTED_EFFORTS]
   if (GPT5_FAMILY_RE.test(id)) efforts.unshift("minimal")
   if (releaseDate >= OPENAI_NONE_EFFORT_RELEASE_DATE) efforts.unshift("none")
   if (releaseDate >= OPENAI_XHIGH_EFFORT_RELEASE_DATE) efforts.push("xhigh")
-  return efforts
+  return withGpt5_6Max(id, efforts)
 }
 
 function openaiCompatibleReasoningEfforts(id: string) {
   const apiId = id.toLowerCase()
   const chatEfforts = gpt5ChatReasoningEfforts(apiId)
-  if (chatEfforts) return chatEfforts
-  if (GPT5_PRO_RE.test(apiId)) return OPENAI_GPT5_PRO_EFFORTS
-  return gpt5CodexReasoningEfforts(apiId) ?? versionedGpt5ReasoningEfforts(apiId) ?? OPENAI_EFFORTS
+  if (chatEfforts) return withGpt5_6Max(apiId, chatEfforts)
+  if (GPT5_PRO_RE.test(apiId)) return withGpt5_6Max(apiId, OPENAI_GPT5_PRO_EFFORTS)
+  return withGpt5_6Max(
+    apiId,
+    gpt5CodexReasoningEfforts(apiId) ?? versionedGpt5ReasoningEfforts(apiId) ?? OPENAI_EFFORTS,
+  )
 }
 
 function anthropicOpus47OrLater(apiId: string) {

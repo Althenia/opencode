@@ -4,6 +4,9 @@ import type { ModelV2Info } from "@opencode-ai/sdk/v2/types"
 import { Effect } from "effect"
 import { define } from "./internal"
 
+const GPT5_6_RE = /(?:^|\/)gpt-5[.-]6(?:[.-]|$)/
+const GPT5_6_ULTRA_RE = /(?:^|\/)gpt-5[.-]6[.-](?:sol|terra|luna)$/
+
 export const Plugin = define({
   id: "variant",
   effect: Effect.fn(function* (ctx) {
@@ -28,9 +31,30 @@ export const Plugin = define({
 })
 
 export function generate(model: ModelV2Info): ModelV2Info["variants"] {
-  if (model.api.type !== "aisdk" || model.api.package !== "@ai-sdk/openai-compatible") return []
-  const ids = `${model.id} ${model.api.id}`.toLowerCase()
-  if (!["glm-5.2", "glm-5-2", "glm-5p2"].some((name) => ids.includes(name))) return []
+  if (model.api.type !== "aisdk") return []
+  const ids = [model.id, model.api.id].map((id) => id.toLowerCase())
+  if (model.api.package === "@ai-sdk/openai") {
+    if (!ids.some((id) => GPT5_6_RE.test(id))) return []
+    return [
+      {
+        id: "max",
+        headers: {},
+        body: { reasoning: { effort: "max" } },
+      },
+      ...(ids.some((id) => GPT5_6_ULTRA_RE.test(id))
+        ? [
+            {
+              id: "ultra",
+              headers: {},
+              body: { reasoning: { effort: "ultra" } },
+            },
+          ]
+        : []),
+    ]
+  }
+  if (model.api.package !== "@ai-sdk/openai-compatible") return []
+  const joined = ids.join(" ")
+  if (!["glm-5.2", "glm-5-2", "glm-5p2"].some((name) => joined.includes(name))) return []
   return ["high", "max"].map((id) => ({
     id,
     headers: {},

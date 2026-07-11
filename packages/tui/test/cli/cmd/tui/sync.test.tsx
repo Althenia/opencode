@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "../../../fixture/fixture"
 import { json, mount, wait } from "./sync-fixture"
-import type { GlobalEvent } from "@opencode-ai/sdk/v2"
+import type { GlobalEvent, QuestionV2Info } from "@opencode-ai/sdk/v2"
 
 const fallback = "Use your best judgment from the goal and current context, then continue."
 
@@ -46,6 +46,37 @@ function permissionEvent(id: string, sessionID = "session"): GlobalEvent {
         patterns: ["*"],
         metadata: {},
         always: [],
+      },
+    },
+  }
+}
+
+function questionV2Event(id: string, questions: QuestionV2Info[], sessionID = "session"): GlobalEvent {
+  return {
+    directory: "/tmp/other",
+    project: "proj_test",
+    workspace: "ws_auto",
+    payload: {
+      id: `event-${id}`,
+      type: "question.v2.asked",
+      properties: { id, sessionID, questions },
+    },
+  }
+}
+
+function permissionV2Event(id: string, sessionID = "session"): GlobalEvent {
+  return {
+    directory: "/tmp/other",
+    project: "proj_test",
+    workspace: "ws_auto",
+    payload: {
+      id: `event-${id}`,
+      type: "permission.v2.asked",
+      properties: {
+        id,
+        sessionID,
+        action: "edit",
+        resources: ["*"],
       },
     },
   }
@@ -135,6 +166,175 @@ describe("tui sync", () => {
       expect(new URL(request.url).searchParams.get("directory")).toBe("/tmp/other")
       expect(new URL(request.url).searchParams.get("workspace")).toBe("ws_auto")
       expect(sync.data.question.session).toBeUndefined()
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("yolo auto-approves V2 permissions once", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const path = "/api/session/session/permission/per_yolo/reply"
+    const { app, emit, requests } = await mount(
+      (url) => {
+        if (url.pathname === path) return new Response(null, { status: 204 })
+      },
+      tmp.path,
+      { auto: true },
+    )
+
+    try {
+      emit(permissionV2Event("per_yolo"))
+      await wait(() => requests.some((request) => new URL(request.url).pathname === path))
+
+      const request = requests.find((request) => new URL(request.url).pathname === path)!
+      expect(await request.json()).toEqual({ reply: "once" })
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("yolo auto-answers selectable V2 questions", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const path = "/api/session/session/question/que_selectable/reply"
+    const { app, emit, requests } = await mount(
+      (url) => {
+        if (url.pathname === path) return new Response(null, { status: 204 })
+      },
+      tmp.path,
+      { auto: true },
+    )
+
+    try {
+      emit(
+        questionV2Event("que_selectable", [
+          {
+            question: "Pick one",
+            header: "Single",
+            options: [
+              { label: "A", description: "A" },
+              { label: "B", description: "B", recommended: true },
+            ],
+          },
+          {
+            question: "Pick many",
+            header: "Multiple",
+            multiple: true,
+            options: [
+              { label: "A", description: "A", recommended: true },
+              { label: "B", description: "B", recommended: true },
+              { label: "C", description: "C" },
+            ],
+          },
+        ]),
+      )
+      await wait(() => requests.some((request) => new URL(request.url).pathname === path))
+
+      const request = requests.find((request) => new URL(request.url).pathname === path)!
+      expect(await request.json()).toEqual({ answers: [["B"], ["A", "B"]] })
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("yolo leaves custom-only and mixed V2 questions unresolved", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const probePath = "/api/session/session/question/que_probe/reply"
+    const { app, emit, requests } = await mount(
+      (url) => {
+        if (url.pathname === probePath) return new Response(null, { status: 204 })
+      },
+      tmp.path,
+      { auto: true },
+    )
+
+    try {
+      emit(
+        questionV2Event("que_custom", [
+          { question: "Explain", header: "Custom", options: [], custom: true },
+        ]),
+      )
+      emit(
+        questionV2Event("que_mixed", [
+          {
+            question: "Pick one",
+            header: "Choice",
+            options: [{ label: "A", description: "A" }],
+          },
+          { question: "Explain", header: "Custom", options: [], custom: true },
+        ]),
+      )
+      emit(
+        questionV2Event("que_probe", [
+          {
+            question: "Pick one",
+            header: "Choice",
+            options: [{ label: "A", description: "A" }],
+          },
+        ]),
+      )
+      await wait(() => requests.some((request) => new URL(request.url).pathname === probePath))
+
+      expect(
+        requests.filter((request) => new URL(request.url).pathname.endsWith("/question/que_custom/reply")),
+      ).toHaveLength(0)
+      expect(
+        requests.filter((request) => new URL(request.url).pathname.endsWith("/question/que_mixed/reply")),
+      ).toHaveLength(0)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("active Goal prevents a duplicate TUI V2 question reply", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const path = "/api/session/session/question/que_goal/reply"
+    const otherPath = "/api/session/session-other/question/que_other/reply"
+    const { app, emit, goal, requests } = await mount(
+      (url) => {
+        if (url.pathname === "/api/session/session/goal/status") return json({ data: null })
+        if (url.pathname === "/api/session/session/goal/start") {
+          return json({ data: { goal: "ship", active: true, iteration: 1, cap: 7 } })
+        }
+        if (url.pathname === path) return new Response(null, { status: 204 })
+        if (url.pathname === otherPath) return new Response(null, { status: 204 })
+      },
+      tmp.path,
+      { auto: true, sessionID: "session" },
+    )
+
+    try {
+      await goal.start("ship")
+      emit(
+        questionV2Event("que_goal", [
+          {
+            question: "Pick one",
+            header: "Choice",
+            options: [{ label: "A", description: "A" }],
+          },
+        ]),
+      )
+      await Bun.sleep(30)
+
+      expect(requests.filter((request) => new URL(request.url).pathname === path)).toHaveLength(0)
+      emit(
+        questionV2Event(
+          "que_other",
+          [
+            {
+              question: "Pick one",
+              header: "Choice",
+              options: [{ label: "A", description: "A" }],
+            },
+          ],
+          "session-other",
+        ),
+      )
+      await wait(() => requests.some((request) => new URL(request.url).pathname === otherPath))
+      expect(requests.filter((request) => new URL(request.url).pathname === path)).toHaveLength(0)
     } finally {
       app.renderer.destroy()
     }
