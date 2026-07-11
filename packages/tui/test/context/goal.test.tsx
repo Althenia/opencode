@@ -11,7 +11,7 @@ import { tmpdir } from "../fixture/fixture"
 import { ArgsProvider } from "../../src/context/args"
 import { ClipboardProvider } from "../../src/context/clipboard"
 import { DataProvider } from "../../src/context/data"
-import { EditorContextProvider } from "../../src/context/editor"
+import { EditorContextProvider, useEditorContext, type EditorSelection } from "../../src/context/editor"
 import { ExitProvider } from "../../src/context/exit"
 import { GoalProvider, useGoal } from "../../src/context/goal"
 import { KVProvider } from "../../src/context/kv"
@@ -34,6 +34,210 @@ import { createPluginRuntime, PluginRuntimeProvider } from "../../src/plugin/run
 import { DialogProvider, useDialog } from "../../src/ui/dialog"
 import { ToastProvider, useToast } from "../../src/ui/toast"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../src/keymap"
+
+test("/goal and /goal-mode toggle home arming without creating a session or starting Goal", async () => {
+  const calls: string[] = []
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") calls.push("create")
+      if (url.pathname.endsWith("/goal/start") || url.pathname.endsWith("/goal/stop")) calls.push(url.pathname)
+      return undefined
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal", parts: [] })
+    await app.promptRef?.submit()
+
+    expect(calls).toEqual([])
+    expect(app.goal.selected()).toBe(true)
+    expect(app.route.data.type).toBe("home")
+
+    await Bun.sleep(0)
+    app.promptRef?.set({ input: "/goal-mode", parts: [] })
+    await app.promptRef?.submit()
+    await waitFor(() => !app.goal.selected())
+
+    expect(calls).toEqual([])
+    expect(app.goal.selected()).toBe(false)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("the first accepted home Goal prompt creates one session and starts Goal with its ID", async () => {
+  const calls: Array<{ method: string; body?: unknown }> = []
+  const app = await mountGoalPrompt(
+    async (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        calls.push({ method: "create", body: await request?.json() })
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        calls.push({ method: "goalStart", body: await request?.json() })
+        return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
+      }
+      if (url.pathname === "/session/session-home/message") calls.push({ method: "prompt" })
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    await app.promptRef?.submit()
+    await Bun.sleep(20)
+
+    expect(app.goal.selected("session-home")).toBe(true)
+    expect(calls.map((call) => call.method)).toEqual(["create", "goalStart"])
+    expect(calls[1]?.body).toMatchObject({ goal: "ship task 6" })
+    expect(app.goal.selected()).toBe(false)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("rejected home Goal input does not create an orphan session", async () => {
+  let creates = 0
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") creates++
+      return undefined
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({
+      input: "ship [Image 1]",
+      parts: [
+        {
+          type: "file",
+          mime: "image/png",
+          filename: "image.png",
+          url: "data:image/png;base64,eA==",
+          source: { type: "file", path: "image.png", text: { start: 5, end: 14, value: "[Image 1]" } },
+        },
+      ],
+    })
+    await app.promptRef?.submit()
+
+    expect(creates).toBe(0)
+    expect(app.promptRef?.current.input).toBe("ship [Image 1]")
+    expect(app.goal.selected()).toBe(true)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("pending editor context rejects a home Goal prompt before session creation", async () => {
+  const calls: string[] = []
+  const zedTerm = process.env.ZED_TERM
+  process.env.ZED_TERM = "true"
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") calls.push("create")
+      if (url.pathname.endsWith("/goal/start") || url.pathname.endsWith("/goal/stop")) calls.push(url.pathname)
+      return undefined
+    },
+    {
+      home: true,
+      editorSelection: {
+        filePath: "/tmp/opencode/packages/tui/src/app.tsx",
+        ranges: [
+          {
+            text: "const selected = true",
+            selection: {
+              start: { line: 1, character: 1 },
+              end: { line: 1, character: 22 },
+            },
+          },
+        ],
+      },
+    },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await waitFor(() => app.editor.labelState() === "pending")
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    await app.promptRef?.submit()
+    await waitFor(
+      () =>
+        calls.length > 0 ||
+        app.toast.currentToast?.message === "Remove attachments or editor context before starting Goal mode.",
+    )
+    await Bun.sleep(20)
+
+    expect(calls).toEqual([])
+    expect(app.promptRef?.current.input).toBe("ship task 6")
+    expect(app.goal.selected()).toBe(true)
+    expect(app.toast.currentToast?.message).toBe("Remove attachments or editor context before starting Goal mode.")
+  } finally {
+    if (zedTerm === undefined) delete process.env.ZED_TERM
+    else process.env.ZED_TERM = zedTerm
+    app.renderer.destroy()
+  }
+})
+
+test("failed home session creation preserves Goal arming and prompt text", async () => {
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST")
+        return json({ error: "create failed" }, { status: 500 })
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.toggle()
+    app.promptRef?.set({ input: "ship task 6", parts: [] })
+    await app.promptRef?.submit()
+
+    expect(app.promptRef?.current.input).toBe("ship task 6")
+    expect(app.goal.selected()).toBe(true)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("home Goal arming clears when navigation leaves home", async () => {
+  const app = await mountGoalPrompt(() => undefined, { home: true })
+
+  try {
+    await app.goal.toggle()
+    expect(app.goal.selected()).toBe(true)
+    expect(app.goal.selected("arbitrary-session")).toBe(false)
+
+    app.route.navigate({ type: "session", sessionID: "session-test" })
+    await waitFor(() => !app.goal.selected())
+
+    app.route.navigate({ type: "home" })
+    expect(app.goal.selected()).toBe(false)
+  } finally {
+    app.renderer.destroy()
+  }
+})
 
 test("/goal selects goal mode without starting a run or changing yolo", async () => {
   const calls: Array<{ method: string; body?: unknown }> = []
@@ -1336,7 +1540,7 @@ test("failed goal start does not change yolo mode", async () => {
 
 async function mountGoalPrompt(
   handler: (url: URL, request?: Request) => Response | undefined | Promise<Response | undefined>,
-  options: { sidebar?: boolean } = {},
+  options: { sidebar?: boolean; home?: boolean; editorSelection?: EditorSelection } = {},
 ) {
   const tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
@@ -1358,9 +1562,20 @@ async function mountGoalPrompt(
     goal: ReturnType<typeof useGoal>
     route: ReturnType<typeof useRoute>
     toast: ReturnType<typeof useToast>
+    editor: ReturnType<typeof useEditorContext>
   }
   const app = await testRender(
-    () => <Harness root={tmp.path} fetch={fetch} events={events.source} state={state} sidebar={options.sidebar} />,
+    () => (
+      <Harness
+        root={tmp.path}
+        fetch={fetch}
+        events={events.source}
+        state={state}
+        sidebar={options.sidebar}
+        home={options.home}
+        editorSelection={options.editorSelection}
+      />
+    ),
     { width: 80, height: 24 },
   )
   await app.renderOnce()
@@ -1379,8 +1594,11 @@ function Harness(props: {
     goal?: ReturnType<typeof useGoal>
     route?: ReturnType<typeof useRoute>
     toast?: ReturnType<typeof useToast>
+    editor?: ReturnType<typeof useEditorContext>
   }
   sidebar?: boolean
+  home?: boolean
+  editorSelection?: EditorSelection
 }) {
   const renderer = useRenderer()
   const config = createTuiResolvedConfig({ plugin_enabled: {} })
@@ -1400,7 +1618,9 @@ function Harness(props: {
             <ArgsProvider model="test/model">
               <KVProvider>
                 <ToastProvider>
-                  <RouteProvider initialRoute={{ type: "session", sessionID: "session-test" }}>
+                  <RouteProvider
+                    initialRoute={props.home ? { type: "home" } : { type: "session", sessionID: "session-test" }}
+                  >
                     <TuiConfigProvider config={config}>
                       <PluginRuntimeProvider value={pluginRuntime}>
                         <SDKProvider url="http://test" directory={directory} fetch={props.fetch} events={props.events}>
@@ -1416,11 +1636,22 @@ function Harness(props: {
                                             <FrecencyProvider>
                                               <PromptHistoryProvider>
                                                 <PromptRefProvider>
-                                                  <EditorContextProvider>
+                                                  <EditorContextProvider
+                                                    integration={
+                                                      props.editorSelection
+                                                        ? {
+                                                            selection: async () => ({
+                                                              type: "selection",
+                                                              selection: props.editorSelection,
+                                                            }),
+                                                          }
+                                                        : undefined
+                                                    }
+                                                  >
                                                     <LocationProvider>
                                                       <PromptSyncData state={props.state} />
                                                       <Prompt
-                                                        sessionID="session-test"
+                                                        sessionID={props.home ? undefined : "session-test"}
                                                         ref={(ref) => {
                                                           props.state.promptRef = ref
                                                         }}
@@ -1462,6 +1693,7 @@ function PromptSyncData(props: {
     goal?: ReturnType<typeof useGoal>
     route?: ReturnType<typeof useRoute>
     toast?: ReturnType<typeof useToast>
+    editor?: ReturnType<typeof useEditorContext>
   }
 }) {
   const sync = useSync()
@@ -1471,6 +1703,7 @@ function PromptSyncData(props: {
   props.state.goal = useGoal()
   props.state.route = useRoute()
   props.state.toast = useToast()
+  props.state.editor = useEditorContext()
   onMount(() => {
     sync.set("session", [
       {

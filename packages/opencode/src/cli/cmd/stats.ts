@@ -46,6 +46,15 @@ interface SessionStats {
   medianTokensPerSession: number
 }
 
+export function cacheRatios(tokens: { input: number; cache: { read: number; write: number } }) {
+  const total = tokens.input + tokens.cache.read + tokens.cache.write
+  if (total === 0) return { read: 0, write: 0 }
+  return {
+    read: (tokens.cache.read / total) * 100,
+    write: (tokens.cache.write / total) * 100,
+  }
+}
+
 export const StatsCommand = effectCmd({
   command: "stats",
   describe: "show token usage and cost statistics",
@@ -325,6 +334,9 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
   console.log(renderRow("Output", formatNumber(stats.totalTokens.output)))
   console.log(renderRow("Cache Read", formatNumber(stats.totalTokens.cache.read)))
   console.log(renderRow("Cache Write", formatNumber(stats.totalTokens.cache.write)))
+  const totalCacheRatios = cacheRatios(stats.totalTokens)
+  console.log(renderRow("Cache Read Ratio", `${totalCacheRatios.read.toFixed(1)}%`))
+  console.log(renderRow("Cache Write Ratio", `${totalCacheRatios.write.toFixed(1)}%`))
   console.log("└────────────────────────────────────────────────────────┘")
   console.log()
 
@@ -344,6 +356,9 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
       console.log(renderRow("  Output Tokens", formatNumber(usage.tokens.output)))
       console.log(renderRow("  Cache Read", formatNumber(usage.tokens.cache.read)))
       console.log(renderRow("  Cache Write", formatNumber(usage.tokens.cache.write)))
+      const modelCacheRatios = cacheRatios(usage.tokens)
+      console.log(renderRow("  Cache Read Ratio", `${modelCacheRatios.read.toFixed(1)}%`))
+      console.log(renderRow("  Cache Write Ratio", `${modelCacheRatios.write.toFixed(1)}%`))
       console.log(renderRow("  Cost", `$${usage.cost.toFixed(4)}`))
       console.log("├────────────────────────────────────────────────────────┤")
     }

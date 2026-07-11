@@ -999,42 +999,6 @@ export function Prompt(props: PromptProps) {
     }
 
     const variant = local.model.variant.current()
-    let sessionID = props.sessionID
-    let finishMoveProgress = false
-    if (sessionID == null) {
-      const selectedWorkspace = workspace.selection()
-      const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
-
-      const directory = await move.getDirectory(store.prompt.input)
-      if (move.pending() && !directory) return false
-      finishMoveProgress = Boolean(move.progress())
-
-      const res = await sdk.client.session.create({
-        directory,
-        workspace: workspaceID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          id: selectedModel.modelID,
-          variant,
-        },
-      })
-
-      if (res.error) {
-        if (finishMoveProgress) move.finishSubmit()
-        console.log("Creating a session failed:", res.error)
-
-        toast.show({
-          message: "Creating a session failed. Open console for more details.",
-          variant: "error",
-        })
-
-        return true
-      }
-
-      sessionID = res.data.id
-    }
-
     const inputText = expandTrackedPastedText(
       store.prompt.input,
       input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
@@ -1071,10 +1035,11 @@ export function Prompt(props: PromptProps) {
     const command = inputText.startsWith("/")
       ? sync.data.command.find((item) => item.name === inputText.split("\n")[0].split(" ")[0].slice(1))
       : undefined
+    let sessionID = props.sessionID
     const startsGoal =
       store.mode === "normal" &&
       goal.selected(sessionID) &&
-      !goal.answering(sessionID) &&
+      !goal.answering(sessionID ?? "") &&
       !command &&
       !inputText.startsWith("/goal ") &&
       !inputText.startsWith("/goal-mode ")
@@ -1087,9 +1052,45 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
+    let finishMoveProgress = false
+    if (sessionID == null) {
+      const selectedWorkspace = workspace.selection()
+      const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
+
+      const directory = await move.getDirectory(store.prompt.input)
+      if (move.pending() && !directory) return false
+      finishMoveProgress = Boolean(move.progress())
+
+      const res = await sdk.client.session.create({
+        directory,
+        workspace: workspaceID,
+        agent: agent.name,
+        model: {
+          providerID: selectedModel.providerID,
+          id: selectedModel.modelID,
+          variant,
+        },
+      })
+
+      if (res.error) {
+        if (finishMoveProgress) move.finishSubmit()
+        console.log("Creating a session failed:", res.error)
+
+        toast.show({
+          message: "Creating a session failed. Open console for more details.",
+          variant: "error",
+        })
+
+        return true
+      }
+
+      sessionID = res.data.id
+      if (startsGoal) goal.adoptHome(sessionID)
+    }
+
     if (startsGoal) {
       move.startSubmit()
-      const start = goal.start(inputText)
+      const start = goal.start(inputText, sessionID)
       const selectionRevision = goal.revision(sessionID)
       void start.catch((error) => {
         if (

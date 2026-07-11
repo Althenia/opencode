@@ -1,4 +1,4 @@
-import { createEffect, onCleanup } from "solid-js"
+import { createEffect, createSignal, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { createSimpleContext } from "./helper"
@@ -20,6 +20,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     const [statuses, setStatuses] = createStore<Record<string, GoalStatus | undefined>>({})
     const [selections, setSelections] = createStore<Record<string, boolean | undefined>>({})
     const [starting, setStarting] = createStore<Record<string, boolean | undefined>>({})
+    const [homeSelected, setHomeSelected] = createSignal(false)
     const queues = new Map<string, Promise<void>>()
     const generations = new Map<string, number>()
     const selectionRevisions = new Map<string, number>()
@@ -54,7 +55,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     }
 
     function selected(id = sessionID()) {
-      return id ? selections[id] === true : false
+      return id ? selections[id] === true : route.data.type === "home" && homeSelected()
     }
 
     function answering(id: string) {
@@ -155,7 +156,10 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
 
     async function toggle() {
       const id = sessionID()
-      if (!id) return
+      if (!id) {
+        if (route.data.type === "home") setHomeSelected((value) => !value)
+        return
+      }
       const ownership = advanceRevision(id)
       const next = !selected(id)
       setSelections(id, next)
@@ -197,6 +201,16 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       presentation.delete(sessionID)
     }
 
+    function adoptHome(sessionID: string) {
+      setHomeSelected(false)
+      advanceRevision(sessionID)
+      setSelections(sessionID, true)
+    }
+
+    createEffect(() => {
+      if (route.data.type !== "home") setHomeSelected(false)
+    })
+
     createEffect(() => {
       const id = sessionID()
       if (!id) return
@@ -224,6 +238,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     return {
       current,
       active,
+      adoptHome,
       answering,
       revision,
       selected,

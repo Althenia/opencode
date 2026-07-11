@@ -1,5 +1,6 @@
 import { createCohere } from "@ai-sdk/cohere"
 import { createGroq } from "@ai-sdk/groq"
+import { createOpenAI } from "@ai-sdk/openai"
 import { createTogetherAI } from "@ai-sdk/togetherai"
 import { describe, expect, test } from "bun:test"
 
@@ -44,6 +45,29 @@ describe("provider cache usage", () => {
 
     const result = await model.doGenerate({ prompt })
     expect(result.usage.inputTokens).toEqual({ total: 500, noCache: 100, cacheRead: 400, cacheWrite: undefined })
+  })
+
+  test("OpenAI Responses reports cache-write input tokens", async () => {
+    const model = createOpenAI({
+      apiKey: "test",
+      fetch: mockFetch({
+        id: "response-1",
+        created_at: 0,
+        model: "gpt-5",
+        object: "response",
+        output: [],
+        status: "completed",
+        usage: {
+          input_tokens: 5,
+          output_tokens: 0,
+          total_tokens: 5,
+          input_tokens_details: { cached_tokens: 1, cache_write_tokens: 2 },
+        },
+      }),
+    }).responses("gpt-5")
+
+    const result = await model.doGenerate({ prompt })
+    expect(result.usage.inputTokens).toEqual({ total: 5, noCache: 2, cacheRead: 1, cacheWrite: 2 })
   })
 
   test("Together AI reports flat cached input tokens", async () => {

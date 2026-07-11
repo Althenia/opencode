@@ -327,6 +327,56 @@ test("goal palette command selects goal mode without starting supervision", asyn
   }
 })
 
+test("goal palette command arms Goal on the fresh home route without creating a session", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const mutations: string[] = []
+  const calls = createFetch((url) => {
+    if (url.pathname.endsWith("/goal/start") || url.pathname.endsWith("/goal/stop")) mutations.push(url.pathname)
+    return undefined
+  }, events)
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: {},
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    api?.keymap.dispatchCommand("goal.start")
+    await Bun.sleep(0)
+    api?.keymap.dispatchCommand("command.palette.show")
+    expect(await captureFrame(setup, (frame) => frame.includes("Stop goal mode"))).toContain("Stop goal mode")
+    expect(mutations).toEqual([])
+    api?.keymap.dispatchCommand("app.exit")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("goal palette command toggles active supervision off", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
