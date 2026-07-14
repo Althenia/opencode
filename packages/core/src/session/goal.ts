@@ -50,7 +50,6 @@ type ActiveGoal = {
   latestExternalSteer?: string
   claimedCompletion?: string
   failedVerification?: string
-  rejectedApproval?: string
   readonly scope: Scope.Closeable
   readonly supervisorPrompts: Set<SessionMessage.ID>
 }
@@ -105,11 +104,6 @@ export const make = Effect.gen(function* () {
 
   const verified = (text: string) => /^\s*YES\s*$/i.test(text)
 
-  const isApprovalRequested = (text: string) =>
-    /(?:^|[.!?]\s+)(?:please\s+)?(?:approve|confirm|clarify|sign[ -]?off)\b|\b(?:need|await(?:ing)?|wait(?:ing)?\s+for|require)\s+(?:your\s+)?(?:approval|confirmation|sign[ -]?off)\b|\b(?:do|would|can|could|will|shall|may|should)\s+(?:you|we|i)\b[\s\S]{0,120}\?|\b(?:is|are)\s+(?:it|this|that)\s+(?:okay|ok|acceptable)\b[\s\S]{0,120}\?|\b(?:does|is)\s+this\s+(?:look|seem|sound)\s+(?:good|right|okay|ok)\b[\s\S]{0,120}\?/im.test(
-      text,
-    )
-
   const bounded = (text: string) => text.slice(0, EVIDENCE_LIMIT)
 
   const promptText = (state: GoalState, active: ActiveGoal) =>
@@ -121,8 +115,6 @@ export const make = Effect.gen(function* () {
       active.latestAssistantResult && !active.claimedCompletion && `Latest assistant result: ${active.latestAssistantResult}`,
       active.claimedCompletion && `Captured claimed completion: ${active.claimedCompletion}`,
       active.failedVerification && `Failed verification: ${active.failedVerification}`,
-      active.rejectedApproval &&
-        "The prior assistant response requested user approval. Continue autonomously; the user has pre-approved ordinary decisions. Escalate only for a configured permission request, explicit consent before a destructive operation, or an irrecoverable failure or blocker.",
       "Inspect the current tool and test evidence in the transcript before continuing.",
       "Use todowrite to maintain a goal-oriented task list: derive remaining work from the goal, latest user instructions, and current evidence; update statuses as work completes; execute the highest-priority unblocked item.",
       "Handle ordinary approval and clarification autonomously using best judgment. Ask the user only for a configured permission request, explicit consent before a destructive operation, or an irrecoverable failure or blocker that cannot be resolved from the current context.",
@@ -212,7 +204,6 @@ export const make = Effect.gen(function* () {
         active.latestExternalSteer = bounded(event.data.prompt.text)
         active.claimedCompletion = undefined
         active.failedVerification = undefined
-        active.rejectedApproval = undefined
         turn = "external"
         continue
       }
@@ -228,7 +219,6 @@ export const make = Effect.gen(function* () {
         active.latestAssistantResult = undefined
         active.claimedCompletion = undefined
         active.failedVerification = undefined
-        active.rejectedApproval = undefined
         activeAssistantMessageID = undefined
         stepEligible = true
         turn = "external"
@@ -280,13 +270,6 @@ export const make = Effect.gen(function* () {
 
       const latest = yield* latestAssistantResult(sessionID)
       active.latestAssistantResult = bounded(latest.all)
-      active.rejectedApproval = isApprovalRequested(latest.text) ? active.latestAssistantResult : undefined
-      if (active.rejectedApproval) {
-        active.claimedCompletion = undefined
-        turn = "work"
-        if (!(yield* continueGoal(sessionID, owner))) return
-        continue
-      }
       if (isReadyForVerification(latest.text)) {
         if (goals.get(sessionID) !== owner || !owner.state.active) return
         active.claimedCompletion = active.latestAssistantResult

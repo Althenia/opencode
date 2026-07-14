@@ -610,7 +610,7 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(2)
-      expect(fake.prompts[1]?.prompt.text).toContain("The prior assistant response requested user approval.")
+      expect(fake.prompts[1]?.prompt.text).toContain("Handle ordinary approval and clarification autonomously")
       expect(yield* goals.status(sessionID)).toMatchObject({ active: true, iteration: 2 })
     }),
   )
@@ -785,7 +785,7 @@ describe("GoalSupervisor", () => {
     }),
   )
 
-  it.effect("ignores approval-like language in hidden reasoning", () =>
+  it.effect("ignores reasoning content when checking for completion", () =>
     Effect.gen(function* () {
       const fake = makeSession([{ text: "GOAL COMPLETE", reasoning: "Can I use this approach?" }])
       const events = yield* makeEvents
@@ -823,7 +823,7 @@ describe("GoalSupervisor", () => {
     }),
   )
 
-  it.effect("rejects approval prose before goal completion verification", () =>
+  it.effect("proceeds to verification when completion marker is present alongside approval prose", () =>
     Effect.gen(function* () {
       const fake = makeSession(["GOAL COMPLETE. Can you approve this?"])
       const events = yield* makeEvents
@@ -838,8 +838,7 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(2)
-      expect(fake.prompts[1]?.prompt.text).toContain("The prior assistant response requested user approval.")
-      expect(fake.prompts[1]?.prompt.text).not.toContain("Answer only YES or NO")
+      expect(fake.prompts[1]?.prompt.text).toContain("Answer only YES or NO")
     }),
   )
 
