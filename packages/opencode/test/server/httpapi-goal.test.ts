@@ -30,7 +30,8 @@ import { resetDatabase } from "../fixture/db"
 import { testEffect } from "../lib/effect"
 
 const calls: Array<
-  { method: "start"; sessionID: string; goal: string; messageID?: string } | { method: "stop" | "status"; sessionID: string }
+  { method: "start"; sessionID: string; goal: string; messageID?: string; files?: unknown } |
+    { method: "stop" | "status"; sessionID: string }
 > = []
 const locationServiceMap = buildLocationServiceMap()
 const serviceLayer = AppNodeBuilder.build(
@@ -59,6 +60,7 @@ const goalLayer = Layer.succeed(
           sessionID: input.sessionID,
           goal: input.goal,
           ...(input.messageID ? { messageID: input.messageID } : {}),
+          ...(input.files ? { files: input.files } : {}),
         })
         return { goal: input.goal, active: true, iteration: 1, cap: 10 }
       }),
@@ -125,7 +127,11 @@ describe("goal HttpApi", () => {
           yield* request(`/api/session/${sessionID}/goal/start`, {
             method: "POST",
             headers,
-            body: JSON.stringify({ goal: "ship task 5", messageID: "msg_goal_http" }),
+            body: JSON.stringify({
+              goal: "ship task 5",
+              messageID: "msg_goal_http",
+              files: [{ uri: "file:///tmp/spec.pdf", name: "spec.pdf" }],
+            }),
           }),
         ),
       ).toEqual({ data: { goal: "ship task 5", active: true, iteration: 1, cap: 10 } })
@@ -139,10 +145,32 @@ describe("goal HttpApi", () => {
       const stopped = yield* request(`/api/session/${sessionID}/goal/stop`, { method: "POST" })
       expect(stopped.status).toBe(204)
       expect(calls).toEqual([
-        { method: "start", sessionID, goal: "ship task 5", messageID: "msg_goal_http" },
+        {
+          method: "start",
+          sessionID,
+          goal: "ship task 5",
+          messageID: "msg_goal_http",
+          files: [{ uri: "file:///tmp/spec.pdf", name: "spec.pdf" }],
+        },
         { method: "status", sessionID },
         { method: "stop", sessionID },
       ])
+    }),
+  )
+
+  it.live("rejects whitespace-only goals", () =>
+    Effect.gen(function* () {
+      const headers = { "content-type": "application/json" }
+      const session = yield* json<{ data: { id: string } }>(
+        yield* request("/api/session", { method: "POST", headers, body: "{}" }),
+      )
+      const response = yield* request(`/api/session/${session.data.id}/goal/start`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ goal: "   " }),
+      })
+
+      expect(response.status).toBe(400)
     }),
   )
 })

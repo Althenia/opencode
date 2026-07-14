@@ -12,6 +12,7 @@ import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { GoalTable } from "./sql"
+import { PromptInput } from "@opencode-ai/schema/prompt-input"
 
 export const GOAL_MAX_ITERATIONS = 25
 const EVIDENCE_LIMIT = 1_000
@@ -29,6 +30,7 @@ export interface StartInput {
   readonly sessionID: SessionSchema.ID
   readonly goal: string
   readonly messageID?: SessionMessage.ID
+  readonly files?: PromptInput.FileAttachment[]
   readonly cap?: number
 }
 
@@ -187,10 +189,11 @@ export const make = Effect.gen(function* () {
     owner: ActiveGoal,
     text: string,
     id = SessionMessage.ID.create(),
+    files?: PromptInput.FileAttachment[],
   ) {
     if (goals.get(sessionID) !== owner || !owner.state.active) return false
     owner.supervisorPrompts.add(id)
-    yield* sessions.prompt({ id, sessionID, prompt: { text }, delivery: "steer", resume: true })
+    yield* sessions.prompt({ id, sessionID, prompt: { text, ...(files ? { files } : {}) }, delivery: "steer", resume: true })
     return goals.get(sessionID) === owner && owner.state.active
   })
 
@@ -209,7 +212,7 @@ export const make = Effect.gen(function* () {
   const continueGoal = Effect.fn("GoalSupervisor.continueGoal")(function* (
     sessionID: SessionSchema.ID,
     owner: ActiveGoal,
-    initial?: { text: string; messageID?: SessionMessage.ID },
+    initial?: { text: string; messageID?: SessionMessage.ID; files?: PromptInput.FileAttachment[] },
   ) {
     if (goals.get(sessionID) !== owner) return false
     const current = owner.state
@@ -221,7 +224,7 @@ export const make = Effect.gen(function* () {
     const state = yield* setState(sessionID, owner, (state) => ({ ...state, iteration: state.iteration + 1 }))
     if (!state) return false
     yield* persistActive(sessionID, owner)
-    return yield* prompt(sessionID, owner, initial?.text ?? promptText(state, owner), initial?.messageID)
+    return yield* prompt(sessionID, owner, initial?.text ?? promptText(state, owner), initial?.messageID, initial?.files)
   })
 
   const run = Effect.fn("GoalSupervisor.run")(function* (
@@ -388,7 +391,11 @@ export const make = Effect.gen(function* () {
         Effect.forkIn(active.scope, { startImmediately: true }),
       )
     if (goals.get(input.sessionID) !== active) return snapshot({ ...active.state, active: false })
-    const started = yield* continueGoal(input.sessionID, active, { text: input.goal, messageID: input.messageID }).pipe(
+    const started = yield* continueGoal(input.sessionID, active, {
+      text: input.goal,
+      messageID: input.messageID,
+      files: input.files,
+    }).pipe(
       Effect.catch((error: PromptError) =>
         Effect.gen(function* () {
           if (goals.get(input.sessionID) === active) yield* stop(input.sessionID)

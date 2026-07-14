@@ -88,9 +88,15 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       setStarting(id, undefined)
     }
 
-    async function requestStart(id: string, goal: string, messageID: string, version: number) {
+    async function requestStart(
+      id: string,
+      goal: string,
+      messageID: string,
+      version: number,
+      files?: Array<{ uri: string; name?: string; source?: { start: number; end: number; text: string } }>,
+    ) {
       if (generation(id) !== version) return
-      const result = await sdk.client.sessions.goalStart({ sessionID: id, goal, messageID })
+      const result = await sdk.client.sessions.goalStart({ sessionID: id, goal, messageID, files })
       if (generation(id) !== version) return
       setStatuses(id, result)
     }
@@ -120,7 +126,11 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       return result ?? undefined
     }
 
-    async function start(goal: string, id = sessionID()) {
+    async function start(
+      goal: string,
+      id = sessionID(),
+      files?: Array<{ uri: string; name?: string; source?: { start: number; end: number; text: string } }>,
+    ) {
       if (!id) return
       const ownership = advanceRevision(id)
       setSelections(id, true)
@@ -128,9 +138,10 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       const messageID = SessionMessage.ID.create()
       presentation.set(id, { goal, messageID, revision: ownership })
       beginStart(id)
-      return serialize(id, () => requestStart(id, goal, messageID, version))
+      return serialize(id, () => requestStart(id, goal, messageID, version, files))
         .catch((error) => {
           if (presentation.get(id)?.revision === ownership) presentation.delete(id)
+          if (revision(id) === ownership) setSelections(id, false)
           throw error
         })
         .finally(() => endStart(id))

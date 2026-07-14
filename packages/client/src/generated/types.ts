@@ -492,8 +492,36 @@ export type SessionsWaitOutput = void
 
 export type SessionsGoalStartInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
-  readonly goal: { readonly goal: string; readonly messageID?: string | undefined }["goal"]
-  readonly messageID?: { readonly goal: string; readonly messageID?: string | undefined }["messageID"]
+  readonly goal: {
+    readonly goal: string
+    readonly messageID?: string | null
+    readonly files?: ReadonlyArray<{
+      readonly uri: string
+      readonly name?: string
+      readonly description?: string
+      readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+    }> | null
+  }["goal"]
+  readonly messageID?: {
+    readonly goal: string
+    readonly messageID?: string | null
+    readonly files?: ReadonlyArray<{
+      readonly uri: string
+      readonly name?: string
+      readonly description?: string
+      readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+    }> | null
+  }["messageID"]
+  readonly files?: {
+    readonly goal: string
+    readonly messageID?: string | null
+    readonly files?: ReadonlyArray<{
+      readonly uri: string
+      readonly name?: string
+      readonly description?: string
+      readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+    }> | null
+  }["files"]
 }
 
 export type SessionsGoalStartOutput = {

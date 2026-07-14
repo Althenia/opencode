@@ -1026,13 +1026,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "goal.start",
-        title: goal.selected() ? "Stop goal mode" : "Start goal mode",
+        name: "goal.stop",
+        title: "Stop goal mode",
         category: "Session",
-        slashName: "goal",
-        slashAliases: ["goal-mode"],
+        enabled: () => route.data.type === "session" && goal.active(route.data.sessionID),
         run: async () => {
-          await goal.toggle()
+          if (route.data.type !== "session" || !goal.active(route.data.sessionID)) return
+          await goal.stop(route.data.sessionID)
+          goal.deselect(route.data.sessionID)
           dialog.clear()
         },
       },

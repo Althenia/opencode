@@ -24,7 +24,11 @@ type ClientWithSessions = Client & {
 }
 
 type GoalSessionInput = { readonly sessionID: string }
-type GoalStartInput = GoalSessionInput & { readonly goal: string; readonly messageID?: string }
+type GoalStartInput = GoalSessionInput & {
+  readonly goal: string
+  readonly messageID?: string
+  readonly files?: Array<{ uri: string; name?: string; source?: { start: number; end: number; text: string } }>
+}
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
@@ -61,7 +65,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           goalStart: (input: GoalStartInput) =>
             request<{ readonly data: GoalStatus }>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/start`, {
               method: "POST",
-              body: JSON.stringify({ goal: input.goal, messageID: input.messageID }),
+              body: JSON.stringify({ goal: input.goal, messageID: input.messageID, files: input.files }),
             }).then((response) => response.data),
           goalStop: (input: GoalSessionInput) =>
             request<void>(`/api/session/${encodeURIComponent(input.sessionID)}/goal/stop`, { method: "POST" }),

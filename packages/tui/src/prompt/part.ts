@@ -1,15 +1,5 @@
 import { displaySlice } from "./display"
 
-export const GOAL_PROMPT = "Analyze this session and create or update the goal todo list. Keep it concise and actionable."
-
-export function buildGoalPrompt(input: string) {
-  const trimmed = input.trim()
-  const command = trimmed.startsWith("/goal-mode") ? "/goal-mode" : "/goal"
-  const value = trimmed.slice(command.length).trim()
-  if (!value) return GOAL_PROMPT
-  return `${GOAL_PROMPT}\n\nContext from user: ${value}`
-}
-
 export function stripPromptPartIDs<Part extends { id: string; messageID: string; sessionID: string }>(part: Part) {
   const { id: _id, messageID: _messageID, sessionID: _sessionID, ...rest } = part
   return rest

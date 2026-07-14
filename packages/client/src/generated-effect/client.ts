@@ -138,11 +138,12 @@ type Endpoint3_9Input = {
   readonly sessionID: Endpoint3_9Request["params"]["sessionID"]
   readonly goal: Endpoint3_9Request["payload"]["goal"]
   readonly messageID?: Endpoint3_9Request["payload"]["messageID"]
+  readonly files?: Endpoint3_9Request["payload"]["files"]
 }
 const Endpoint3_9 = (raw: RawClient["server.session"]) => (input: Endpoint3_9Input) =>
   raw["session.goal.start"]({
     params: { sessionID: input["sessionID"] },
-    payload: { goal: input["goal"], messageID: input["messageID"] },
+    payload: { goal: input["goal"], messageID: input["messageID"], files: input["files"] },
   }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),

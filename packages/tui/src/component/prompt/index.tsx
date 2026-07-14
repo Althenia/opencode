@@ -57,6 +57,7 @@ import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { useGoal } from "../../context/goal"
 
 registerOpencodeSpinner()
 
@@ -157,6 +158,7 @@ export function Prompt(props: PromptProps) {
   const route = useRoute()
   const project = useProject()
   const sync = useSync()
+  const goal = useGoal()
   const tuiConfig = useTuiConfig()
   const dialog = useDialog()
   const toast = useToast()
@@ -230,6 +232,7 @@ export function Prompt(props: PromptProps) {
   }
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
+  const skillStyleId = syntax().getStyleId("extmark.skill")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
   const event = useEvent()
@@ -960,6 +963,15 @@ export function Prompt(props: PromptProps) {
     const agent = local.agent.current()
     if (!agent) return false
     const trimmed = store.prompt.input.trim()
+    const goalCommand = /^\/goal(?:\s+([\s\S]*))?$/.exec(trimmed)
+    if (goalCommand && !goalCommand[1]?.trim()) {
+      toast.show({ variant: "warning", message: "Usage: /goal <goal>, or /goal stop" })
+      return false
+    }
+    if (goalCommand?.[1]?.trim() === "stop" && !props.sessionID) {
+      toast.show({ variant: "warning", message: "No active goal to stop" })
+      return false
+    }
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
@@ -1055,7 +1067,25 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
-    if (store.mode === "shell") {
+    const goalText = goalCommand ? inputText.slice("/goal".length).trim() : undefined
+    if (goalText === "stop") {
+      void goal.stop(sessionID).then(() => goal.deselect(sessionID)).catch((error) => {
+        toast.show({ title: "Failed to stop Goal", message: errorMessage(error), variant: "error" })
+      })
+    } else if (goalText) {
+      const files = nonTextParts
+        .filter((part) => part.type === "file")
+        .map((part) => ({
+          uri: part.url,
+          name: part.filename,
+          ...(part.source?.text
+            ? { source: { start: part.source.text.start, end: part.source.text.end, text: part.source.text.value } }
+            : {}),
+        }))
+      void goal.start(goalText, sessionID, files.length > 0 ? files : undefined).catch((error) => {
+        toast.show({ title: "Failed to start Goal", message: errorMessage(error), variant: "error" })
+      })
+    } else if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({
         sessionID,
@@ -1706,6 +1736,7 @@ export function Prompt(props: PromptProps) {
         value={store.prompt.input}
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
+        skillStyleId={skillStyleId}
         promptPartTypeId={() => promptPartTypeId}
       />
     </>

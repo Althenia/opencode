@@ -314,7 +314,7 @@ test("goal palette command selects goal mode without starting supervision", asyn
     )
 
     await ready
-    api?.keymap.dispatchCommand("goal.start")
+    api?.keymap.dispatchCommand("goal.stop")
     await Bun.sleep(50)
     expect(prompted).toBe(false)
     api?.keymap.dispatchCommand("app.exit")
@@ -327,7 +327,7 @@ test("goal palette command selects goal mode without starting supervision", asyn
   }
 })
 
-test("goal palette command arms Goal on the fresh home route without creating a session", async () => {
+test("goal palette stop command does not create a session on the home route", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -364,10 +364,10 @@ test("goal palette command arms Goal on the fresh home route without creating a 
     )
 
     await ready
-    api?.keymap.dispatchCommand("goal.start")
+    api?.keymap.dispatchCommand("goal.stop")
     await Bun.sleep(0)
     api?.keymap.dispatchCommand("command.palette.show")
-    expect(await captureFrame(setup, (frame) => frame.includes("Stop goal mode"))).toContain("Stop goal mode")
+    expect(setup.captureCharFrame()).not.toContain("Stop goal mode")
     expect(mutations).toEqual([])
     api?.keymap.dispatchCommand("app.exit")
     await task
@@ -377,7 +377,7 @@ test("goal palette command arms Goal on the fresh home route without creating a 
   }
 })
 
-test("goal palette command toggles active supervision off", async () => {
+test("goal palette command stops active supervision", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -419,7 +419,7 @@ test("goal palette command toggles active supervision off", async () => {
     )
 
     await ready
-    api?.keymap.dispatchCommand("goal.start")
+    api?.keymap.dispatchCommand("goal.stop")
     await waitFor(() => stopped)
     api?.keymap.dispatchCommand("app.exit")
     await task
