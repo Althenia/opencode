@@ -51,13 +51,12 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
-import { useGoal } from "../../context/goal"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
-import { DialogPrompt } from "../../ui/dialog-prompt"
+import { useLocation } from "../../context/location"
 
 registerOpencodeSpinner()
 
@@ -144,13 +143,13 @@ let stashed: { prompt: PromptInfo; cursor: number } | undefined
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
   let anchor: BoxRenderable
-  let submissionEpoch = 0
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = useLeaderActive()
   const local = useLocal()
   const args = useArgs()
   const paths = useTuiPaths()
+  const location = useLocation()
   const terminalEnvironment = useTuiTerminalEnvironment()
   const clipboard = useClipboard()
   const sdk = useSDK()
@@ -172,7 +171,6 @@ export function Prompt(props: PromptProps) {
   const dimensions = useTerminalDimensions()
   const { theme, syntax } = useTheme()
   const kv = useKV()
-  const goal = useGoal()
   const animationsEnabled = createMemo(() => kv.get("animations_enabled", true))
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
@@ -213,7 +211,7 @@ export function Prompt(props: PromptProps) {
   const move = usePromptMove({ projectID: project.project, sessionID: () => props.sessionID })
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
-  const hasRightContent = createMemo(() => Boolean(props.right) || local.permission.mode === "auto" || goal.selected())
+  const hasRightContent = createMemo(() => Boolean(props.right))
 
   function promptModelWarning() {
     toast.show({
@@ -233,7 +231,6 @@ export function Prompt(props: PromptProps) {
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
-  const skillStyleId = syntax().getStyleId("extmark.skill")!
   let promptPartTypeId = 0
   const event = useEvent()
 
@@ -627,7 +624,6 @@ export function Prompt(props: PromptProps) {
   })
 
   onCleanup(() => {
-    submissionEpoch++
     if (store.prompt.input) {
       stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset }
     }
@@ -963,20 +959,11 @@ export function Prompt(props: PromptProps) {
     if (!store.prompt.input) return false
     const agent = local.agent.current()
     if (!agent) return false
-    const acceptedSubmission = ++submissionEpoch
     const trimmed = store.prompt.input.trim()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
     }
-    const toggleGoal = trimmed === "/goal" || trimmed === "/goal-mode"
-    if (toggleGoal) {
-      clearPrompt()
-      props.onSubmit?.()
-      await goal.toggle()
-      return true
-    }
-
     const selectedModel = local.model.current()
     if (!selectedModel) {
       void promptModelWarning()
@@ -999,59 +986,7 @@ export function Prompt(props: PromptProps) {
     }
 
     const variant = local.model.variant.current()
-    const inputText = expandTrackedPastedText(
-      store.prompt.input,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const partIndex = store.extmarkToPartIndex.get(extmark.id)
-        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
-        if (part?.type !== "text") return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
-
-    // Filter out text parts (pasted content) since they're now expanded inline
-    const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
-
-    // Capture mode before it gets reset
-    const currentMode = store.mode
-    const editorSelection = editorContext()
-    const editorParts =
-      editorSelection && editor.labelState() === "pending"
-        ? [
-            {
-              type: "text" as const,
-              text: formatEditorContext(editorSelection),
-              synthetic: true,
-              metadata: {
-                kind: "editor_context",
-                source: editorSelection.source ?? "editor",
-                filePath: editorSelection.filePath,
-                ranges: editorSelection.ranges,
-              },
-            },
-          ]
-        : []
-
-    const command = inputText.startsWith("/")
-      ? sync.data.command.find((item) => item.name === inputText.split("\n")[0].split(" ")[0].slice(1))
-      : undefined
     let sessionID = props.sessionID
-    const startsGoal =
-      store.mode === "normal" &&
-      goal.selected(sessionID) &&
-      !goal.answering(sessionID ?? "") &&
-      !command &&
-      !inputText.startsWith("/goal ") &&
-      !inputText.startsWith("/goal-mode ")
-
-    if (startsGoal && (nonTextParts.length > 0 || editorParts.length > 0)) {
-      toast.show({
-        variant: "warning",
-        message: "Remove attachments or editor context before starting Goal mode.",
-      })
-      return false
-    }
-
     let finishMoveProgress = false
     if (sessionID == null) {
       const selectedWorkspace = workspace.selection()
@@ -1085,34 +1020,42 @@ export function Prompt(props: PromptProps) {
       }
 
       sessionID = res.data.id
-      if (startsGoal) goal.adoptHome(sessionID)
     }
 
-    if (startsGoal) {
-      move.startSubmit()
-      const start = goal.start(inputText, sessionID)
-      const selectionRevision = goal.revision(sessionID)
-      void start.catch((error) => {
-        if (
-          submissionEpoch === acceptedSubmission &&
-          !input.isDestroyed &&
-          !store.prompt.input &&
-          store.prompt.parts.length === 0 &&
-          goal.selected(sessionID) &&
-          goal.revision(sessionID) === selectionRevision
-        ) {
-          input.setText(inputText)
-          setStore("prompt", { input: inputText, parts: [] })
-          input.gotoBufferEnd()
-        }
-        if (input.isDestroyed) return
-        toast.show({
-          title: "Failed to start Goal",
-          message: errorMessage(error),
-          variant: "error",
-        })
-      })
-    } else if (store.mode === "shell") {
+    const inputText = expandTrackedPastedText(
+      store.prompt.input,
+      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+        const partIndex = store.extmarkToPartIndex.get(extmark.id)
+        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
+        if (part?.type !== "text") return []
+        return [{ start: extmark.start, end: extmark.end, text: part.text }]
+      }),
+    )
+
+    // Filter out text parts (pasted content) since they're now expanded inline
+    const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
+
+    // Capture mode before it gets reset
+    const currentMode = store.mode
+    const editorSelection = editorContext()
+    const editorParts =
+      editorSelection && editor.labelState() === "pending"
+        ? [
+            {
+              type: "text" as const,
+              text: formatEditorContext(editorSelection),
+              synthetic: true,
+              metadata: {
+                kind: "editor_context",
+                source: editorSelection.source ?? "editor",
+                filePath: editorSelection.filePath,
+                ranges: editorSelection.ranges,
+              },
+            },
+          ]
+        : []
+
+    if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({
         sessionID,
@@ -1125,7 +1068,8 @@ export function Prompt(props: PromptProps) {
       })
       setStore("mode", "normal")
     } else if (
-      command
+      inputText.startsWith("/") &&
+      sync.data.command.some((x) => x.name === inputText.split("\n")[0].split(" ")[0].slice(1))
     ) {
       move.startSubmit()
       // Parse command from first line, preserve multi-line content in arguments
@@ -1502,6 +1446,9 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
+                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
+                        <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
+                      </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
@@ -1528,12 +1475,6 @@ export function Prompt(props: PromptProps) {
               </box>
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center">
-                  <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
-                    <text fg={fadeColor(theme.error, agentMetaAlpha())}>yolo</text>
-                  </Show>
-                  <Show when={store.mode === "normal" && goal.selected()}>
-                    <text fg={fadeColor(theme.warning, agentMetaAlpha())}>goal</text>
-                  </Show>
                   {props.right}
                 </box>
               </Show>
@@ -1698,7 +1639,15 @@ export function Prompt(props: PromptProps) {
                 <text fg={theme.accent}>(new working copy)</text>
               </box>
             </Match>
-            <Match when={true}>{props.hint ?? <text />}</Match>
+            <Match when={true}>
+              {props.hint ?? (
+                <Show when={props.sessionID}>
+                  <box marginLeft={1}>
+                    <text fg={theme.textMuted}>{location()?.directory ?? paths.cwd}</text>
+                  </box>
+                </Show>
+              )}
+            </Match>
           </Switch>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">
@@ -1757,7 +1706,6 @@ export function Prompt(props: PromptProps) {
         value={store.prompt.input}
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
-        skillStyleId={skillStyleId}
         promptPartTypeId={() => promptPartTypeId}
       />
     </>
