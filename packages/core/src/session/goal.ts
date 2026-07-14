@@ -1,17 +1,22 @@
 export * as GoalSupervisor from "./goal"
 
 import { Context, Effect, Exit, Fiber, Layer, Option, Queue, Scope, Stream } from "effect"
+import { eq } from "drizzle-orm"
 import { EventV2 } from "../event"
 import { makeGlobalNode } from "../effect/app-node"
 import { LocationServiceMap } from "../location-service-map"
 import { QuestionV2 } from "../question"
 import { SessionV2 } from "../session"
+import { Database } from "../database/database"
 import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
+import { GoalTable } from "./sql"
 
 export const GOAL_MAX_ITERATIONS = 25
 const EVIDENCE_LIMIT = 1_000
+
+type DatabaseService = Database.Interface["db"]
 
 export interface GoalState {
   readonly goal: string
@@ -57,11 +62,45 @@ type ActiveGoal = {
 export const make = Effect.gen(function* () {
   const sessions = yield* SessionV2.Service
   const events = yield* EventV2.Service
+  const dbOption = yield* Effect.serviceOption(Database.Service)
+  const db = Option.getOrUndefined(dbOption)?.db
   const locations = Option.getOrUndefined(yield* Effect.serviceOption(LocationServiceMap.Service))
   const scope = yield* Scope.Scope
   const goals = new Map<SessionSchema.ID, ActiveGoal>()
 
   const snapshot = (state: GoalState): GoalState => ({ ...state })
+
+  const persistGoal = (sessionID: SessionSchema.ID, state: GoalState): Effect.Effect<void> =>
+    db
+      ? db
+          .insert(GoalTable)
+          .values({
+            session_id: sessionID,
+            goal: state.goal,
+            active: state.active,
+            iteration: state.iteration,
+            cap: state.cap,
+          })
+          .onConflictDoUpdate({
+            target: GoalTable.session_id,
+            set: {
+              goal: state.goal,
+              active: state.active,
+              iteration: state.iteration,
+              cap: state.cap,
+            },
+          })
+          .run()
+          .pipe(Effect.orDie, Effect.asVoid)
+      : Effect.void
+
+  const persistActive = (sessionID: SessionSchema.ID, owner: ActiveGoal): Effect.Effect<void> =>
+    persistGoal(sessionID, owner.state)
+
+  const deleteGoal = (sessionID: SessionSchema.ID): Effect.Effect<void> =>
+    db
+      ? db.delete(GoalTable).where(eq(GoalTable.session_id, sessionID)).run().pipe(Effect.orDie, Effect.asVoid)
+      : Effect.void
 
   const status: Interface["status"] = Effect.fn("GoalSupervisor.status")((sessionID) =>
     Effect.sync(() => {
@@ -163,6 +202,7 @@ export const make = Effect.gen(function* () {
     if (goals.get(sessionID) !== owner) return
     owner.failed = failed
     yield* setState(sessionID, owner, (state) => ({ ...state, active: false }))
+    yield* persistActive(sessionID, owner)
     yield* Scope.close(owner.scope, Exit.void).pipe(Effect.forkIn(scope, { startImmediately: true }))
   })
 
@@ -180,6 +220,7 @@ export const make = Effect.gen(function* () {
     }
     const state = yield* setState(sessionID, owner, (state) => ({ ...state, iteration: state.iteration + 1 }))
     if (!state) return false
+    yield* persistActive(sessionID, owner)
     return yield* prompt(sessionID, owner, initial?.text ?? promptText(state, owner), initial?.messageID)
   })
 
@@ -289,6 +330,7 @@ export const make = Effect.gen(function* () {
       const active = goals.get(sessionID)
       goals.delete(sessionID)
       if (active) yield* Scope.close(active.scope, Exit.void)
+      yield* deleteGoal(sessionID)
     }),
   )
 
@@ -302,6 +344,7 @@ export const make = Effect.gen(function* () {
       supervisorPrompts: new Set(),
     }
     goals.set(input.sessionID, active)
+    yield* persistGoal(input.sessionID, state)
     const questions = yield* events.listen((event) => {
       if (!isQuestionAsked(event)) return Effect.void
       if (event.data.sessionID !== input.sessionID || goals.get(input.sessionID) !== active || !active.state.active)
@@ -372,6 +415,43 @@ export const make = Effect.gen(function* () {
   yield* Effect.addFinalizer(() =>
     Effect.forEach(goals.values(), (goal) => Scope.close(goal.scope, Exit.void), { discard: true }),
   )
+
+  // Recover active goals from a previous process that crashed mid-supervision.
+  // The supervisor loop itself is not resumed (post-crash continuation recovery
+  // requires a separate explicit design), but the durable state is restored so
+  // status queries return the correct goal and the client can decide to
+  // re-start or stop.
+  if (db) {
+    const rows = yield* db
+      .select()
+      .from(GoalTable)
+      .where(eq(GoalTable.active, true))
+      .all()
+      .pipe(Effect.orDie)
+
+    for (const row of rows) {
+      const state: GoalState = {
+        goal: row.goal,
+        active: true,
+        iteration: row.iteration,
+        cap: row.cap,
+      }
+      const recovered: ActiveGoal = {
+        state,
+        failed: false,
+        scope: yield* Scope.fork(scope),
+        supervisorPrompts: new Set(),
+      }
+      goals.set(row.session_id as SessionSchema.ID, recovered)
+    }
+
+    if (rows.length > 0) {
+      yield* Effect.logInfo("GoalSupervisor recovered durable goal state", {
+        count: rows.length,
+        sessions: rows.map((r: typeof rows[number]) => r.session_id),
+      })
+    }
+  }
 
   return Service.of({ start, stop, status })
 })

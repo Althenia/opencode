@@ -174,3 +174,19 @@ export const SessionContextEpochTable = sqliteTable("session_context_epoch", {
   snapshot: text({ mode: "json" }).notNull().$type<SystemContext.Snapshot>(),
   baseline_seq: integer().notNull(),
 })
+
+export const GoalTable = sqliteTable(
+  "session_goal",
+  {
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .primaryKey()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    goal: text().notNull(),
+    active: integer({ mode: "boolean" }).notNull().default(true),
+    iteration: integer().notNull().default(0),
+    cap: integer().notNull(),
+    ...Timestamps,
+  },
+  (table) => [index("session_goal_active_idx").on(table.active)],
+)

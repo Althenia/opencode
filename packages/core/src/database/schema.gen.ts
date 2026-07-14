@@ -125,6 +125,18 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`session_goal\` (
+          \`session_id\` text PRIMARY KEY,
+          \`goal\` text NOT NULL,
+          \`active\` integer DEFAULT true NOT NULL,
+          \`iteration\` integer DEFAULT 0 NOT NULL,
+          \`cap\` integer NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL,
+          CONSTRAINT \`fk_session_goal_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`message\` (
           \`id\` text PRIMARY KEY,
           \`session_id\` text NOT NULL,
@@ -241,6 +253,7 @@ export default {
       yield* tx.run(
         `CREATE UNIQUE INDEX \`permission_project_action_resource_idx\` ON \`permission\` (\`project_id\`,\`action\`,\`resource\`);`,
       )
+      yield* tx.run(`CREATE INDEX \`session_goal_active_idx\` ON \`session_goal\` (\`active\`);`)
       yield* tx.run(
         `CREATE INDEX \`message_session_time_created_id_idx\` ON \`message\` (\`session_id\`,\`time_created\`,\`id\`);`,
       )
