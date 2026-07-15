@@ -192,19 +192,17 @@ export const locationLayer = Layer.effect(
         yield* plugins.wait(PluginV2.ID.make("variant"))
         const defaultModel = session.model ? undefined : yield* catalog.model.default()
         const selected = session.model
-          ? (yield* catalog.model.available()).find(
-              (model) => model.providerID === session.model?.providerID && model.id === session.model.id,
-            )
+          ? yield* catalog.model.get(session.model.providerID, session.model.id)
           : defaultModel && supported(defaultModel)
             ? defaultModel
             : (yield* catalog.model.available()).find(supported)
-        if (!selected && session.model)
+        const provider = selected ? yield* catalog.provider.get(selected.providerID) : undefined
+        if (session.model && (!selected?.enabled || provider?.disabled))
           return yield* new ModelUnavailableError({
             providerID: session.model.providerID,
             modelID: session.model.id,
           })
         if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
-        const provider = yield* catalog.provider.get(selected.providerID)
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),
         )

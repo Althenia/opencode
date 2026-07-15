@@ -590,6 +590,7 @@ test("session timeline keeps the active Goal above its first message", async () 
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
   await Bun.write(path.join(tmp.path, "state", "kv.json"), "{}")
+  const goalText = "finished the self-improvement features. auto approve dont ask until all verification is complete"
   const events = createEventSource()
   const calls = createFetch((url) => {
     const session = {
@@ -652,7 +653,7 @@ test("session timeline keeps the active Goal above its first message", async () 
       ])
     if (url.pathname === "/session/session-test/todo" || url.pathname === "/session/session-test/diff") return json([])
     if (url.pathname === "/api/session/session-test/goal/status") {
-      return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
+      return json({ data: { goal: goalText, active: true, iteration: 2, cap: 7 } })
     }
   }, events)
   const app = await testRender(
@@ -668,6 +669,7 @@ test("session timeline keeps the active Goal above its first message", async () 
     expect(goalRow).toBeGreaterThanOrEqual(0)
     expect(messageRow).toBeGreaterThanOrEqual(0)
     expect(goalRow).toBeLessThan(messageRow)
+    expect(frame.replace(/[┃\s]+/g, " ")).toContain(`Goal · Pursuing ${goalText}`)
     expect(frame).toContain("Explore · model · ultra")
     expect(frame).not.toContain("2/7")
   } finally {

@@ -201,7 +201,7 @@ export function Session() {
     if (goal.starting(route.sessionID)) return "Goal · Starting"
     const current = goal.current()
     if (!current) return "Goal · Starting"
-    return `Goal · Pursuing ${Locale.truncate(current.goal, 64)}`
+    return `Goal · Pursuing ${current.goal}`
   })
   const location = createMemo(() => {
     const current = session()
@@ -1176,10 +1176,19 @@ export function Session() {
             <Show when={session()}>
               <Show when={goalLabel()}>
                 {(label) => (
-                  <box flexShrink={0} height={1} paddingLeft={1}>
-                    <text fg={theme.accent} wrapMode="none">
-                      {label()}
-                    </text>
+                  <box
+                    width="100%"
+                    flexShrink={0}
+                    backgroundColor={theme.backgroundPanel}
+                    border={["left"]}
+                    borderColor={theme.accent}
+                    customBorderChars={SplitBorder.customBorderChars}
+                  >
+                    <box width="100%" paddingLeft={2} paddingRight={3} paddingTop={1} paddingBottom={1}>
+                      <text width="100%" fg={theme.accent} wrapMode="word">
+                        {label()}
+                      </text>
+                    </box>
                   </box>
                 )}
               </Show>
