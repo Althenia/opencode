@@ -403,6 +403,7 @@ describe("tool.task", () => {
           subagent_type: "general",
           provider: "test",
           model: "openrouter/model/with/slashes",
+          variant: "high",
         },
         {
           sessionID: chat.id,
@@ -424,7 +425,7 @@ describe("tool.task", () => {
         providerID: ProviderV2.ID.make("test"),
         modelID: ModelV2.ID.make("openrouter/model/with/slashes"),
       })
-      expect(seen?.variant).toBeUndefined()
+      expect(seen?.variant).toBe("high")
     }),
   )
 

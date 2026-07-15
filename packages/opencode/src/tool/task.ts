@@ -57,6 +57,9 @@ const BaseParameterFields = {
   model: Schema.optional(Schema.String).annotate({
     description: "Model ID to use for this subagent. Must be provided with provider and may contain slashes.",
   }),
+  variant: Schema.optional(Schema.String).annotate({
+    description: "Model variant to use for this subagent, such as a provider-specific reasoning effort.",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -211,7 +214,7 @@ export const TaskTool = Tool.define(
             modelID: model.modelID,
             providerID: model.providerID,
           },
-          variant: explicitModel || next.model ? undefined : variant,
+          variant: params.variant ?? (explicitModel || next.model ? undefined : variant),
           agent: next.name,
           parts,
         })
