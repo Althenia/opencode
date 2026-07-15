@@ -2279,12 +2279,21 @@ noLLMServer.instance(
       const override = yield* prompt.prompt({
         sessionID: session.id,
         agent: "build",
+        model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") },
         noReply: true,
         variant: "high",
         parts: [{ type: "text", text: "hello third" }],
       })
       if (override.info.role !== "user") throw new Error("expected user message")
       expect(override.info.model.variant).toBe("high")
+
+      const stored = yield* MessageV2.get({ sessionID: session.id, messageID: override.info.id })
+      if (stored.info.role !== "user") throw new Error("expected stored user message")
+      expect(stored.info.model).toEqual({
+        providerID: ProviderV2.ID.make("test"),
+        modelID: ModelV2.ID.make("test-model"),
+        variant: "high",
+      })
 
       yield* sessions.remove(session.id)
     }),

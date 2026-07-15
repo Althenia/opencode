@@ -190,6 +190,63 @@ describe("LocationServiceMap", () => {
     ),
   )
 
+  it.live("rejects an explicitly enabled model from a disabled provider during location model resolution", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          yield* Effect.promise(() =>
+            fs.writeFile(
+              path.join(dir.path, "opencode.json"),
+              JSON.stringify({
+                providers: {
+                  unavailable: {
+                    name: "Unavailable",
+                    api: { type: "native", settings: {} },
+                    models: { chat: { disabled: false } },
+                  },
+                },
+              }),
+            ),
+          )
+          yield* Effect.gen(function* () {
+            yield* (yield* Catalog.Service).transform((catalog) => {
+              catalog.provider.update(ProviderV2.ID.make("unavailable"), (provider) => {
+                provider.disabled = true
+              })
+            })
+          }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
+          const failure = yield* SessionRunnerModel.Service.use((models) =>
+            models.resolve(
+              SessionV2.Info.make({
+                id: SessionV2.ID.make("ses_disabled_provider_enabled_model"),
+                projectID: ProjectV2.ID.global,
+                title: "test",
+                model: {
+                  id: ModelV2.ID.make("chat"),
+                  providerID: ProviderV2.ID.make("unavailable"),
+                },
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+                location,
+              }),
+            ),
+          ).pipe(Effect.provide(LocationServiceMap.Service.get(location)), Effect.flip)
+
+          expect(failure).toMatchObject({
+            _tag: "SessionRunnerModel.ModelUnavailableError",
+            providerID: "unavailable",
+            modelID: "chat",
+          })
+        }),
+      ),
+    ),
+  )
+
   it.live("installs public plugins into a location", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

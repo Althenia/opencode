@@ -44,7 +44,7 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
   })
 
 describe("SessionRunnerModel", () => {
-  it.effect("waits for internal catalog plugins before resolving the first selected model", () =>
+  it.effect("waits for plugins before resolving an explicit model excluded from availability", () =>
     Effect.gen(function* () {
       const catalog = model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" })
       const session = SessionV2.Info.make({
@@ -65,9 +65,14 @@ describe("SessionRunnerModel", () => {
           Layer.mergeAll(
             Layer.mock(Catalog.Service, {
               model: {
-                get: () => Effect.die("unused"),
+                get: (providerID, modelID) =>
+                  Effect.sync(() => {
+                    expect(providerID).toBe(catalog.providerID)
+                    expect(modelID).toBe(catalog.id)
+                    return ready ? catalog : undefined
+                  }),
                 all: () => Effect.die("unused"),
-                available: () => Effect.succeed(ready ? [catalog] : []),
+                available: () => Effect.succeed([]),
                 default: () => Effect.die("unused"),
                 small: () => Effect.die("unused"),
               },
