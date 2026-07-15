@@ -1069,9 +1069,13 @@ export function Prompt(props: PromptProps) {
 
     const goalText = goalCommand ? inputText.slice("/goal".length).trim() : undefined
     if (goalText === "stop") {
-      void goal.stop(sessionID).then(() => goal.deselect(sessionID)).catch((error) => {
+      try {
+        await goal.stop(sessionID)
+        goal.deselect(sessionID)
+      } catch (error) {
         toast.show({ title: "Failed to stop Goal", message: errorMessage(error), variant: "error" })
-      })
+        return false
+      }
     } else if (goalText) {
       const files = nonTextParts
         .filter((part) => part.type === "file")
@@ -1082,9 +1086,12 @@ export function Prompt(props: PromptProps) {
             ? { source: { start: part.source.text.start, end: part.source.text.end, text: part.source.text.value } }
             : {}),
         }))
-      void goal.start(goalText, sessionID, files.length > 0 ? files : undefined).catch((error) => {
+      try {
+        await goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
+      } catch (error) {
         toast.show({ title: "Failed to start Goal", message: errorMessage(error), variant: "error" })
-      })
+        return false
+      }
     } else if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({

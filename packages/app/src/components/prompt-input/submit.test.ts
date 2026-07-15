@@ -20,6 +20,8 @@ const optimisticSeeded: boolean[] = []
 const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
+const startedGoals: Array<{ sessionID: string; goal: string }> = []
+const stoppedGoals: string[] = []
 const syncedDirectories: string[] = []
 const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
 
@@ -29,8 +31,9 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
+let customCommands: Array<{ name: string }> = []
 
-const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
+let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 const prompt = {
   ready: Object.assign(() => true, { promise: Promise.resolve(true) }),
   current: () => promptValue,
@@ -78,6 +81,14 @@ const clientFor = (directory: string) => {
     },
     worktree: {
       create: async () => ({ data: { directory: `${directory}/new` } }),
+    },
+    goal: {
+      start: async (input: { sessionID: string; goal: string }) => {
+        startedGoals.push(input)
+      },
+      stop: async (input: { sessionID: string }) => {
+        stoppedGoals.push(input.sessionID)
+      },
     },
   }
 }
@@ -176,7 +187,7 @@ beforeAll(async () => {
 
   mock.module("@/context/sync", () => ({
     useSync: () => () => ({
-      data: { command: [] },
+      data: { command: customCommands },
       session: {
         optimistic: {
           add: (value: {
@@ -252,15 +263,102 @@ beforeEach(() => {
   params = {}
   search = {}
   sentShell.length = 0
+  startedGoals.length = 0
+  stoppedGoals.length = 0
   syncedDirectories.length = 0
+  promptValue = [{ type: "text", content: "ls", start: 0, end: 2 }]
   selected = "/repo/worktree-a"
   variant = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
+  customCommands = []
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
 describe("prompt submit worktree selection", () => {
+  test("starts Goal instead of sending /goal as a normal prompt", async () => {
+    params = { id: "session-1" }
+    customCommands = [{ name: "goal" }]
+    promptValue = [{ type: "text", content: "/goal focus on auth and tests", start: 0, end: 29 }]
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Bun.sleep(0)
+
+    expect(startedGoals).toEqual([{ sessionID: "session-1", goal: "focus on auth and tests" }])
+    expect(optimistic).toHaveLength(0)
+  })
+
+  test("stops Goal instead of sending /goal stop as a normal prompt", async () => {
+    params = { id: "session-1" }
+    promptValue = [{ type: "text", content: "/goal stop", start: 0, end: 10 }]
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Bun.sleep(0)
+
+    expect(stoppedGoals).toEqual(["session-1"])
+    expect(optimistic).toHaveLength(0)
+  })
+
+  test("bare /goal does not create a session", async () => {
+    promptValue = [{ type: "text", content: "/goal", start: 0, end: 5 }]
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(createdSessions).toEqual([])
+    expect(startedGoals).toEqual([])
+  })
+
   test("reads the latest worktree accessor value per submit", async () => {
     const submit = createPromptSubmit({
       prompt,

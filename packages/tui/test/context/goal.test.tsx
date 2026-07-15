@@ -158,6 +158,46 @@ test("/goal with text starts Goal", async () => {
   }
 })
 
+test("failed /goal start preserves the command", async () => {
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return json({ error: "goal failed" }, { status: 409 })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    await app.promptRef?.submit()
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.promptRef?.current.input).toBe("/goal ship task 6")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("failed /goal stop preserves the command", async () => {
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/stop") {
+      return json({ error: "goal failed" }, { status: 409 })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal stop", parts: [] })
+    await app.promptRef?.submit()
+    await waitFor(() => app.toast.currentToast?.title === "Failed to stop Goal")
+
+    expect(app.promptRef?.current.input).toBe("/goal stop")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("free text steers an active goal through the normal prompt endpoint", async () => {
   const calls: string[] = []
   const app = await mountGoalPrompt((url) => {

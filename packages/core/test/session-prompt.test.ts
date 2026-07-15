@@ -7,6 +7,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventTable } from "@opencode-ai/core/event/sql"
 import { SessionEvent } from "@opencode-ai/core/session/event"
+import { GoalSupervisor } from "@opencode-ai/core/session/goal"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -99,6 +100,24 @@ const eventCount = (type: string) =>
   )
 
 describe("SessionV2.prompt", () => {
+  it.effect("admits the initial goal and wakes session execution", () =>
+    Effect.gen(function* () {
+      yield* setup
+      wakeCalls.length = 0
+      const goals = yield* GoalSupervisor.make
+      const id = SessionMessage.ID.create()
+
+      yield* goals.start({ sessionID, goal: "ship task 6", messageID: id })
+
+      expect(yield* admitted(id)).toMatchObject({
+        sessionID,
+        prompt: { text: "ship task 6" },
+        delivery: "steer",
+      })
+      expect(wakeCalls).toEqual([sessionID])
+    }),
+  )
+
   it.effect("exposes the execution registry", () =>
     Effect.gen(function* () {
       activeSessions.add(sessionID)

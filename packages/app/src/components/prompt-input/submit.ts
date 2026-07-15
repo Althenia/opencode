@@ -73,6 +73,23 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
 
   const [head, ...tail] = text.split(" ")
   const cmd = head?.startsWith("/") ? head.slice(1) : undefined
+  const goalCommand = /^\/goal(?:\s+([\s\S]*))?$/.exec(text.trim())
+  const goal = goalCommand?.[1]?.trim()
+  if (goal) {
+    setBusy()
+    try {
+      if (!(await wait())) {
+        setIdle()
+        return false
+      }
+      if (goal === "stop") await input.client.goal.stop({ sessionID: input.draft.sessionID })
+      else await input.client.goal.start({ sessionID: input.draft.sessionID, goal })
+      return true
+    } catch (error) {
+      setIdle()
+      throw error
+    }
+  }
   if (cmd && input.sync.data.command.find((item) => item.name === cmd)) {
     setBusy()
     try {
@@ -293,11 +310,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const text = currentPrompt.map((part) => ("content" in part ? part.content : "")).join("")
     const images = input.imageAttachments().slice()
     const mode = input.mode()
+    const goalCommand = mode === "normal" ? /^\/goal(?:\s+([\s\S]*))?$/.exec(text.trim()) : undefined
 
     if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
       if (input.working()) void abort()
       return
     }
+    if (goalCommand && (!goalCommand[1]?.trim() || (goalCommand[1].trim() === "stop" && !params.id))) return
 
     const modelSelection = input.model ?? local.model
     const currentModel = modelSelection.current()
@@ -439,7 +458,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return true
     }
 
-    if (!isNewSession && mode === "normal" && input.shouldQueue?.()) {
+    if (!goalCommand && !isNewSession && mode === "normal" && input.shouldQueue?.()) {
       input.onQueue?.(draft)
       clearContext(submission.target())
       clearInput()
@@ -467,7 +486,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    if (text.startsWith("/")) {
+    if (!goalCommand && text.startsWith("/")) {
       const [cmdName, ...args] = text.split(" ")
       const commandName = cmdName.slice(1)
       const customCommand = sync().data.command.find((c) => c.name === commandName)
