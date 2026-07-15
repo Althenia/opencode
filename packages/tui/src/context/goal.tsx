@@ -19,7 +19,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     const route = useRoute()
     const [statuses, setStatuses] = createStore<Record<string, GoalStatus | undefined>>({})
     const [selections, setSelections] = createStore<Record<string, boolean | undefined>>({})
-    const [starting, setStarting] = createStore<Record<string, boolean | undefined>>({})
+    const [starts, setStarting] = createStore<Record<string, boolean | undefined>>({})
     const [homeSelected, setHomeSelected] = createSignal(false)
     const queues = new Map<string, Promise<void>>()
     const generations = new Map<string, number>()
@@ -58,8 +58,12 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       return id ? selections[id] === true : route.data.type === "home" && homeSelected()
     }
 
+    function starting(id: string) {
+      return starts[id] === true
+    }
+
     function answering(id: string) {
-      return selected(id) && (starting[id] === true || active(id))
+      return selected(id) && (starting(id) || active(id))
     }
 
     function generation(sessionID: string) {
@@ -251,6 +255,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       active,
       adoptHome,
       answering,
+      starting,
       revision,
       selected,
       clear,

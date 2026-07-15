@@ -45,6 +45,7 @@ import { createColors, createFrames } from "../../ui/spinner"
 import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
+import { DialogPrompt } from "../../ui/dialog-prompt"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
@@ -334,6 +335,21 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  async function requestGoalText() {
+    const value = await DialogPrompt.show(dialog, "Start Goal", {
+      placeholder: "What should OpenCode accomplish?",
+    })
+    const goal = value?.trim()
+    if (!goal) {
+      dialog.clear()
+      return false
+    }
+    dialog.clear()
+    input.setText(`/goal ${goal}`)
+    setStore("prompt", "input", input.plainText)
+    return true
+  }
+
   const promptCommands = createMemo(() =>
     [
       {
@@ -357,6 +373,16 @@ export function Prompt(props: PromptProps) {
           if (!handled) return
 
           dialog.clear()
+        },
+      },
+      {
+        name: "goal.start",
+        title: "Start goal mode",
+        category: "Session",
+        slashName: "goal",
+        run: async () => {
+          if (!(await requestGoalText())) return
+          void submit()
         },
       },
       {
@@ -958,16 +984,15 @@ export function Prompt(props: PromptProps) {
     }
     if (props.disabled) return false
     if (workspace.creating() || move.creating()) return false
-    if (auto()?.visible) return false
     if (!store.prompt.input) return false
     const agent = local.agent.current()
     if (!agent) return false
+    const bareGoal = store.prompt.input.trim() === "/goal"
+    if (bareGoal && !(await requestGoalText())) return false
+    if (!bareGoal && auto()?.visible) return false
+
     const trimmed = store.prompt.input.trim()
     const goalCommand = /^\/goal(?:\s+([\s\S]*))?$/.exec(trimmed)
-    if (goalCommand && !goalCommand[1]?.trim()) {
-      toast.show({ variant: "warning", message: "Usage: /goal <goal>, or /goal stop" })
-      return false
-    }
     if (goalCommand?.[1]?.trim() === "stop" && !props.sessionID) {
       toast.show({ variant: "warning", message: "No active goal to stop" })
       return false
@@ -1336,6 +1361,14 @@ export function Prompt(props: PromptProps) {
     return !!current
   })
 
+  const goalLabel = createMemo(() => {
+    if (store.mode !== "normal" || !props.sessionID || !goal.answering(props.sessionID)) return
+    if (goal.starting(props.sessionID)) return "Goal · Starting"
+    const current = goal.current()
+    if (!current) return "Goal · Starting"
+    return `Goal · Pursuing ${Locale.truncate(current.goal, 32)}`
+  })
+
   const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
   const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
   const variantMetaAlpha = createFadeIn(
@@ -1486,6 +1519,13 @@ export function Prompt(props: PromptProps) {
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
+                      <Show when={goalLabel()}>
+                        {(label) => (
+                          <text fg={fadeColor(theme.accent, agentMetaAlpha())} wrapMode="none">
+                            {label()}
+                          </text>
+                        )}
+                      </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
@@ -1511,7 +1551,7 @@ export function Prompt(props: PromptProps) {
                 </Show>
               </box>
               <Show when={hasRightContent()}>
-                <box flexDirection="row" gap={1} alignItems="center">
+                <box flexDirection="row" flexShrink={0} gap={1} alignItems="center">
                   {props.right}
                 </box>
               </Show>

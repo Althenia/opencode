@@ -143,7 +143,7 @@ function makeSession(outputs: Array<string | { text: string; reasoning: string }
       const input = admitted[promoted]
       if (!input) return Effect.void
       promoted++
-      return promptEvent(events, SessionEvent.Prompted, input.id, input.prompt.text)
+      return promptEvent(events, SessionEvent.Prompted, input.id, input.prompt.text, input.delivery)
     })
   return { service, prompts, promoteNext }
 }
@@ -297,13 +297,14 @@ const promptEvent = (
   definition: typeof SessionEvent.PromptAdmitted | typeof SessionEvent.Prompted,
   messageID: SessionMessage.ID,
   text: string,
+  delivery: "steer" | "queue" = "steer",
 ) =>
   events.publish(definition, {
     sessionID,
     timestamp: DateTime.makeUnsafe(1),
     messageID,
     prompt: Prompt.make({ text }),
-    delivery: "steer",
+    delivery,
   })
 
 describe("GoalSupervisor", () => {
@@ -523,6 +524,9 @@ describe("GoalSupervisor", () => {
 
       expect(fake.prompts[0]?.id).toBe(supplied)
       expect(fake.prompts[0]?.prompt.text).toBe("supplied")
+      expect(fake.prompts[0]).toMatchObject({ delivery: "steer", resume: true })
+      expect(fake.prompts[1]).toMatchObject({ delivery: "queue", resume: true })
+      expect(fake.prompts[1]?.prompt.text).toContain("Original goal: supplied")
       expect(fake.prompts[1]?.prompt.text).toContain("Continue working toward the goal.")
       expect(fake.prompts[1]?.id).toBeDefined()
       expect(fake.prompts[1]?.id).not.toBe(supplied)
@@ -543,6 +547,7 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]).toMatchObject({ delivery: "queue", resume: true })
       expect(fake.prompts[1]?.prompt.text).toContain("Answer only YES or NO")
       expect(fake.prompts[1]?.prompt.text).toContain("latest user instruction")
       expect(yield* goals.status(sessionID)).toMatchObject({ active: false, goal: "finish", iteration: 1 })
@@ -860,7 +865,8 @@ describe("GoalSupervisor", () => {
       const externalID = SessionMessage.ID.create()
       yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "also update the changelog")
       yield* promptEvent(events, SessionEvent.Prompted, externalID, "also update the changelog")
-      yield* turnEnded(events, fake)
+      const externalStep = yield* stepStarted(events)
+      yield* stepEnded(events, externalStep)
       yield* Effect.yieldNow
       const secondContinuation = fake.prompts[2]?.prompt.text
 
@@ -935,6 +941,7 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]).toMatchObject({ delivery: "queue", resume: true })
       expect(fake.prompts[1]?.prompt.text).toContain("old goal")
       expect(fake.prompts[1]?.prompt.text).toContain("latest user instruction")
       expect(fake.prompts[1]?.prompt.text).not.toContain("Iteration")
@@ -942,9 +949,47 @@ describe("GoalSupervisor", () => {
     }),
   )
 
+  it.effect("promotes queued supervisor prompts before filtering external steer delivery", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["first result", "second result"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "old goal" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts[1]).toMatchObject({ delivery: "queue", resume: true })
+
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(3)
+
+      const externalID = SessionMessage.ID.create()
+      yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "new goal")
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(3)
+
+      yield* promptEvent(events, SessionEvent.Prompted, externalID, "new goal")
+      const externalStep = yield* stepStarted(events)
+      yield* stepEnded(events, externalStep)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(4)
+      expect(fake.prompts[3]).toMatchObject({ delivery: "queue", resume: true })
+      expect(fake.prompts[3]?.prompt.text).toContain("Latest external steer: new goal")
+    }),
+  )
+
   it.effect("invalidates stale verification when a newer external steer is admitted", () =>
     Effect.gen(function* () {
-      const fake = makeSession(["GOAL COMPLETE", "YES"])
+      const fake = makeSession(["GOAL COMPLETE", "external result", "YES"])
       const events = yield* makeEvents
       const goals = yield* GoalSupervisor.make.pipe(
         Effect.provideService(SessionV2.Service, fake.service),
@@ -959,17 +1004,53 @@ describe("GoalSupervisor", () => {
 
       const externalID = SessionMessage.ID.create()
       yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "new goal")
-      yield* turnEnded(events, fake)
       yield* Effect.yieldNow
       yield* promptEvent(events, SessionEvent.Prompted, externalID, "new goal")
+      const externalStep = yield* stepStarted(events)
+      yield* stepEnded(events, externalStep)
       yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(3)
+      expect(fake.prompts[2]?.prompt.text).toContain("Latest external steer: new goal")
+
       yield* turnEnded(events, fake)
       yield* Effect.yieldNow
 
       expect(yield* goals.status(sessionID)).toMatchObject({ active: true, goal: "old goal", iteration: 1 })
       expect(fake.prompts).toHaveLength(3)
       expect(fake.prompts[2]?.prompt.text).toContain("old goal")
-      expect(fake.prompts[2]?.prompt.text).toContain("latest user instruction")
+    }),
+  )
+
+  it.effect("ignores stale verification failure after a newer external turn completes", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["GOAL COMPLETE", "external result"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "old goal" })
+      yield* Effect.yieldNow
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+
+      const externalID = SessionMessage.ID.create()
+      yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "new goal")
+      yield* promptEvent(events, SessionEvent.Prompted, externalID, "new goal")
+      const externalStep = yield* stepStarted(events)
+      yield* stepEnded(events, externalStep)
+      yield* Effect.yieldNow
+
+      expect(fake.prompts).toHaveLength(3)
+
+      yield* turnFailed(events, fake)
+      yield* Effect.yieldNow
+
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, goal: "old goal", iteration: 1 })
+      expect(fake.prompts).toHaveLength(3)
+      expect(fake.prompts[2]?.prompt.text).toContain("Latest external steer: new goal")
     }),
   )
 
