@@ -82,6 +82,7 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
+import { useGoal } from "../../context/goal"
 
 addDefaultParsers(parsers.parsers)
 
@@ -192,8 +193,16 @@ export function Session() {
   const tuiConfig = useTuiConfig()
   const kv = useKV()
   const { theme } = useTheme()
+  const goal = useGoal()
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID))
+  const goalLabel = createMemo(() => {
+    if (!goal.answering(route.sessionID)) return
+    if (goal.starting(route.sessionID)) return "Goal · Starting"
+    const current = goal.current()
+    if (!current) return "Goal · Starting"
+    return `Goal · Pursuing ${Locale.truncate(current.goal, 64)}`
+  })
   const location = createMemo(() => {
     const current = session()
     return current ? { directory: current.directory, workspaceID: current.workspaceID } : undefined
@@ -1165,6 +1174,15 @@ export function Session() {
         <box flexDirection="row" flexGrow={1} minHeight={0}>
           <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
             <Show when={session()}>
+              <Show when={goalLabel()}>
+                {(label) => (
+                  <box flexShrink={0} height={1} paddingLeft={1}>
+                    <text fg={theme.accent} wrapMode="none">
+                      {label()}
+                    </text>
+                  </box>
+                )}
+              </Show>
               <scrollbox
                 ref={(r) => (scroll = r)}
                 viewportOptions={{
@@ -1459,6 +1477,10 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
   const sync = useSync()
   const messages = createMemo(() => sync.data.message[props.message.sessionID] ?? [])
   const model = createMemo(() => Model.name(ctx.providers(), props.message.providerID, props.message.modelID))
+  const variant = createMemo(() => {
+    const parent = messages().find((message) => message.role === "user" && message.id === props.message.parentID)
+    return parent?.role === "user" && parent.model.variant !== "default" ? parent.model.variant : undefined
+  })
 
   const final = createMemo(() => {
     return props.message.finish && !["tool-calls", "unknown"].includes(props.message.finish)
@@ -1545,9 +1567,12 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
               >
                 ▣{" "}
               </span>{" "}
-              <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
-              <span style={{ fg: theme.textMuted }}> · {model()}</span>
-              <Show when={duration()}>
+               <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
+               <span style={{ fg: theme.textMuted }}> · {model()}</span>
+               <Show when={variant()}>
+                 <span style={{ fg: theme.textMuted }}> · {variant()}</span>
+               </Show>
+               <Show when={duration()}>
                 <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
               </Show>
               <Show when={props.message.error?.name === "MessageAbortedError"}>

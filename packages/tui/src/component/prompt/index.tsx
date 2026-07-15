@@ -1361,14 +1361,6 @@ export function Prompt(props: PromptProps) {
     return !!current
   })
 
-  const goalLabel = createMemo(() => {
-    if (store.mode !== "normal" || !props.sessionID || !goal.answering(props.sessionID)) return
-    if (goal.starting(props.sessionID)) return "Goal · Starting"
-    const current = goal.current()
-    if (!current) return "Goal · Starting"
-    return `Goal · Pursuing ${Locale.truncate(current.goal, 32)}`
-  })
-
   const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
   const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
   const variantMetaAlpha = createFadeIn(
@@ -1518,13 +1510,6 @@ export function Prompt(props: PromptProps) {
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
-                      </Show>
-                      <Show when={goalLabel()}>
-                        {(label) => (
-                          <text fg={fadeColor(theme.accent, agentMetaAlpha())} wrapMode="none">
-                            {label()}
-                          </text>
-                        )}
                       </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>

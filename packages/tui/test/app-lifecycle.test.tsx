@@ -17,8 +17,9 @@ import { ArgsProvider } from "../src/context/args"
 import { ClipboardProvider } from "../src/context/clipboard"
 import { DataProvider } from "../src/context/data"
 import { EditorContextProvider } from "../src/context/editor"
+import { EpilogueProvider } from "../src/context/epilogue"
 import { ExitProvider } from "../src/context/exit"
-import { GoalProvider } from "../src/context/goal"
+import { GoalProvider, useGoal } from "../src/context/goal"
 import { KVProvider } from "../src/context/kv"
 import { LocalProvider } from "../src/context/local"
 import { LocationProvider } from "../src/context/location"
@@ -35,6 +36,7 @@ import { Prompt } from "../src/component/prompt"
 import { PromptHistoryProvider } from "../src/component/prompt/history"
 import { PromptStashProvider } from "../src/component/prompt/stash"
 import { createPluginRuntime, PluginRuntimeProvider } from "../src/plugin/runtime"
+import { Session } from "../src/routes/session"
 import { DialogProvider } from "../src/ui/dialog"
 import { ToastProvider } from "../src/ui/toast"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../src/keymap"
@@ -584,31 +586,101 @@ test("an active final goal attempt does not show the exhaustion dialog", async (
   }
 })
 
-test("prompt chrome renders the active Goal", async () => {
+test("session timeline keeps the active Goal above its first message", async () => {
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
   await Bun.write(path.join(tmp.path, "state", "kv.json"), "{}")
   const events = createEventSource()
   const calls = createFetch((url) => {
+    const session = {
+      id: "session-test",
+      title: "Goal session",
+      slug: "session-test",
+      projectID: "project-test",
+      directory,
+      version: "0.0.0-test",
+      time: { created: 0, updated: 0 },
+    }
+    if (url.pathname === "/session") return json([session])
+    if (url.pathname === "/session/session-test") return json(session)
+    if (url.pathname === "/session/session-test/message")
+      return json([
+        {
+          info: {
+            id: "message-test",
+            sessionID: "session-test",
+            role: "user",
+            time: { created: 0 },
+            agent: "Build",
+            model: { providerID: "test", modelID: "model", variant: "ultra" },
+          },
+          parts: [
+            {
+              id: "part-test",
+              sessionID: "session-test",
+              messageID: "message-test",
+              type: "text",
+              text: "First timeline message",
+            },
+          ],
+        },
+        {
+          info: {
+            id: "message-assistant",
+            sessionID: "session-test",
+            role: "assistant",
+            agent: "explore",
+            modelID: "model",
+            providerID: "test",
+            mode: "explore",
+            parentID: "message-test",
+            path: { cwd: directory, root: directory },
+            cost: 0,
+            tokens: { input: 0, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, completed: 2 },
+          },
+          parts: [
+            {
+              id: "part-assistant",
+              sessionID: "session-test",
+              messageID: "message-assistant",
+              type: "text",
+              text: "Done",
+            },
+          ],
+        },
+      ])
+    if (url.pathname === "/session/session-test/todo" || url.pathname === "/session/session-test/diff") return json([])
     if (url.pathname === "/api/session/session-test/goal/status") {
       return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
     }
   }, events)
   const app = await testRender(
-    () => <PromptHarness root={tmp.path} fetch={calls.fetch} events={events.source} />,
+    () => <PromptHarness root={tmp.path} fetch={calls.fetch} events={events.source} session />,
     { width: 80, height: 24 },
   )
 
   try {
     const frame = await captureFrame(app, (value) => value.includes("Goal · Pursuing"))
-    expect(frame).toContain("Goal · Pursuing")
+    const rows = frame.split("\n")
+    const goalRow = rows.findIndex((row) => row.includes("Goal · Pursuing"))
+    const messageRow = rows.findIndex((row) => row.includes("First timeline message"))
+    expect(goalRow).toBeGreaterThanOrEqual(0)
+    expect(messageRow).toBeGreaterThanOrEqual(0)
+    expect(goalRow).toBeLessThan(messageRow)
+    expect(frame).toContain("Explore · model · ultra")
     expect(frame).not.toContain("2/7")
   } finally {
     app.renderer.destroy()
   }
 })
 
-function PromptHarness(props: { root: string; fetch: typeof fetch; events: ReturnType<typeof createEventSource>["source"] }) {
+function PromptHarness(props: {
+  root: string
+  fetch: typeof fetch
+  events: ReturnType<typeof createEventSource>["source"]
+  session?: boolean
+}) {
   const renderer = useRenderer()
   const config = createTuiResolvedConfig({ plugin_enabled: {} })
   const keymap = createDefaultOpenTuiKeymap(renderer)
@@ -643,16 +715,18 @@ function PromptHarness(props: { root: string; fetch: typeof fetch; events: Retur
                                   <DataProvider>
                                     <ThemeProvider mode="dark">
                                       <LocalProvider>
-                                        <PromptSyncData />
+                                        <PromptSyncData session={props.session} />
                                         <PromptStashProvider>
                                           <DialogProvider>
                                             <FrecencyProvider>
                                               <PromptHistoryProvider>
                                                 <PromptRefProvider>
                                                   <EditorContextProvider>
-                                                    <LocationProvider>
-                                                      <Prompt sessionID="session-test" />
-                                                    </LocationProvider>
+                                                    <EpilogueProvider set={() => {}}>
+                                                      <LocationProvider>
+                                                        {props.session ? <Session /> : <Prompt sessionID="session-test" />}
+                                                      </LocationProvider>
+                                                    </EpilogueProvider>
                                                   </EditorContextProvider>
                                                 </PromptRefProvider>
                                               </PromptHistoryProvider>
@@ -680,10 +754,14 @@ function PromptHarness(props: { root: string; fetch: typeof fetch; events: Retur
   )
 }
 
-function PromptSyncData() {
+function PromptSyncData(props: { session?: boolean }) {
   const sync = useSync()
+  const goal = useGoal()
   onMount(() => {
     sync.set("agent", [{ name: "Build", mode: "primary", hidden: false, permission: [], options: {} }])
+    if (!props.session) return
+    goal.adoptHome("session-test")
+    void goal.status()
   })
   return undefined
 }
