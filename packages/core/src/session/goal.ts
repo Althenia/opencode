@@ -42,6 +42,13 @@ type GoalEvent =
   | EventV2.Payload<typeof SessionEvent.Step.Ended>
   | EventV2.Payload<typeof SessionEvent.Step.Failed>
 
+type SupervisorPrompt = {
+  readonly kind: "work" | "verification"
+  readonly revision: number
+}
+
+type Turn = SupervisorPrompt | { readonly kind: "external"; readonly revision: number }
+
 export interface Interface {
   readonly start: (input: StartInput) => Effect.Effect<GoalState, PromptError>
   readonly stop: (sessionID: SessionSchema.ID) => Effect.Effect<void>
@@ -57,8 +64,9 @@ type ActiveGoal = {
   latestExternalSteer?: string
   claimedCompletion?: string
   failedVerification?: string
+  revision: number
   readonly scope: Scope.Closeable
-  readonly supervisorPrompts: Set<SessionMessage.ID>
+  readonly supervisorPrompts: Map<SessionMessage.ID, SupervisorPrompt>
 }
 
 export const make = Effect.gen(function* () {
@@ -188,12 +196,14 @@ export const make = Effect.gen(function* () {
     sessionID: SessionSchema.ID,
     owner: ActiveGoal,
     text: string,
+    kind: SupervisorPrompt["kind"],
+    delivery: "steer" | "queue" = "queue",
     id = SessionMessage.ID.create(),
     files?: PromptInput.FileAttachment[],
   ) {
     if (goals.get(sessionID) !== owner || !owner.state.active) return false
-    owner.supervisorPrompts.add(id)
-    yield* sessions.prompt({ id, sessionID, prompt: { text, ...(files ? { files } : {}) }, delivery: "steer", resume: true })
+    owner.supervisorPrompts.set(id, { kind, revision: owner.revision })
+    yield* sessions.prompt({ id, sessionID, prompt: { text, ...(files ? { files } : {}) }, delivery, resume: true })
     return goals.get(sessionID) === owner && owner.state.active
   })
 
@@ -224,7 +234,15 @@ export const make = Effect.gen(function* () {
     const state = yield* setState(sessionID, owner, (state) => ({ ...state, iteration: state.iteration + 1 }))
     if (!state) return false
     yield* persistActive(sessionID, owner)
-    return yield* prompt(sessionID, owner, initial?.text ?? promptText(state, owner), initial?.messageID, initial?.files)
+    return yield* prompt(
+      sessionID,
+      owner,
+      initial?.text ?? promptText(state, owner),
+      "work",
+      initial ? "steer" : "queue",
+      initial?.messageID,
+      initial?.files,
+    )
   })
 
   const run = Effect.fn("GoalSupervisor.run")(function* (
@@ -232,11 +250,11 @@ export const make = Effect.gen(function* () {
     owner: ActiveGoal,
     queue: Queue.Queue<GoalEvent>,
   ) {
-    const pendingExternal = new Set<SessionMessage.ID>()
+    const pendingExternal = new Map<SessionMessage.ID, number>()
     const seenAssistantMessages = new Set<SessionMessage.ID>()
     let activeAssistantMessageID: SessionMessage.ID | undefined
-    let stepEligible = false
-    let turn: "work" | "verification" | "external" = "work"
+    let pendingTurn: Turn | undefined
+    let activeTurn: Turn | undefined
     while (true) {
       const event = yield* Queue.take(queue)
       const active = goals.get(sessionID)
@@ -244,28 +262,32 @@ export const make = Effect.gen(function* () {
 
       if (event.type === SessionEvent.PromptAdmitted.type) {
         if (active.supervisorPrompts.has(event.data.messageID) || event.data.delivery !== "steer") continue
-        pendingExternal.add(event.data.messageID)
+        active.revision++
+        pendingExternal.set(event.data.messageID, active.revision)
         active.latestExternalSteer = bounded(event.data.prompt.text)
         active.claimedCompletion = undefined
         active.failedVerification = undefined
-        turn = "external"
         continue
       }
 
       if (event.type === SessionEvent.Prompted.type) {
-        if (event.data.delivery !== "steer") continue
-        if (active.supervisorPrompts.delete(event.data.messageID)) {
-          stepEligible = true
+        const supervisor = active.supervisorPrompts.get(event.data.messageID)
+        if (supervisor) {
+          active.supervisorPrompts.delete(event.data.messageID)
+          pendingTurn = supervisor
           continue
         }
-        if (!pendingExternal.delete(event.data.messageID)) continue
+        if (event.data.delivery !== "steer") continue
+        const revision = pendingExternal.get(event.data.messageID)
+        if (revision === undefined) continue
+        pendingExternal.delete(event.data.messageID)
         active.latestExternalSteer = bounded(event.data.prompt.text)
         active.latestAssistantResult = undefined
         active.claimedCompletion = undefined
         active.failedVerification = undefined
         activeAssistantMessageID = undefined
-        stepEligible = true
-        turn = "external"
+        activeTurn = undefined
+        pendingTurn = { kind: "external", revision }
         yield* setState(sessionID, owner, (state) => ({
           ...state,
           active: true,
@@ -277,15 +299,25 @@ export const make = Effect.gen(function* () {
       if (event.type === SessionEvent.Step.Started.type) {
         if (seenAssistantMessages.has(event.data.assistantMessageID)) continue
         seenAssistantMessages.add(event.data.assistantMessageID)
-        if (!stepEligible) continue
-        stepEligible = false
+        if (!pendingTurn) continue
         activeAssistantMessageID = event.data.assistantMessageID
+        activeTurn = pendingTurn
+        pendingTurn = undefined
         continue
       }
 
       if (event.type === SessionEvent.Step.Failed.type) {
         if (activeAssistantMessageID !== event.data.assistantMessageID) continue
+        const failedTurn = activeTurn
         activeAssistantMessageID = undefined
+        activeTurn = undefined
+        if (
+          pendingExternal.size === 0 &&
+          failedTurn &&
+          failedTurn.kind !== "external" &&
+          failedTurn.revision !== active.revision
+        )
+          continue
         yield* retire(sessionID, owner, true)
         return
       }
@@ -293,12 +325,16 @@ export const make = Effect.gen(function* () {
       if (
         event.type !== SessionEvent.Step.Ended.type ||
         pendingExternal.size > 0 ||
-        activeAssistantMessageID !== event.data.assistantMessageID
+        activeAssistantMessageID !== event.data.assistantMessageID ||
+        !activeTurn
       )
         continue
+      const completedTurn = activeTurn
       activeAssistantMessageID = undefined
+      activeTurn = undefined
+      if (completedTurn.kind !== "external" && completedTurn.revision !== active.revision) continue
 
-      if (turn === "verification") {
+      if (completedTurn.kind === "verification") {
         const latest = yield* latestAssistantResult(sessionID)
         const verification = bounded(latest.all)
         if (verified(latest.text)) {
@@ -307,7 +343,6 @@ export const make = Effect.gen(function* () {
         }
         if (goals.get(sessionID) !== owner) return
         active.failedVerification = verification
-        turn = "work"
         if (!(yield* continueGoal(sessionID, owner))) return
         continue
       }
@@ -317,13 +352,11 @@ export const make = Effect.gen(function* () {
       if (isReadyForVerification(latest.text)) {
         if (goals.get(sessionID) !== owner || !owner.state.active) return
         active.claimedCompletion = active.latestAssistantResult
-        turn = "verification"
-        yield* prompt(sessionID, owner, verificationPromptText(owner.state))
+        yield* prompt(sessionID, owner, verificationPromptText(owner.state), "verification")
         continue
       }
 
       if (goals.get(sessionID) !== owner) return
-      turn = "work"
       if (!(yield* continueGoal(sessionID, owner))) return
     }
   })
@@ -343,8 +376,9 @@ export const make = Effect.gen(function* () {
     const active: ActiveGoal = {
       state,
       failed: false,
+      revision: 0,
       scope: yield* Scope.fork(scope),
-      supervisorPrompts: new Set(),
+      supervisorPrompts: new Map(),
     }
     goals.set(input.sessionID, active)
     yield* persistGoal(input.sessionID, state)
@@ -446,8 +480,9 @@ export const make = Effect.gen(function* () {
       const recovered: ActiveGoal = {
         state,
         failed: false,
+        revision: 0,
         scope: yield* Scope.fork(scope),
-        supervisorPrompts: new Set(),
+        supervisorPrompts: new Map(),
       }
       goals.set(row.session_id as SessionSchema.ID, recovered)
     }

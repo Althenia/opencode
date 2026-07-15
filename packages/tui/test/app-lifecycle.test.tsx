@@ -584,7 +584,7 @@ test("an active final goal attempt does not show the exhaustion dialog", async (
   }
 })
 
-test("prompt chrome renders yolo then goal without a counter", async () => {
+test("prompt chrome renders the active Goal", async () => {
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
   await Bun.write(path.join(tmp.path, "state", "kv.json"), "{}")
@@ -600,11 +600,9 @@ test("prompt chrome renders yolo then goal without a counter", async () => {
   )
 
   try {
-    const frame = await captureFrame(app, (frame) => frame.includes("yolo") && frame.includes("goal"))
-    expect(frame).toContain("yolo")
-    expect(frame).toMatch(/yolo\s+goal/)
+    const frame = await captureFrame(app, (value) => value.includes("Goal · Pursuing"))
+    expect(frame).toContain("Goal · Pursuing")
     expect(frame).not.toContain("2/7")
-    expect(frame.split("\n").find((line) => line.includes("yolo"))?.indexOf("yolo")).toBeGreaterThan(40)
   } finally {
     app.renderer.destroy()
   }

@@ -35,7 +35,7 @@ import { DialogProvider, useDialog } from "../../src/ui/dialog"
 import { ToastProvider, useToast } from "../../src/ui/toast"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../src/keymap"
 
-test("bare /goal on home does not create a session or select Goal", async () => {
+test("bare /goal on home opens the goal prompt without creating a session or starting Goal", async () => {
   const calls: string[] = []
   const app = await mountGoalPrompt(
     (url, request) => {
@@ -51,7 +51,9 @@ test("bare /goal on home does not create a session or select Goal", async () => 
     await waitFor(() => !!app.local.model.current())
     app.promptRef?.set({ input: "/goal", parts: [] })
     await app.promptRef?.submit()
+    const frame = await captureFrame(app, (value) => value.includes("Start Goal"))
 
+    expect(frame).toContain("Start Goal")
     expect(calls).toEqual([])
     expect(app.goal.selected()).toBe(false)
     expect(app.route.data.type).toBe("home")
@@ -102,29 +104,42 @@ test("the first accepted home Goal prompt creates one session and starts Goal wi
   }
 })
 
-test("bare /goal preserves the prompt without selecting goal mode", async () => {
+test("/goal autocomplete handles blank cancellation and starts Goal through keyboard input", async () => {
   const calls: Array<{ method: string; body?: unknown }> = []
   const app = await mountGoalPrompt(async (url, request) => {
     if (url.pathname === "/api/session/session-test/goal/start") {
       calls.push({ method: "goalStart", body: request ? await request.json() : undefined })
-      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
-    }
-    if (url.pathname === "/session/session-test/message") {
-      calls.push({ method: "prompt", body: request ? await request.json() : undefined })
-      return json({ data: {} })
+      return json({ data: { goal: "focus on auth and tests", active: true, iteration: 1, cap: 7 } })
     }
   })
 
   try {
     await waitFor(() => !!app.promptRef)
     await waitFor(() => !!app.local.model.current())
-    app.promptRef?.set({ input: "/goal", parts: [] })
-    await app.promptRef?.submit()
+    await waitFor(() => app.promptRef?.focused === true)
 
+    await app.mockInput.typeText("/go")
+    expect(await captureFrame(app, (value) => value.includes("/goal"))).toContain("/goal")
+    app.mockInput.pressEnter()
+    expect(await captureFrame(app, (value) => value.includes("Start Goal"))).toContain("Start Goal")
+
+    await app.mockInput.typeText("   ")
+    app.mockInput.pressEnter()
+    await waitFor(() => app.dialog.stack.length === 0)
     expect(calls).toEqual([])
-    expect(app.goal.selected("session-test")).toBe(false)
-    expect(app.promptRef?.current.input).toBe("/goal")
-    expect(app.local.permission.mode).toBe("normal")
+
+    await waitFor(() => app.promptRef?.focused === true)
+    await app.mockInput.typeText("/go")
+    expect(await captureFrame(app, (value) => value.includes("/goal"))).toContain("/goal")
+    app.mockInput.pressEnter()
+    expect(await captureFrame(app, (value) => value.includes("Start Goal"))).toContain("Start Goal")
+
+    await app.mockInput.typeText("focus on auth and tests")
+    app.mockInput.pressEnter()
+    await waitFor(() => calls.length === 1)
+
+    expect(calls[0]?.method).toBe("goalStart")
+    expect(calls[0]?.body).toMatchObject({ goal: "focus on auth and tests" })
   } finally {
     app.renderer.destroy()
   }
@@ -791,6 +806,70 @@ test("status polling records active goal status", async () => {
   }
 })
 
+test("prompt Goal indicator transitions from replacement start to active to removed", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/status") {
+      return json({ data: { goal: "stale goal", active: false, iteration: 7, cap: 7 } })
+    }
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+    if (url.pathname === "/api/session/session-test/goal/stop") return new Response(null, { status: 204 })
+  })
+
+  try {
+    await app.goal.status()
+    const start = app.goal.start("replacement goal")
+    await waitFor(() => resolveStart !== undefined)
+
+    const starting = await captureFrame(app, (value) => value.includes("Goal · Starting"))
+    expect(starting).toContain("Goal · Starting")
+    expect(starting).not.toContain("stale goal")
+
+    resolveStart(json({ data: { goal: "replacement goal", active: true, iteration: 1, cap: 7 } }))
+    await start
+    const active = await captureFrame(app, (value) => value.includes("Goal · Pursuing replacement goal"))
+    expect(active).toContain("Goal · Pursuing replacement goal")
+
+    await app.goal.stop()
+    const removed = await captureFrame(app, (value) => !value.includes("Goal ·"))
+    expect(removed).not.toContain("Goal ·")
+  } finally {
+    resolveStart?.(json({ data: { goal: "replacement goal", active: true, iteration: 1, cap: 7 } }))
+    app.renderer.destroy()
+  }
+})
+
+test("long Goal indicator preserves model and right controls at narrow width", async () => {
+  const goal = "ship a deliberately long goal through every validation stage"
+  const app = await mountGoalPrompt(
+    (url) => {
+      if (url.pathname === "/api/session/session-test/goal/start") {
+        return json({ data: { goal, active: true, iteration: 1, cap: 7 } })
+      }
+    },
+    { width: 60, right: true },
+  )
+
+  try {
+    await app.goal.start(goal)
+    const frame = await captureFrame(
+      app,
+      (value) => value.includes("Goal · Pursuing") && value.includes("model") && value.includes("controls"),
+    )
+
+    expect(frame).toContain("Goal · Pursuing")
+    expect(frame).toContain("model")
+    expect(frame).toContain("controls")
+    expect(frame).not.toContain(goal)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("a server-active final goal attempt remains active and answering", async () => {
   let starts = 0
   const app = await mountGoalPrompt((url) => {
@@ -883,7 +962,13 @@ test("failed goal start does not change yolo mode", async () => {
 
 async function mountGoalPrompt(
   handler: (url: URL, request?: Request) => Response | undefined | Promise<Response | undefined>,
-  options: { sidebar?: boolean; home?: boolean; editorSelection?: EditorSelection } = {},
+  options: {
+    sidebar?: boolean
+    home?: boolean
+    editorSelection?: EditorSelection
+    width?: number
+    right?: boolean
+  } = {},
 ) {
   const tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
@@ -917,9 +1002,10 @@ async function mountGoalPrompt(
         sidebar={options.sidebar}
         home={options.home}
         editorSelection={options.editorSelection}
+        right={options.right}
       />
     ),
-    { width: 80, height: 24 },
+    { width: options.width ?? 80, height: 24 },
   )
   const destroy = app.renderer.destroy.bind(app.renderer)
   app.renderer.destroy = () => {
@@ -947,6 +1033,7 @@ function Harness(props: {
   sidebar?: boolean
   home?: boolean
   editorSelection?: EditorSelection
+  right?: boolean
 }) {
   const renderer = useRenderer()
   const config = createTuiResolvedConfig({ plugin_enabled: {} })
@@ -998,12 +1085,15 @@ function Harness(props: {
                                                   >
                                                     <LocationProvider>
                                                       <PromptSyncData state={props.state} />
-                                                      <Prompt
-                                                        sessionID={props.home ? undefined : "session-test"}
-                                                        ref={(ref) => {
-                                                          props.state.promptRef = ref
-                                                        }}
-                                                      />
+                                                      <box flexGrow={1} justifyContent="flex-end">
+                                                        <Prompt
+                                                          sessionID={props.home ? undefined : "session-test"}
+                                                          right={props.right ? <text>controls</text> : undefined}
+                                                          ref={(ref) => {
+                                                            props.state.promptRef = ref
+                                                          }}
+                                                        />
+                                                      </box>
                                                       {props.sidebar && <Sidebar sessionID="session-test" />}
                                                     </LocationProvider>
                                                   </EditorContextProvider>
