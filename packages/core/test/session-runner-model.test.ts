@@ -1,11 +1,13 @@
 import { describe, expect } from "bun:test"
 import { LLM } from "@opencode-ai/llm"
 import { LLMClient } from "@opencode-ai/llm/route"
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Layer } from "effect"
 import { Headers } from "effect/unstable/http"
+import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Integration } from "@opencode-ai/core/integration"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { PluginV2 } from "@opencode-ai/core/plugin"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
@@ -42,6 +44,69 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
   })
 
 describe("SessionRunnerModel", () => {
+  it.effect("waits for internal catalog plugins before resolving the first selected model", () =>
+    Effect.gen(function* () {
+      const catalog = model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" })
+      const session = SessionV2.Info.make({
+        id: SessionV2.ID.make("ses_model_cold_start"),
+        projectID: ProjectV2.ID.global,
+        title: "test",
+        model: { id: catalog.id, providerID: catalog.providerID },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+        location: { directory: AbsolutePath.make("/project") },
+      })
+      let ready = false
+
+      const resolved = yield* SessionRunnerModel.Service.use((service) => service.resolve(session)).pipe(
+        Effect.provide(SessionRunnerModel.locationLayer),
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(Catalog.Service, {
+              model: {
+                get: () => Effect.die("unused"),
+                all: () => Effect.die("unused"),
+                available: () => Effect.succeed(ready ? [catalog] : []),
+                default: () => Effect.die("unused"),
+                small: () => Effect.die("unused"),
+              },
+              provider: {
+                get: () => Effect.succeed(undefined),
+                all: () => Effect.die("unused"),
+                available: () => Effect.die("unused"),
+              },
+            }),
+            Layer.mock(Integration.Service, {
+              connection: {
+                active: () => Effect.succeed(undefined),
+                resolve: () => Effect.die("unused"),
+                key: () => Effect.die("unused"),
+                oauth: () => Effect.die("unused"),
+                update: () => Effect.die("unused"),
+                remove: () => Effect.die("unused"),
+              },
+              attempt: {
+                status: () => Effect.die("unused"),
+                complete: () => Effect.die("unused"),
+                cancel: () => Effect.die("unused"),
+              },
+            }),
+            Layer.mock(PluginV2.Service, {
+              wait: (id) =>
+                Effect.sync(() => {
+                  expect(id).toBe(PluginV2.ID.make("variant"))
+                  ready = true
+                }),
+            }),
+          ),
+        ),
+      )
+
+      expect(resolved).toMatchObject({ id: "api-test-model", provider: "test-provider" })
+    }),
+  )
+
   it.effect("maps catalog OpenAI AI SDK models into native Responses routes", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(

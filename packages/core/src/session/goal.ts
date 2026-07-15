@@ -30,7 +30,7 @@ export interface StartInput {
   readonly sessionID: SessionSchema.ID
   readonly goal: string
   readonly messageID?: SessionMessage.ID
-  readonly files?: PromptInput.FileAttachment[]
+  readonly files?: ReadonlyArray<PromptInput.FileAttachment>
   readonly cap?: number
 }
 
@@ -199,7 +199,7 @@ export const make = Effect.gen(function* () {
     kind: SupervisorPrompt["kind"],
     delivery: "steer" | "queue" = "queue",
     id = SessionMessage.ID.create(),
-    files?: PromptInput.FileAttachment[],
+    files?: ReadonlyArray<PromptInput.FileAttachment>,
   ) {
     if (goals.get(sessionID) !== owner || !owner.state.active) return false
     owner.supervisorPrompts.set(id, { kind, revision: owner.revision })
@@ -222,7 +222,7 @@ export const make = Effect.gen(function* () {
   const continueGoal = Effect.fn("GoalSupervisor.continueGoal")(function* (
     sessionID: SessionSchema.ID,
     owner: ActiveGoal,
-    initial?: { text: string; messageID?: SessionMessage.ID; files?: PromptInput.FileAttachment[] },
+    initial?: { text: string; messageID?: SessionMessage.ID; files?: ReadonlyArray<PromptInput.FileAttachment> },
   ) {
     if (goals.get(sessionID) !== owner) return false
     const current = owner.state

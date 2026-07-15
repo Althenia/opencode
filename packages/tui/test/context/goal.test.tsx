@@ -806,7 +806,7 @@ test("status polling records active goal status", async () => {
   }
 })
 
-test("prompt Goal indicator transitions from replacement start to active to removed", async () => {
+test("Goal state transitions from replacement start to active to removed", async () => {
   let resolveStart!: (response: Response) => void
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/api/session/session-test/goal/status") {
@@ -825,25 +825,24 @@ test("prompt Goal indicator transitions from replacement start to active to remo
     const start = app.goal.start("replacement goal")
     await waitFor(() => resolveStart !== undefined)
 
-    const starting = await captureFrame(app, (value) => value.includes("Goal · Starting"))
-    expect(starting).toContain("Goal · Starting")
-    expect(starting).not.toContain("stale goal")
+    expect(app.goal.starting("session-test")).toBe(true)
+    expect(app.goal.current()?.goal).toBe("stale goal")
 
     resolveStart(json({ data: { goal: "replacement goal", active: true, iteration: 1, cap: 7 } }))
     await start
-    const active = await captureFrame(app, (value) => value.includes("Goal · Pursuing replacement goal"))
-    expect(active).toContain("Goal · Pursuing replacement goal")
+    expect(app.goal.current()).toMatchObject({ goal: "replacement goal", active: true })
+    expect(app.goal.starting("session-test")).toBe(false)
 
     await app.goal.stop()
-    const removed = await captureFrame(app, (value) => !value.includes("Goal ·"))
-    expect(removed).not.toContain("Goal ·")
+    expect(app.goal.answering("session-test")).toBe(false)
+    expect(app.goal.current()).toBeUndefined()
   } finally {
     resolveStart?.(json({ data: { goal: "replacement goal", active: true, iteration: 1, cap: 7 } }))
     app.renderer.destroy()
   }
 })
 
-test("long Goal indicator preserves model and right controls at narrow width", async () => {
+test("long Goal stays out of prompt chrome at narrow width", async () => {
   const goal = "ship a deliberately long goal through every validation stage"
   const app = await mountGoalPrompt(
     (url) => {
@@ -856,14 +855,11 @@ test("long Goal indicator preserves model and right controls at narrow width", a
 
   try {
     await app.goal.start(goal)
-    const frame = await captureFrame(
-      app,
-      (value) => value.includes("Goal · Pursuing") && value.includes("model") && value.includes("controls"),
-    )
+    const frame = await captureFrame(app, (value) => value.includes("model") && value.includes("controls"))
 
-    expect(frame).toContain("Goal · Pursuing")
     expect(frame).toContain("model")
     expect(frame).toContain("controls")
+    expect(frame).not.toContain("Goal ·")
     expect(frame).not.toContain(goal)
   } finally {
     app.renderer.destroy()

@@ -12,6 +12,8 @@ import { Catalog } from "../../catalog"
 import { Credential } from "../../credential"
 import { Integration } from "../../integration"
 import { ModelV2 } from "../../model"
+import { PluginV2 } from "../../plugin"
+import { PluginInternal } from "../../plugin/internal"
 import { ProviderV2 } from "../../provider"
 import { SessionSchema } from "../schema"
 
@@ -184,9 +186,10 @@ export const locationLayer = Layer.effect(
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
     const integrations = yield* Integration.Service
+    const plugins = yield* PluginV2.Service
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
-        // Location plugins populate and filter the catalog asynchronously during layer startup.
+        yield* plugins.wait(PluginV2.ID.make("variant"))
         const defaultModel = session.model ? undefined : yield* catalog.model.default()
         const selected = session.model
           ? (yield* catalog.model.available()).find(
@@ -215,4 +218,8 @@ export const locationLayer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer: locationLayer, deps: [Catalog.node, Integration.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer: locationLayer,
+  deps: [Catalog.node, Integration.node, PluginV2.node, PluginInternal.node],
+})
