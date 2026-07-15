@@ -18,6 +18,7 @@ const locationLayer = Layer.succeed(
   Location.Service.of(location({ directory: AbsolutePath.make(import.meta.dir) })),
 )
 const it = testEffect(AppNodeBuilder.build(Catalog.node, [[Location.node, locationLayer]]))
+const gpt56Efforts = ["none", "low", "medium", "high", "xhigh", "max"].map((id) => ModelV2.VariantID.make(id))
 
 function modelInfo(id: string, apiID = id, pkg = "@ai-sdk/openai"): ModelV2Info {
   return {
@@ -37,40 +38,38 @@ function modelInfo(id: string, apiID = id, pkg = "@ai-sdk/openai"): ModelV2Info 
 }
 
 describe("VariantPlugin", () => {
-  test("adds max to direct OpenAI GPT-5.6 models", () => {
+  test("adds supported efforts to direct OpenAI GPT-5.6 models", () => {
     for (const model of [
       modelInfo("gpt-5.6"),
       modelInfo("gpt-5.6-solace"),
       modelInfo("alias", "gpt-5.6"),
     ]) {
-      expect(VariantPlugin.generate(model)).toEqual([
-        {
-          id: "max",
-          headers: {},
-          body: { reasoning: { effort: "max" } },
-        },
-      ])
+      const variants = VariantPlugin.generate(model)
+      expect(variants.map((variant) => variant.id)).toEqual(gpt56Efforts)
+      expect(variants).toContainEqual({ id: "high", headers: {}, body: { reasoning: { effort: "high" } } })
     }
   })
 
-  test("adds ultra only for direct OpenAI GPT-5.6 Sol, Terra, and Luna", () => {
+  test("does not expose Codex-only ultra on direct OpenAI GPT-5.6 families", () => {
     for (const model of [
       modelInfo("gpt-5.6-sol", "alias"),
       modelInfo("alias", "gpt-5.6-terra"),
       modelInfo("gpt-5.6-luna"),
+      modelInfo("gpt-5.6-codex"),
     ]) {
-      expect(VariantPlugin.generate(model)).toEqual([
-        {
-          id: "max",
-          headers: {},
-          body: { reasoning: { effort: "max" } },
-        },
-        {
-          id: "ultra",
-          headers: {},
-          body: { reasoning: { effort: "ultra" } },
-        },
-      ])
+      const variants = VariantPlugin.generate(model)
+      expect(variants.map((variant) => variant.id)).toEqual(gpt56Efforts)
+    }
+  })
+
+  test("restricts direct OpenAI GPT-5.6 subtype efforts", () => {
+    for (const [model, efforts] of [
+      [modelInfo("gpt-5.6-pro"), ["medium", "high", "xhigh", "max"]],
+      [modelInfo("gpt-5.6-pro", "deployment-chat"), ["medium", "high", "xhigh", "max"]],
+      [modelInfo("gpt-5.6-chat-latest"), ["medium", "max"]],
+      [modelInfo("gpt-5.6-deep-research"), ["medium", "max"]],
+    ] as const) {
+      expect(VariantPlugin.generate(model).map((variant) => variant.id)).toEqual([...efforts])
     }
   })
 
@@ -104,6 +103,27 @@ describe("VariantPlugin", () => {
         expect.objectContaining({ id: "high", body: { reasoning_effort: "high" } }),
         expect.objectContaining({ id: "max", body: { reasoning_effort: "max" } }),
       ])
+    }),
+  )
+
+  it.effect("uses an inherited OpenAI provider API for native-default models", () =>
+    Effect.gen(function* () {
+      const service = yield* Catalog.Service
+      yield* service.transform((catalog) => {
+        catalog.provider.update(ProviderV2.ID.opencode, (provider) => {
+          provider.api = { type: "aisdk", package: "@ai-sdk/openai" }
+        })
+        catalog.model.update(ProviderV2.ID.opencode, ModelV2.ID.make("glm-5.2"), (model) => {
+          model.api = { id: ModelV2.ID.make("gpt-5.6-sol"), type: "native", settings: {} }
+        })
+      })
+      yield* VariantPlugin.Plugin.effect(host({ catalog: catalogHost(service) }))
+
+      expect(
+        (yield* service.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("glm-5.2")))?.variants.map(
+          (variant) => variant.id,
+        ),
+      ).toEqual(gpt56Efforts)
     }),
   )
 
@@ -150,18 +170,16 @@ describe("VariantPlugin", () => {
       })
       yield* VariantPlugin.Plugin.effect(host({ catalog: catalogHost(service) }))
 
-      expect((yield* service.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("glm-5.2")))?.variants).toEqual([
-        {
-          id: ModelV2.VariantID.make("max"),
-          headers: {},
-          body: { reasoning: { effort: "max" } },
-        },
-        {
-          id: ModelV2.VariantID.make("ultra"),
-          headers: { custom: "true" },
-          body: { reasoning: { effort: "custom" } },
-        },
+      const variants = (yield* service.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("glm-5.2")))?.variants
+      expect(variants?.map((variant) => variant.id)).toEqual([
+        ...gpt56Efforts,
+        ModelV2.VariantID.make("ultra"),
       ])
+      expect(variants).toContainEqual({
+        id: ModelV2.VariantID.make("ultra"),
+        headers: { custom: "true" },
+        body: { reasoning: { effort: "custom" } },
+      })
     }),
   )
 })

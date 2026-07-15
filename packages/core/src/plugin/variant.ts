@@ -5,7 +5,8 @@ import { Effect } from "effect"
 import { define } from "./internal"
 
 const GPT5_6_RE = /(?:^|\/)gpt-5[.-]6(?:[.-]|$)/
-const GPT5_6_ULTRA_RE = /(?:^|\/)gpt-5[.-]6[.-](?:sol|terra|luna)$/
+const GPT5_6_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"]
+const GPT5_6_PRO_RE = /(?:^|\/)gpt-5[.-]6[.-]pro(?:[.-]|$)/
 
 export const Plugin = define({
   id: "variant",
@@ -14,7 +15,13 @@ export const Plugin = define({
       for (const record of catalog.provider.list()) {
         for (const model of record.models.values()) {
           catalog.model.update(model.providerID, model.id, (draft) => {
-            const generated = generate(draft)
+            const generated = generate({
+              ...draft,
+              api:
+                draft.api.type === "native" && !draft.api.url && Object.keys(draft.api.settings).length === 0
+                  ? { ...record.provider.api, id: draft.api.id }
+                  : draft.api,
+            })
             if (generated.length === 0) return
 
             const explicit = new Map(draft.variants.map((variant) => [variant.id, variant]))
@@ -34,23 +41,18 @@ export function generate(model: ModelV2Info): ModelV2Info["variants"] {
   if (model.api.type !== "aisdk") return []
   const ids = [model.id, model.api.id].map((id) => id.toLowerCase())
   if (model.api.package === "@ai-sdk/openai") {
-    if (!ids.some((id) => GPT5_6_RE.test(id))) return []
-    return [
-      {
-        id: "max",
-        headers: {},
-        body: { reasoning: { effort: "max" } },
-      },
-      ...(ids.some((id) => GPT5_6_ULTRA_RE.test(id))
-        ? [
-            {
-              id: "ultra",
-              headers: {},
-              body: { reasoning: { effort: "ultra" } },
-            },
-          ]
-        : []),
-    ]
+    const matching = ids.filter((id) => GPT5_6_RE.test(id))
+    if (matching.length === 0) return []
+    const efforts = matching.some((id) => id.includes("deep-research") || id.includes("-chat"))
+      ? ["medium", "max"]
+      : matching.some((id) => GPT5_6_PRO_RE.test(id))
+        ? ["medium", "high", "xhigh", "max"]
+        : GPT5_6_EFFORTS
+    return efforts.map((id) => ({
+      id,
+      headers: {},
+      body: { reasoning: { effort: id } },
+    }))
   }
   if (model.api.package !== "@ai-sdk/openai-compatible") return []
   const joined = ids.join(" ")

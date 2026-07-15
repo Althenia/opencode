@@ -115,6 +115,34 @@ describe("Config", () => {
     }),
   )
 
+  it.effect("infers the built-in OpenAI package when v1 config omits npm", () =>
+    Effect.sync(() => {
+      const migrated = ConfigMigrateV1.migrate({
+        provider: {
+          openai: {
+            options: { headerTimeout: 180_000, timeout: 1_800_000, chunkTimeout: 180_000 },
+            models: {
+              "gpt-5.6-sol": {
+                family: "gpt-5.6",
+                variants: { high: { reasoningEffort: "high" } },
+              },
+            },
+          },
+        },
+      })
+
+      expect(migrated.providers?.openai?.api).toEqual({
+        type: "aisdk",
+        package: "@ai-sdk/openai",
+        settings: { headerTimeout: 180_000, timeout: 1_800_000, chunkTimeout: 180_000 },
+      })
+      expect(migrated.providers?.openai?.request).toEqual({ headers: undefined, body: undefined })
+      expect(migrated.providers?.openai?.models?.["gpt-5.6-sol"]?.variants).toEqual([
+        { id: "high", body: { reasoning: { effort: "high" } } },
+      ])
+    }),
+  )
+
   it.effect("migrates v1 command configuration", () =>
     Effect.sync(() => {
       expect(

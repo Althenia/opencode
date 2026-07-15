@@ -164,20 +164,21 @@ function migrateMcp(info: ConfigMCPV1.Info) {
 
 function providers(info?: Readonly<Record<string, ConfigProviderV1.Info>>) {
   if (!info) return undefined
-  return Object.fromEntries(Object.entries(info).map(([name, provider]) => [name, migrateProvider(provider)]))
+  return Object.fromEntries(Object.entries(info).map(([name, provider]) => [name, migrateProvider(name, provider)]))
 }
 
-function migrateProvider(info: ConfigProviderV1.Info) {
-  const lowerer = ConfigProviderOptionsV1.get(info.npm)
+function migrateProvider(name: string, info: ConfigProviderV1.Info) {
+  const packageName = info.npm ?? (name === "openai" ? "@ai-sdk/openai" : undefined)
+  const lowerer = ConfigProviderOptionsV1.get(packageName)
   const options = lowerer.provider(info.options ?? {})
   const url = info.api ?? options.url
   return {
     name: info.name,
     env: info.env,
-    api: info.npm
+    api: packageName
       ? {
           type: "aisdk" as const,
-          package: info.npm,
+          package: packageName,
           ...(url === undefined ? {} : { url }),
           settings: options.settings ?? {},
         }
@@ -185,7 +186,7 @@ function migrateProvider(info: ConfigProviderV1.Info) {
     request: info.options && { headers: options.headers, body: options.body },
     models:
       info.models &&
-      Object.fromEntries(Object.entries(info.models).map(([name, model]) => [name, migrateModel(model, info.npm)])),
+      Object.fromEntries(Object.entries(info.models).map(([name, model]) => [name, migrateModel(model, packageName)])),
   }
 }
 
