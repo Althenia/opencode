@@ -22,6 +22,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     const [starts, setStarting] = createStore<Record<string, boolean | undefined>>({})
     const [homeSelected, setHomeSelected] = createSignal(false)
     const [homeGoal, setHomeGoal] = createSignal<string>()
+    let homeRevision = 0
     const queues = new Map<string, Promise<void>>()
     const generations = new Map<string, number>()
     const selectionRevisions = new Map<string, number>()
@@ -64,13 +65,18 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     }
 
     function prepareHome(goal: string) {
+      const ownership = ++homeRevision
       setHomeGoal(goal)
       setHomeSelected(true)
+      return ownership
     }
 
-    function clearHome() {
+    function clearHome(ownership?: number) {
+      if (ownership !== undefined && ownership !== homeRevision) return false
+      homeRevision++
       setHomeGoal(undefined)
       setHomeSelected(false)
+      return true
     }
 
     function pending(id = sessionID()) {
@@ -234,17 +240,16 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       presentation.delete(sessionID)
     }
 
-    function adoptHome(sessionID: string) {
-      setHomeGoal(undefined)
-      setHomeSelected(false)
+    function adoptHome(sessionID: string, ownership: number) {
+      if (!clearHome(ownership)) return false
       advanceRevision(sessionID)
       setSelections(sessionID, true)
+      return true
     }
 
     createEffect(() => {
       if (route.data.type === "home") return
-      setHomeGoal(undefined)
-      setHomeSelected(false)
+      clearHome()
     })
 
     createEffect(() => {

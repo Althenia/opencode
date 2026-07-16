@@ -3,7 +3,7 @@ import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
-import { onCleanup, onMount } from "solid-js"
+import { Show, onCleanup, onMount } from "solid-js"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "../fixture/tui-sdk"
 import { TestTuiContexts } from "../fixture/tui-environment"
@@ -201,6 +201,84 @@ test("stale Home Goal failure preserves a newer Goal and draft", async () => {
     app.renderer.destroy()
   }
 })
+
+test.each(["failure", "success"] as const)(
+  "stale Home Goal %s cannot take ownership from a newer Home Goal",
+  async (outcome) => {
+    const creates: Array<(response: Response) => void> = []
+    const app = await mountGoalPrompt(
+      (url, request) => {
+        if (url.pathname === "/session" && request?.method === "POST") {
+          return new Promise<Response>((resolve) => creates.push(resolve))
+        }
+        if (url.pathname === "/api/session/session-a/goal/start") {
+          if (outcome === "failure") return json({ error: "goal A failed" }, { status: 409 })
+          return json({ data: { goal: "goal A", active: true, iteration: 1, cap: 7 } })
+        }
+        if (url.pathname === "/api/session/session-b/goal/start") {
+          return json({ data: { goal: "goal B", active: true, iteration: 1, cap: 7 } })
+        }
+      },
+      { home: true, routed: true },
+    )
+    const submissions: Array<Promise<boolean>> = []
+
+    try {
+      await waitFor(() => !!app.promptRef)
+      await waitFor(() => !!app.local.model.current())
+      const firstPrompt = app.state.promptRef
+      firstPrompt?.set({ input: "/goal goal A", parts: [] })
+      submissions.push(firstPrompt?.submit() ?? Promise.resolve(false))
+      await waitFor(() => creates.length === 1 && app.goal.pending() === "goal A")
+
+      app.route.navigate({ type: "session", sessionID: "session-other" })
+      await app.renderOnce()
+      await waitFor(() => app.state.promptRef !== firstPrompt && app.route.data.type === "session")
+      const sessionPrompt = app.state.promptRef
+      app.route.navigate({ type: "home" })
+      await app.renderOnce()
+      await waitFor(() => app.state.promptRef !== sessionPrompt && app.route.data.type === "home")
+      app.state.promptRef?.set({ input: "/goal goal B", parts: [] })
+      submissions.push(app.state.promptRef?.submit() ?? Promise.resolve(false))
+      await waitFor(() => creates.length === 2 && app.goal.pending() === "goal B")
+
+      creates[0](
+        json({
+          id: "session-a",
+          title: "Goal A",
+          slug: "session-a",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        }),
+      )
+      await submissions[0]
+      await app.renderOnce()
+
+      expect(app.route.data).toEqual({ type: "home" })
+      expect(app.goal.pending()).toBe("goal B")
+      expect(app.state.promptRef?.current.input).toBe("")
+
+      creates[1](
+        json({
+          id: "session-b",
+          title: "Goal B",
+          slug: "session-b",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        }),
+      )
+      await submissions[1]
+    } finally {
+      creates.forEach((resolve) => resolve(json({ error: "create failed" }, { status: 500 })))
+      await Promise.allSettled(submissions)
+      app.renderer.destroy()
+    }
+  },
+)
 
 test("failed Home session creation restores the Goal command", async () => {
   const app = await mountGoalPrompt(
@@ -1549,6 +1627,7 @@ async function mountGoalPrompt(
     editorSelection?: EditorSelection
     width?: number
     right?: boolean
+    routed?: boolean
   } = {},
 ) {
   const tmp = await tmpdir()
@@ -1587,6 +1666,7 @@ async function mountGoalPrompt(
         home={options.home}
         editorSelection={options.editorSelection}
         right={options.right}
+        routed={options.routed}
       />
     ),
     { width: options.width ?? 80, height: 24 },
@@ -1598,7 +1678,7 @@ async function mountGoalPrompt(
   }
   await app.renderOnce()
   await waitFor(() => !!state.local && !!state.dialog && !!state.goal && !!state.sync && !!state.sdk && !!state.keymap)
-  return { ...app, ...state, events }
+  return { ...app, ...state, state, events }
 }
 
 function Harness(props: {
@@ -1621,6 +1701,7 @@ function Harness(props: {
   home?: boolean
   editorSelection?: EditorSelection
   right?: boolean
+  routed?: boolean
 }) {
   const renderer = useRenderer()
   const config = createTuiResolvedConfig({ plugin_enabled: {} })
@@ -1674,13 +1755,20 @@ function Harness(props: {
                                                     <LocationProvider>
                                                       <PromptSyncData state={props.state} />
                                                       <box flexGrow={1} justifyContent="flex-end">
-                                                        <Prompt
-                                                          sessionID={props.home ? undefined : "session-test"}
-                                                          right={props.right ? <text>controls</text> : undefined}
-                                                          ref={(ref) => {
-                                                            props.state.promptRef = ref
-                                                          }}
-                                                        />
+                                                        <Show
+                                                          when={props.routed ? true : undefined}
+                                                          fallback={
+                                                            <Prompt
+                                                              sessionID={props.home ? undefined : "session-test"}
+                                                              right={props.right ? <text>controls</text> : undefined}
+                                                              ref={(ref) => {
+                                                                props.state.promptRef = ref
+                                                              }}
+                                                            />
+                                                          }
+                                                        >
+                                                          <RoutedPrompt state={props.state} />
+                                                        </Show>
                                                       </box>
                                                       {props.sidebar && <Sidebar sessionID="session-test" />}
                                                     </LocationProvider>
@@ -1708,6 +1796,32 @@ function Harness(props: {
         </ClipboardProvider>
       </ExitProvider>
     </TestTuiContexts>
+  )
+}
+
+function RoutedPrompt(props: {
+  state: {
+    promptRef?: PromptRef
+  }
+}) {
+  const route = useRoute()
+  const promptRef = usePromptRef()
+  const key = () => {
+    if (route.data.type === "home") return "home"
+    if (route.data.type === "session") return route.data.sessionID
+  }
+  return (
+    <Show when={key()} keyed>
+      {(value) => (
+        <Prompt
+          sessionID={value === "home" ? undefined : value}
+          ref={(ref) => {
+            props.state.promptRef = ref
+            promptRef.set(ref)
+          }}
+        />
+      )}
+    </Show>
   )
 }
 

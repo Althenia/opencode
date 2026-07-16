@@ -763,7 +763,7 @@ function PromptSyncData(props: { session?: boolean }) {
   onMount(() => {
     sync.set("agent", [{ name: "Build", mode: "primary", hidden: false, permission: [], options: {} }])
     if (!props.session) return
-    goal.adoptHome("session-test")
+    goal.adoptHome("session-test", goal.prepareHome("ship task 6"))
     void goal.status()
   })
   return undefined

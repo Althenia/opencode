@@ -1089,9 +1089,10 @@ export function Prompt(props: PromptProps) {
     }
     const startsGoal = Boolean(goalText && goalText !== "stop")
     const createdSession = props.sessionID == null
+    const homeOwnership = createdSession && startsGoal && goalText ? goal.prepareHome(goalText) : undefined
     const restoreGoalPrompt = (sessionID?: string) => {
       if (!startsGoal) return
-      goal.clearHome()
+      if (!sessionID && !goal.clearHome(homeOwnership)) return
       if (sessionID && (route.data.type !== "session" || route.data.sessionID !== sessionID)) return
       if (!sessionID && route.data.type !== "home") return
       const target = promptRef.current ?? ref
@@ -1101,7 +1102,6 @@ export function Prompt(props: PromptProps) {
     }
 
     if (startsGoal) {
-      if (!props.sessionID && goalText) goal.prepareHome(goalText)
       ref.reset()
     }
 
@@ -1175,10 +1175,10 @@ export function Prompt(props: PromptProps) {
             ? { source: { start: part.source.text.start, end: part.source.text.end, text: part.source.text.value } }
             : {}),
         }))
-      if (createdSession) goal.adoptHome(sessionID)
+      const ownsHome = !createdSession || (homeOwnership !== undefined && goal.adoptHome(sessionID, homeOwnership))
       const start = goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
       const startRevision = goal.revision(sessionID)
-      if (createdSession) route.navigate({ type: "session", sessionID })
+      if (createdSession && ownsHome) route.navigate({ type: "session", sessionID })
 
       try {
         await start
