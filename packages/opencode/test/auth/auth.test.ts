@@ -9,35 +9,68 @@ import { Auth } from "../../src/auth"
 import { testEffect } from "../lib/effect"
 
 const layer = LayerNode.compile(LayerNode.group([Auth.node, Credential.node]))
+const credentialLayer = LayerNode.compile(Credential.node)
 const it = testEffect(layer)
+const authFile = path.join(Global.Path.data, "auth.json")
+
+async function withAuthState(run: (file: string) => Promise<void>) {
+  const previousEnv = process.env.OPENCODE_AUTH_CONTENT
+  const existed = await Bun.file(authFile).exists()
+  const previousFile = existed ? await Bun.file(authFile).text() : undefined
+  const previousCredentialIDs = new Set(
+    await Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      return (yield* credentials.list(Integration.ID.make("openai"))).map((item) => item.id)
+    }).pipe(Effect.provide(credentialLayer), Effect.scoped, Effect.runPromise),
+  )
+
+  try {
+    await run(authFile)
+  } finally {
+    if (previousEnv === undefined) delete process.env.OPENCODE_AUTH_CONTENT
+    else process.env.OPENCODE_AUTH_CONTENT = previousEnv
+    try {
+      if (previousFile === undefined) await Bun.file(authFile).delete()
+      else await Bun.write(authFile, previousFile)
+    } finally {
+      await Effect.gen(function* () {
+        const credentials = yield* Credential.Service
+        yield* Effect.forEach(
+          (yield* credentials.list(Integration.ID.make("openai"))).filter(
+            (item) => !previousCredentialIDs.has(item.id),
+          ),
+          (item) => credentials.remove(item.id),
+        )
+      }).pipe(Effect.provide(credentialLayer), Effect.scoped, Effect.runPromise)
+    }
+  }
+}
 
 describe("Auth", () => {
-  test("imports OpenAI OAuth from auth.json without persisting environment auth", async () => {
-    const previous = process.env.OPENCODE_AUTH_CONTENT
-    const authFile = path.join(Global.Path.data, "auth.json")
-    await Bun.write(
-      authFile,
-      JSON.stringify({
+  test("imports OpenAI OAuth from auth.json without persisting environment auth", () =>
+    withAuthState(async (authFile) => {
+      await Bun.write(
+        authFile,
+        JSON.stringify({
+          openai: {
+            type: "oauth",
+            refresh: "file-refresh-token",
+            access: "file-access-token",
+            expires: 2_000_000_000_000,
+            accountId: "file-account-id",
+          },
+        }),
+      )
+      process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({
         openai: {
           type: "oauth",
-          refresh: "file-refresh-token",
-          access: "file-access-token",
+          refresh: "environment-refresh-token",
+          access: "environment-access-token",
           expires: 2_000_000_000_000,
-          accountId: "file-account-id",
+          accountId: "environment-account-id",
         },
-      }),
-    )
-    process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({
-      openai: {
-        type: "oauth",
-        refresh: "environment-refresh-token",
-        access: "environment-access-token",
-        expires: 2_000_000_000_000,
-        accountId: "environment-account-id",
-      },
-    })
+      })
 
-    try {
       const result = await Effect.gen(function* () {
         const credentials = yield* Credential.Service
         return yield* credentials.list(Integration.ID.make("openai"))
@@ -53,18 +86,51 @@ describe("Auth", () => {
           },
         },
       ])
-    } finally {
-      if (previous === undefined) delete process.env.OPENCODE_AUTH_CONTENT
-      else process.env.OPENCODE_AUTH_CONTENT = previous
-      await Bun.write(authFile, "{}")
+    }),
+  )
+
+  test("set does not persist environment auth", () =>
+    withAuthState(async (authFile) => {
+      await Bun.write(authFile, JSON.stringify({ disk: { type: "api", key: "disk-key" } }))
+      process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({
+        environment: { type: "api", key: "environment-key" },
+      })
+
       await Effect.gen(function* () {
-        const credentials = yield* Credential.Service
-        yield* Effect.forEach(yield* credentials.list(Integration.ID.make("openai")), (item) =>
-          credentials.remove(item.id),
-        )
-      }).pipe(Effect.provide(LayerNode.compile(Credential.node)), Effect.scoped, Effect.runPromise)
-    }
-  })
+        const auth = yield* Auth.Service
+        yield* auth.set("added", { type: "api", key: "added-key" })
+      }).pipe(Effect.provide(layer), Effect.scoped, Effect.runPromise)
+
+      expect(await Bun.file(authFile).json()).toEqual({
+        disk: { type: "api", key: "disk-key" },
+        added: { type: "api", key: "added-key" },
+      })
+    }),
+  )
+
+  test("remove does not persist environment auth", () =>
+    withAuthState(async (authFile) => {
+      await Bun.write(
+        authFile,
+        JSON.stringify({
+          disk: { type: "api", key: "disk-key" },
+          removed: { type: "api", key: "removed-key" },
+        }),
+      )
+      process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({
+        environment: { type: "api", key: "environment-key" },
+      })
+
+      await Effect.gen(function* () {
+        const auth = yield* Auth.Service
+        yield* auth.remove("removed")
+      }).pipe(Effect.provide(layer), Effect.scoped, Effect.runPromise)
+
+      expect(await Bun.file(authFile).json()).toEqual({
+        disk: { type: "api", key: "disk-key" },
+      })
+    }),
+  )
 
   it.instance("projects OpenAI OAuth into the V2 credential store", () =>
     Effect.gen(function* () {

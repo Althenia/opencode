@@ -98,7 +98,7 @@ const layer = Layer.effect(
 
     const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
       const norm = key.replace(/\/+$/, "")
-      const data = yield* all()
+      const data = yield* read()
       if (norm !== key) delete data[key]
       delete data[norm + "/"]
       yield* fsys
@@ -109,7 +109,7 @@ const layer = Layer.effect(
 
     const remove = Effect.fn("Auth.remove")(function* (key: string) {
       const norm = key.replace(/\/+$/, "")
-      const data = yield* all()
+      const data = yield* read()
       delete data[key]
       delete data[norm]
       yield* fsys.writeJson(file, data, 0o600).pipe(Effect.mapError(fail("Failed to write auth data")))

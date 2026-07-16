@@ -408,6 +408,45 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("keeps configured OpenAI endpoints for API keys", () =>
+    Effect.gen(function* () {
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
+          providerID: ProviderV2.ID.openai,
+          request: { headers: {}, body: {} },
+        }),
+        Credential.Key.make({ type: "key", key: "secret", metadata: { accountID: "account-id" } }),
+      )
+
+      expect(resolved.route.endpoint).toMatchObject({ baseURL: "https://openai.example/v1" })
+      expect(resolved.route.defaults.headers).not.toHaveProperty("ChatGPT-Account-Id")
+    }),
+  )
+
+  it.effect("keeps configured OpenAI endpoints for non-ChatGPT OAuth", () =>
+    Effect.gen(function* () {
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
+          providerID: ProviderV2.ID.openai,
+          request: { headers: {}, body: {} },
+        }),
+        Credential.OAuth.make({
+          type: "oauth",
+          methodID: Integration.MethodID.make("device"),
+          access: "secret",
+          refresh: "refresh",
+          expires: Date.now() + 60_000,
+          metadata: { accountID: "account-id" },
+        }),
+      )
+
+      expect(resolved.route.endpoint).toMatchObject({ baseURL: "https://openai.example/v1" })
+      expect(resolved.route.defaults.headers).not.toHaveProperty("ChatGPT-Account-Id")
+    }),
+  )
+
   it.effect("rejects catalog APIs without a native route", () =>
     Effect.gen(function* () {
       const failure = yield* SessionRunnerModel.fromCatalogModel(
