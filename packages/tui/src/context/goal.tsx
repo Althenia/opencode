@@ -21,6 +21,8 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     const [selections, setSelections] = createStore<Record<string, boolean | undefined>>({})
     const [starts, setStarting] = createStore<Record<string, boolean | undefined>>({})
     const [homeSelected, setHomeSelected] = createSignal(false)
+    const [homeGoal, setHomeGoal] = createSignal<string>()
+    let homeRevision = 0
     const queues = new Map<string, Promise<void>>()
     const generations = new Map<string, number>()
     const selectionRevisions = new Map<string, number>()
@@ -60,6 +62,27 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
 
     function starting(id: string) {
       return starts[id] === true
+    }
+
+    function prepareHome(goal: string) {
+      const ownership = ++homeRevision
+      setHomeGoal(goal)
+      setHomeSelected(true)
+      return ownership
+    }
+
+    function clearHome(ownership?: number) {
+      if (ownership !== undefined && ownership !== homeRevision) return false
+      homeRevision++
+      setHomeGoal(undefined)
+      setHomeSelected(false)
+      return true
+    }
+
+    function pending(id = sessionID()) {
+      if (!id) return route.data.type === "home" ? homeGoal() : undefined
+      if (!starting(id)) return
+      return presentation.get(id)?.goal
     }
 
     function answering(id: string) {
@@ -136,16 +159,21 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       files?: Array<{ uri: string; name?: string; source?: { start: number; end: number; text: string } }>,
     ) {
       if (!id) return
+      const initialSelection = selected(id) && (statuses[id] !== undefined || !starting(id))
+      let previousSelection = initialSelection
       const ownership = advanceRevision(id)
       setSelections(id, true)
       const version = generation(id)
       const messageID = SessionMessage.ID.create()
       presentation.set(id, { goal, messageID, revision: ownership })
       beginStart(id)
-      return serialize(id, () => requestStart(id, goal, messageID, version, files))
+      return serialize(id, () => {
+        previousSelection = statuses[id] === undefined ? initialSelection : selected(id)
+        return requestStart(id, goal, messageID, version, files)
+      })
         .catch((error) => {
           if (presentation.get(id)?.revision === ownership) presentation.delete(id)
-          if (revision(id) === ownership) setSelections(id, false)
+          if (revision(id) === ownership) setSelections(id, previousSelection)
           throw error
         })
         .finally(() => endStart(id))
@@ -216,20 +244,23 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       presentation.delete(sessionID)
     }
 
-    function adoptHome(sessionID: string) {
-      setHomeSelected(false)
+    function adoptHome(sessionID: string, ownership: number) {
+      if (!clearHome(ownership)) return false
       advanceRevision(sessionID)
       setSelections(sessionID, true)
+      return true
     }
 
     createEffect(() => {
-      if (route.data.type !== "home") setHomeSelected(false)
+      if (route.data.type === "home") return
+      clearHome()
     })
 
     createEffect(() => {
       const id = sessionID()
       if (!id) return
       const poll = () => {
+        if (presentation.has(id)) return
         const version = generation(id)
         return refresh(id).catch(() => {
           if (generation(id) === version) setStatuses(id, undefined)
@@ -256,6 +287,9 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       adoptHome,
       answering,
       starting,
+      prepareHome,
+      clearHome,
+      pending,
       revision,
       selected,
       clear,

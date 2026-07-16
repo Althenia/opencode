@@ -62,3 +62,39 @@ export function skillReferenceTriggerIndex(value: string, offset = promptOffsetW
 export function displaySkillReference(value: string) {
   return value.startsWith("$") ? `✦ ${value.slice(1)}` : value
 }
+
+export function displaySkillReferences(value: string, skills: ReadonlySet<string>, metadata?: unknown) {
+  if (!metadata || typeof metadata !== "object" || !("skillReferences" in metadata)) return value
+  if (!Array.isArray(metadata.skillReferences)) return value
+
+  const result = metadata.skillReferences
+    .filter(
+      (reference): reference is { start: number; end: number; name: string } =>
+        reference !== null &&
+        typeof reference === "object" &&
+        "start" in reference &&
+        Number.isSafeInteger(reference.start) &&
+        "end" in reference &&
+        Number.isSafeInteger(reference.end) &&
+        "name" in reference &&
+        typeof reference.name === "string" &&
+        reference.start >= 0 &&
+        reference.end > reference.start &&
+        reference.end <= promptOffsetWidth(value) &&
+        skills.has(reference.name) &&
+        displaySlice(value, reference.start, reference.end) === `$${reference.name}`,
+    )
+    .sort((a, b) => a.start - b.start)
+    .reduce(
+      (output, reference) => {
+        if (reference.start < output.end) return output
+        output.value +=
+          displaySlice(value, output.end, reference.start) + displaySkillReference(`$${reference.name}`)
+        output.end = reference.end
+        return output
+      },
+      { value: "", end: 0 },
+    )
+
+  return result.value + displaySlice(value, result.end)
+}

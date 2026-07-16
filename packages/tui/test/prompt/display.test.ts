@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   displayCharAt,
   displaySkillReference,
+  displaySkillReferences,
   displaySlice,
   mentionTriggerIndex,
   skillReferenceTriggerIndex,
@@ -47,5 +48,47 @@ describe("prompt display", () => {
 
   test("replaces skill reference prefix with an icon marker", () => {
     expect(displaySkillReference("$dispatching-parallel-agents")).toBe("✦ dispatching-parallel-agents")
+  })
+
+  test("leaves known skill text unchanged without selected-reference provenance", () => {
+    expect(displaySkillReferences("echo $effect", new Set(["effect"]))).toBe("echo $effect")
+    expect(displaySkillReferences("Pay $20", new Set(["20"]))).toBe("Pay $20")
+  })
+
+  test("renders only the selected occurrence of a known skill reference", () => {
+    const value = "$effect then $effect"
+    expect(
+      displaySkillReferences(value, new Set(["effect"]), {
+        skillReferences: [{ start: 13, end: 20, name: "effect" }],
+      }),
+    ).toBe("$effect then ✦ effect")
+  })
+
+  test("renders selected numeric skill names", () => {
+    expect(
+      displaySkillReferences("Run $20", new Set(["20"]), {
+        skillReferences: [{ start: 4, end: 7, name: "20" }],
+      }),
+    ).toBe("Run ✦ 20")
+  })
+
+  test("leaves stale and malformed skill reference provenance unchanged", () => {
+    const skills = new Set(["effect"])
+    expect(
+      displaySkillReferences("Run $effect", skills, {
+        skillReferences: [{ start: 4, end: 11, name: "missing" }],
+      }),
+    ).toBe("Run $effect")
+    expect(
+      displaySkillReferences("Run $effect", skills, {
+        skillReferences: [{ start: 0, end: 11, name: "effect" }],
+      }),
+    ).toBe("Run $effect")
+    expect(
+      displaySkillReferences("Run $effect", skills, {
+        skillReferences: [{ start: 4, end: 12, name: "effect" }],
+      }),
+    ).toBe("Run $effect")
+    expect(displaySkillReferences("Run $effect", skills, { skillReferences: "effect" })).toBe("Run $effect")
   })
 })

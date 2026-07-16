@@ -28,7 +28,7 @@ import { useEvent } from "../../context/event"
 import { editorSelectionKey, useEditorContext, type EditorSelection } from "../../context/editor"
 import { normalizePromptContent, openEditor } from "../../editor"
 import { useExit } from "../../context/exit"
-import { promptOffsetWidth } from "../../prompt/display"
+import { displaySlice, promptOffsetWidth } from "../../prompt/display"
 import { createStore, produce, unwrap } from "solid-js/store"
 import { usePromptHistory, type PromptInfo } from "../../prompt/history"
 import { computePromptTraits } from "../../prompt/traits"
@@ -59,6 +59,8 @@ import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 import { useGoal } from "../../context/goal"
+import { usePromptRef } from "../../context/prompt"
+import { GoalStatusBand } from "../goal-status-band"
 
 registerOpencodeSpinner()
 
@@ -160,10 +162,18 @@ export function Prompt(props: PromptProps) {
   const project = useProject()
   const sync = useSync()
   const goal = useGoal()
+  const promptRef = usePromptRef()
   const tuiConfig = useTuiConfig()
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  const goalPending = createMemo(() => goal.pending(props.sessionID))
+  const goalObjective = createMemo(() =>
+    goalPending() ?? (props.sessionID && goal.active(props.sessionID) ? goal.current()?.goal : undefined),
+  )
+  const goalTodos = createMemo(() =>
+    goalPending() || !props.sessionID ? [] : (sync.data.todo[props.sessionID] ?? []),
+  )
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -707,7 +717,7 @@ export function Prompt(props: PromptProps) {
         start = part.source.text.start
         end = part.source.text.end
         virtualText = part.source.text.value
-        styleId = pasteStyleId
+        styleId = part.metadata?.kind === "skill_reference" ? skillStyleId : pasteStyleId
       }
 
       if (virtualText) {
@@ -1021,58 +1031,40 @@ export function Prompt(props: PromptProps) {
       ))
       return false
     }
+    const submissionRevision = promptRef.beginSubmission()
 
     const variant = local.model.variant.current()
-    let sessionID = props.sessionID
-    let finishMoveProgress = false
-    if (sessionID == null) {
-      const selectedWorkspace = workspace.selection()
-      const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
-
-      const directory = await move.getDirectory(store.prompt.input)
-      if (move.pending() && !directory) return false
-      finishMoveProgress = Boolean(move.progress())
-
-      const res = await sdk.client.session.create({
-        directory,
-        workspace: workspaceID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          id: selectedModel.modelID,
-          variant,
+    const trackedTextParts = input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+      const partIndex = store.extmarkToPartIndex.get(extmark.id)
+      const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
+      if (part?.type !== "text") return []
+      return [
+        {
+          start: extmark.start,
+          end: extmark.end,
+          text: part.text,
+          skill:
+            part.metadata?.kind === "skill_reference" && typeof part.metadata.name === "string"
+              ? part.metadata.name
+              : undefined,
         },
-      })
-
-      if (res.error) {
-        if (finishMoveProgress) move.finishSubmit()
-        console.log("Creating a session failed:", res.error)
-
-        toast.show({
-          message: "Creating a session failed. Open console for more details.",
-          variant: "error",
-        })
-
-        return true
-      }
-
-      sessionID = res.data.id
-    }
-
+      ]
+    })
+    const pastedTextParts = trackedTextParts.filter((part) => !part.skill)
     const inputText = expandTrackedPastedText(
       store.prompt.input,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const partIndex = store.extmarkToPartIndex.get(extmark.id)
-        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
-        if (part?.type !== "text") return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
+      pastedTextParts.map((part) => ({ start: part.start, end: part.end, text: part.text })),
     )
-
-    // Filter out text parts (pasted content) since they're now expanded inline
+    const skillReferences = trackedTextParts.flatMap((part) => {
+      if (!part.skill || part.text !== `$${part.skill}`) return []
+      if (displaySlice(store.prompt.input, part.start, part.end) !== part.text) return []
+      if (pastedTextParts.some((pasted) => pasted.start < part.end && part.start < pasted.end)) return []
+      const shift = pastedTextParts
+        .filter((pasted) => pasted.end <= part.start)
+        .reduce((total, pasted) => total + promptOffsetWidth(pasted.text) - (pasted.end - pasted.start), 0)
+      return [{ start: part.start + shift, end: part.end + shift, name: part.skill }]
+    })
     const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
-
-    // Capture mode before it gets reset
     const currentMode = store.mode
     const editorSelection = editorContext()
     const editorParts =
@@ -1091,8 +1083,82 @@ export function Prompt(props: PromptProps) {
             },
           ]
         : []
-
     const goalText = goalCommand ? inputText.slice("/goal".length).trim() : undefined
+    const submittedPrompt = {
+      input: store.prompt.input,
+      parts: [...store.prompt.parts],
+    }
+    const startsGoal = Boolean(goalText && goalText !== "stop")
+    const createdSession = props.sessionID == null
+    const homeOwnership = createdSession && startsGoal && goalText ? goal.prepareHome(goalText) : undefined
+    const restoreGoalPrompt = (sessionID?: string) => {
+      if (!startsGoal) return
+      if (!sessionID && !goal.clearHome(homeOwnership)) return
+      if (promptRef.submissionRevision !== submissionRevision) return
+      if (sessionID && (route.data.type !== "session" || route.data.sessionID !== sessionID)) return
+      if (!sessionID && route.data.type !== "home") return
+      const target = promptRef.current ?? ref
+      if (target.current.input || target.current.parts.length > 0) return
+      target.set(submittedPrompt)
+      target.focus()
+    }
+
+    if (startsGoal) {
+      ref.reset()
+    }
+
+    let sessionID = props.sessionID
+    let finishMoveProgress = false
+    if (sessionID == null) {
+      const selectedWorkspace = workspace.selection()
+      const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
+
+      const directory = await move.getDirectory(submittedPrompt.input)
+      if (move.pending() && !directory) {
+        restoreGoalPrompt()
+        return false
+      }
+      finishMoveProgress = Boolean(move.progress())
+
+      const res = await sdk.client.session
+        .create({
+          directory,
+          workspace: workspaceID,
+          agent: agent.name,
+          model: {
+            providerID: selectedModel.providerID,
+            id: selectedModel.modelID,
+            variant,
+          },
+        })
+        .catch((error) => {
+          if (!startsGoal) throw error
+          if (finishMoveProgress) move.finishSubmit()
+          restoreGoalPrompt()
+          console.log("Creating a session failed:", error)
+          toast.show({
+            message: "Creating a session failed. Open console for more details.",
+            variant: "error",
+          })
+        })
+
+      if (!res) return true
+
+      if (res.error) {
+        if (finishMoveProgress) move.finishSubmit()
+        restoreGoalPrompt()
+        console.log("Creating a session failed:", res.error)
+
+        toast.show({
+          message: "Creating a session failed. Open console for more details.",
+          variant: "error",
+        })
+
+        return true
+      }
+
+      sessionID = res.data.id
+    }
     if (goalText === "stop") {
       try {
         await goal.stop(sessionID)
@@ -1111,9 +1177,18 @@ export function Prompt(props: PromptProps) {
             ? { source: { start: part.source.text.start, end: part.source.text.end, text: part.source.text.value } }
             : {}),
         }))
+      const ownsHome = !createdSession || (homeOwnership !== undefined && goal.adoptHome(sessionID, homeOwnership))
+      const start = goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
+      const startRevision = goal.revision(sessionID)
+      if (createdSession && ownsHome) route.navigate({ type: "session", sessionID })
+
       try {
-        await goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
+        await start
       } catch (error) {
+        if (goal.revision(sessionID) === startRevision) {
+          if (createdSession) goal.clear(sessionID)
+          restoreGoalPrompt(sessionID)
+        }
         toast.show({ title: "Failed to start Goal", message: errorMessage(error), variant: "error" })
         return false
       }
@@ -1165,6 +1240,7 @@ export function Prompt(props: PromptProps) {
               {
                 type: "text",
                 text: inputText,
+                ...(skillReferences.length > 0 ? { metadata: { skillReferences } } : {}),
               },
               ...nonTextParts,
             ],
@@ -1181,19 +1257,14 @@ export function Prompt(props: PromptProps) {
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({
-      ...store.prompt,
+      ...submittedPrompt,
       mode: currentMode,
     })
-    input.extmarks.clear()
-    setStore("prompt", {
-      input: "",
-      parts: [],
-    })
-    setStore("extmarkToPartIndex", new Map())
+    if (!startsGoal) ref.reset()
     props.onSubmit?.()
 
     // temporary hack to make sure the message is sent
-    if (!props.sessionID) {
+    if (!props.sessionID && !startsGoal) {
       if (editorParts.length > 0) editor.preserveSelectionFromNewSession()
       setTimeout(() => {
         route.navigate({
@@ -1202,7 +1273,6 @@ export function Prompt(props: PromptProps) {
         })
       }, 50)
     }
-    input.clear()
     if (finishMoveProgress) move.finishSubmit()
     return true
   }
@@ -1409,6 +1479,7 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
+        <GoalStatusBand objective={goalObjective()} starting={Boolean(goalPending())} todos={goalTodos()} />
         <box
           width="100%"
           border={["left"]}

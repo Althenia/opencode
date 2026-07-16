@@ -3,7 +3,7 @@ import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
-import { onCleanup, onMount } from "solid-js"
+import { Show, createSignal, onCleanup, onMount } from "solid-js"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "../fixture/tui-sdk"
 import { TestTuiContexts } from "../fixture/tui-environment"
@@ -21,13 +21,13 @@ import { PermissionProvider } from "../../src/context/permission"
 import { ProjectProvider } from "../../src/context/project"
 import { PromptRefProvider, usePromptRef } from "../../src/context/prompt"
 import { RouteProvider, useRoute } from "../../src/context/route"
-import { SDKProvider } from "../../src/context/sdk"
+import { SDKProvider, useSDK } from "../../src/context/sdk"
 import { SyncProvider, useSync } from "../../src/context/sync"
 import { ThemeProvider } from "../../src/context/theme"
 import { TuiConfigProvider } from "../../src/config"
 import { FrecencyProvider } from "../../src/component/prompt/frecency"
 import { Prompt, type PromptRef } from "../../src/component/prompt"
-import { PromptHistoryProvider } from "../../src/component/prompt/history"
+import { PromptHistoryProvider, type PromptInfo } from "../../src/component/prompt/history"
 import { PromptStashProvider } from "../../src/component/prompt/stash"
 import { Sidebar } from "../../src/routes/session/sidebar"
 import { createPluginRuntime, PluginRuntimeProvider } from "../../src/plugin/runtime"
@@ -98,8 +98,441 @@ test("the first accepted home Goal prompt creates one session and starts Goal wi
     expect(app.goal.selected("session-home")).toBe(true)
     expect(calls.map((call) => call.method)).toEqual(["create", "goalStart"])
     expect(calls[1]?.body).toMatchObject({ goal: "ship task 6" })
-    expect(app.goal.selected()).toBe(false)
+    expect(app.goal.selected()).toBe(true)
+    expect(app.route.data).toMatchObject({ type: "session", sessionID: "session-home" })
   } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("Home Goal shows Starting and clears input before goalStart resolves", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        return new Promise<Response>((resolve) => {
+          resolveStart = resolve
+        })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+
+    expect(app.promptRef?.current.input).toBe("")
+    expect(app.route.data).toMatchObject({ type: "session", sessionID: "session-home" })
+    const frame = await captureFrame(app, (value) => value.includes("Starting · ship task 6"))
+    expect(frame).toContain("Starting · ship task 6")
+    expect(frame).toContain("0%")
+    expect(frame).toContain("Current target · ship task 6")
+
+    resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    await waitFor(() => app.goal.active("session-home"))
+  } finally {
+    resolveStart?.(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    app.renderer.destroy()
+  }
+})
+
+test("stale Home Goal failure preserves a newer Goal and draft", async () => {
+  let resolveFirst!: (response: Response) => void
+  let starts = 0
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        starts++
+        if (starts === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveFirst = resolve
+          })
+        }
+        return json({ data: { goal: "goal B", active: true, iteration: 1, cap: 7 } })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal goal A", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveFirst !== undefined)
+
+    const second = app.goal.start("goal B", "session-home")
+    app.promptRef?.set({ input: "newer draft", parts: [] })
+    resolveFirst(json({ error: "goal A failed" }, { status: 409 }))
+    await second
+
+    expect(starts).toBe(2)
+    expect(app.goal.current()).toMatchObject({ goal: "goal B", active: true })
+    expect(app.goal.selected("session-home")).toBe(true)
+    expect(app.promptRef?.current.input).toBe("newer draft")
+  } finally {
+    resolveFirst?.(json({ error: "goal A failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test.each(["failure", "success"] as const)(
+  "stale Home Goal %s cannot take ownership from a newer Home Goal",
+  async (outcome) => {
+    const creates: Array<(response: Response) => void> = []
+    const app = await mountGoalPrompt(
+      (url, request) => {
+        if (url.pathname === "/session" && request?.method === "POST") {
+          return new Promise<Response>((resolve) => creates.push(resolve))
+        }
+        if (url.pathname === "/api/session/session-a/goal/start") {
+          if (outcome === "failure") return json({ error: "goal A failed" }, { status: 409 })
+          return json({ data: { goal: "goal A", active: true, iteration: 1, cap: 7 } })
+        }
+        if (url.pathname === "/api/session/session-b/goal/start") {
+          return json({ data: { goal: "goal B", active: true, iteration: 1, cap: 7 } })
+        }
+      },
+      { home: true, routed: true },
+    )
+    const submissions: Array<Promise<boolean>> = []
+
+    try {
+      await waitFor(() => !!app.promptRef)
+      await waitFor(() => !!app.local.model.current())
+      const firstPrompt = app.state.promptRef
+      firstPrompt?.set({ input: "/goal goal A", parts: [] })
+      submissions.push(firstPrompt?.submit() ?? Promise.resolve(false))
+      await waitFor(() => creates.length === 1 && app.goal.pending() === "goal A")
+
+      app.route.navigate({ type: "session", sessionID: "session-other" })
+      await app.renderOnce()
+      await waitFor(() => app.state.promptRef !== firstPrompt && app.route.data.type === "session")
+      const sessionPrompt = app.state.promptRef
+      app.route.navigate({ type: "home" })
+      await app.renderOnce()
+      await waitFor(() => app.state.promptRef !== sessionPrompt && app.route.data.type === "home")
+      app.state.promptRef?.set({ input: "/goal goal B", parts: [] })
+      submissions.push(app.state.promptRef?.submit() ?? Promise.resolve(false))
+      await waitFor(() => creates.length === 2 && app.goal.pending() === "goal B")
+
+      creates[0](
+        json({
+          id: "session-a",
+          title: "Goal A",
+          slug: "session-a",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        }),
+      )
+      await submissions[0]
+      await app.renderOnce()
+
+      expect(app.route.data).toEqual({ type: "home" })
+      expect(app.goal.pending()).toBe("goal B")
+      expect(app.state.promptRef?.current.input).toBe("")
+
+      creates[1](
+        json({
+          id: "session-b",
+          title: "Goal B",
+          slug: "session-b",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        }),
+      )
+      await submissions[1]
+    } finally {
+      creates.forEach((resolve) => resolve(json({ error: "create failed" }, { status: 500 })))
+      await Promise.allSettled(submissions)
+      app.renderer.destroy()
+    }
+  },
+)
+
+test("failed Home session creation restores the Goal command", async () => {
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({ error: "create failed" }, { status: 500 })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => app.promptRef?.current.input === "/goal ship task 6")
+
+    expect(app.goal.pending()).toBeUndefined()
+    expect(app.route.data.type).toBe("home")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("failed Home session creation does not restore after navigating away", async () => {
+  let resolveCreate!: (response: Response) => void
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          resolveCreate = resolve
+        })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveCreate !== undefined && app.promptRef?.current.input === "")
+
+    app.route.navigate({ type: "session", sessionID: "session-other" })
+    resolveCreate(json({ error: "create failed" }, { status: 500 }))
+    await waitFor(() => app.goal.pending() === undefined)
+
+    expect(app.route.data).toEqual({ type: "session", sessionID: "session-other" })
+    expect(app.promptRef?.current.input).toBe("")
+  } finally {
+    resolveCreate?.(json({ error: "create failed" }, { status: 500 }))
+    app.renderer.destroy()
+  }
+})
+
+test("rejected Home session creation restores the exact Goal prompt", async () => {
+  let rejectCreate!: (error: Error) => void
+  const app = await mountGoalPrompt(() => undefined, { home: true })
+  const createSession = app.sdk.client.session.create
+  app.sdk.client.session.create = (() =>
+    new Promise<never>((_, reject) => {
+      rejectCreate = reject
+    })) as typeof app.sdk.client.session.create
+  const submitted = {
+    input: "/goal ship task 6 [Image 1]",
+    parts: [
+      {
+        type: "file" as const,
+        mime: "image/png",
+        filename: "diagram.png",
+        url: "data:image/png;base64,AA==",
+        source: {
+          type: "file" as const,
+          path: "diagram.png",
+          text: { start: 18, end: 27, value: "[Image 1]" },
+        },
+      },
+    ],
+  } satisfies PromptInfo
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set(submitted)
+    app.promptRef?.submit()
+    await waitFor(() => rejectCreate !== undefined && app.promptRef?.current.input === "")
+
+    rejectCreate(new Error("network down"))
+    await waitFor(() => app.promptRef?.current.input === submitted.input)
+
+    expect(app.promptRef?.current).toEqual(submitted)
+    expect(app.promptRef?.focused).toBe(true)
+    expect(app.goal.pending()).toBeUndefined()
+    expect(app.goal.selected()).toBe(false)
+    expect(app.route.data.type).toBe("home")
+
+    await app.mockInput.typeText(" ")
+    expect(app.promptRef?.current.parts).toEqual(submitted.parts)
+  } finally {
+    app.sdk.client.session.create = createSession
+    rejectCreate?.(new Error("network down"))
+    app.renderer.destroy()
+  }
+})
+
+test("failed Home-created Goal start does not restore after navigating away", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        return new Promise<Response>((resolve) => {
+          resolveStart = resolve
+        })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(
+      () => resolveStart !== undefined && app.route.data.type === "session" && app.route.data.sessionID === "session-home",
+    )
+
+    app.route.navigate({ type: "session", sessionID: "session-other" })
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.route.data).toEqual({ type: "session", sessionID: "session-other" })
+    expect(app.promptRef?.current.input).toBe("")
+    expect(app.goal.pending("session-home")).toBeUndefined()
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("newer normal submission prevents failed Home Goal restoration", async () => {
+  let resolveStart!: (response: Response) => void
+  const prompts: unknown[] = []
+  const app = await mountGoalPrompt(
+    async (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        return new Promise<Response>((resolve) => {
+          resolveStart = resolve
+        })
+      }
+      if (url.pathname === "/session/session-home/message") {
+        prompts.push(await request?.json())
+        return json({ data: {} })
+      }
+    },
+    { home: true, routed: true },
+  )
+
+  try {
+    await waitFor(() => !!app.state.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    const homePrompt = app.state.promptRef
+    homePrompt?.set({ input: "/goal goal A", parts: [] })
+    const start = homePrompt?.submit()
+    await waitFor(
+      () => resolveStart !== undefined && app.route.data.type === "session" && app.route.data.sessionID === "session-home",
+    )
+    await waitFor(() => app.state.promptRef !== homePrompt)
+
+    app.state.promptRef?.set({ input: "newer normal prompt", parts: [] })
+    await app.state.promptRef?.submit()
+    await waitFor(() => prompts.length === 1 && app.state.promptRef?.current.input === "")
+
+    resolveStart(json({ error: "goal A failed" }, { status: 409 }))
+    await start
+
+    expect(app.state.promptRef?.current.input).toBe("")
+  } finally {
+    resolveStart?.(json({ error: "goal A failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("newer failed Home submission prevents restoration but clears owned Goal optimism", async () => {
+  let resolveGoalCreate!: (response: Response) => void
+  let creates = 0
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        creates++
+        if (creates === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveGoalCreate = resolve
+          })
+        }
+        return json({ error: "normal submission failed" }, { status: 500 })
+      }
+    },
+    { home: true, routed: true },
+  )
+
+  try {
+    await waitFor(() => !!app.state.promptRef && !!app.state.remountPrompt)
+    await waitFor(() => !!app.local.model.current())
+    const goalPrompt = app.state.promptRef
+    if (!goalPrompt) throw new Error("Goal prompt did not mount")
+    goalPrompt.set({ input: "/goal goal A", parts: [] })
+    const goalSubmission = goalPrompt.submit()
+    await waitFor(() => resolveGoalCreate !== undefined && app.goal.pending() === "goal A")
+
+    app.state.remountPrompt?.()
+    await app.renderOnce()
+    await waitFor(() => app.state.promptRef !== goalPrompt)
+    const normalPrompt = app.state.promptRef
+    if (!normalPrompt) throw new Error("Normal prompt did not mount")
+    normalPrompt.set({ input: "newer normal prompt", parts: [] })
+    await normalPrompt.submit()
+    normalPrompt.reset()
+    expect(app.route.data).toEqual({ type: "home" })
+    expect(app.state.promptRef?.current.input).toBe("")
+
+    resolveGoalCreate(json({ error: "goal A create failed" }, { status: 500 }))
+    await goalSubmission
+
+    await waitFor(() => app.goal.pending() === undefined)
+    expect(app.goal.pending()).toBeUndefined()
+    expect(app.state.promptRef?.current.input).toBe("")
+    expect(await captureFrame(app, (value) => value.includes("model"))).not.toContain("Starting · goal A")
+  } finally {
+    resolveGoalCreate?.(json({ error: "goal A create failed" }, { status: 500 }))
     app.renderer.destroy()
   }
 })
@@ -188,6 +621,64 @@ test("failed /goal start preserves the command", async () => {
     await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
 
     expect(app.promptRef?.current.input).toBe("/goal ship task 6")
+    expect(app.goal.pending("session-test")).toBeUndefined()
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("failed Goal start preserves a newer draft", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return new Promise<Response>((resolve) => {
+        resolveStart = resolve
+      })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal goal A", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+
+    app.promptRef?.set({ input: "newer draft", parts: [] })
+    resolveStart(json({ error: "goal A failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.promptRef?.current.input).toBe("newer draft")
+  } finally {
+    resolveStart?.(json({ error: "goal A failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("failed replacement Goal start preserves the active Goal", async () => {
+  let starts = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      starts++
+      if (starts === 1) return json({ data: { goal: "existing goal", active: true, iteration: 2, cap: 7 } })
+      return json({ error: "replacement failed" }, { status: 409 })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.start("existing goal")
+
+    app.promptRef?.set({ input: "/goal replacement goal", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.promptRef?.current.input).toBe("/goal replacement goal")
+    expect(app.goal.current()).toMatchObject({ goal: "existing goal", active: true, iteration: 2, cap: 7 })
+    expect(app.goal.active("session-test")).toBe(true)
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.goal.pending("session-test")).toBeUndefined()
   } finally {
     app.renderer.destroy()
   }
@@ -235,6 +726,133 @@ test("free text steers an active goal through the normal prompt endpoint", async
     await waitFor(() => calls.includes("prompt"))
 
     expect(calls).toEqual(["goalStart", "prompt"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("selected skill autocomplete persists only its exact reference range", async () => {
+  const calls: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname !== "/session/session-test/message") return
+    calls.push(await request?.json())
+    return json({ data: {} })
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await waitFor(() => app.promptRef?.focused === true)
+
+    await app.mockInput.typeText("echo $effect ")
+    await app.mockInput.typeText("$eff")
+    expect(await captureFrame(app, (value) => value.includes("✦ effect"))).toContain("✦ effect")
+    app.mockInput.pressEnter()
+    await waitFor(() => app.promptRef?.current.input === "echo $effect $effect ")
+    app.mockInput.pressEnter()
+    await waitFor(() => calls.length === 1)
+
+    expect(calls[0]).toMatchObject({
+      parts: [
+        {
+          type: "text",
+          text: "echo $effect $effect ",
+          metadata: { skillReferences: [{ start: 13, end: 20, name: "effect" }] },
+        },
+      ],
+    })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("selected skill provenance survives prompt history restoration", async () => {
+  const calls: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname !== "/session/session-test/message") return
+    calls.push(await request?.json())
+    return json({ data: {} })
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await waitFor(() => app.promptRef?.focused === true)
+
+    await app.mockInput.typeText("echo $effect ")
+    await app.mockInput.typeText("$eff")
+    expect(await captureFrame(app, (value) => value.includes("✦ effect"))).toContain("✦ effect")
+    app.mockInput.pressEnter()
+    await waitFor(() => app.promptRef?.current.input === "echo $effect $effect ")
+    app.mockInput.pressEnter()
+    await waitFor(() => calls.length === 1 && app.promptRef?.current.input === "")
+
+    app.keymap.dispatchCommand("prompt.history.previous")
+    await waitFor(() => app.promptRef?.current.input === "echo $effect $effect ")
+    expect(app.promptRef?.current.parts).toEqual([
+      {
+        type: "text",
+        text: "$effect",
+        metadata: { kind: "skill_reference", name: "effect" },
+        source: { text: { start: 13, end: 20, value: "$effect" } },
+      },
+    ])
+
+    app.mockInput.pressEnter()
+    await waitFor(() => calls.length === 2)
+    expect(calls[1]).toMatchObject({
+      parts: [
+        {
+          type: "text",
+          text: "echo $effect $effect ",
+          metadata: { skillReferences: [{ start: 13, end: 20, name: "effect" }] },
+        },
+      ],
+    })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("submitted skill reference ranges account for tracked pasted-text expansion", async () => {
+  const calls: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname !== "/session/session-test/message") return
+    calls.push(await request?.json())
+    return json({ data: {} })
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({
+      input: "[Pasted ~3 lines] $effect",
+      parts: [
+        {
+          type: "text",
+          text: "alpha\nbeta\ngamma",
+          source: { text: { start: 0, end: 17, value: "[Pasted ~3 lines]" } },
+        },
+        {
+          type: "text",
+          text: "$effect",
+          metadata: { kind: "skill_reference", name: "effect" },
+          source: { text: { start: 18, end: 25, value: "$effect" } },
+        },
+      ],
+    })
+    await app.promptRef?.submit()
+    await waitFor(() => calls.length === 1)
+
+    expect(calls[0]).toMatchObject({
+      parts: [
+        {
+          type: "text",
+          text: "alpha\nbeta\ngamma $effect",
+          metadata: { skillReferences: [{ start: 17, end: 24, name: "effect" }] },
+        },
+      ],
+    })
   } finally {
     app.renderer.destroy()
   }
@@ -399,6 +1017,42 @@ test("overlapping same-session start failures do not change yolo mode", async ()
     expect(app.local.permission.mode).toBe("normal")
     expect(app.goal.current()).toBeUndefined()
   } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("queued replacement failure preserves the active Goal completed ahead of it", async () => {
+  let resolveFirst!: (response: Response) => void
+  let starts = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      starts++
+      if (starts === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirst = resolve
+        })
+      }
+      return json({ error: "goal B failed" }, { status: 409 })
+    }
+  })
+
+  try {
+    const first = app.goal.start("goal A")
+    await waitFor(() => resolveFirst !== undefined)
+    const second = app.goal.start("goal B").then(
+      () => false,
+      () => true,
+    )
+
+    resolveFirst(json({ data: { goal: "goal A", active: true, iteration: 1, cap: 7 } }))
+    await first
+
+    expect(await second).toBe(true)
+    expect(app.goal.current()).toMatchObject({ goal: "goal A", active: true })
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.goal.answering("session-test")).toBe(true)
+  } finally {
+    resolveFirst?.(json({ data: { goal: "goal A", active: true, iteration: 1, cap: 7 } }))
     app.renderer.destroy()
   }
 })
@@ -806,6 +1460,125 @@ test("status polling records active goal status", async () => {
   }
 })
 
+test("inactive exhausted Goal status stays persisted without rendering the band", async () => {
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/status") {
+      return json({ data: { goal: "finished goal", active: false, iteration: 7, cap: 7 } })
+    }
+  })
+
+  try {
+    await app.goal.status()
+    const frame = await captureFrame(app, (value) => value.includes("model"))
+
+    expect(app.goal.current()).toMatchObject({ goal: "finished goal", active: false, iteration: 7, cap: 7 })
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(frame).not.toContain("Goal · finished goal")
+    expect(frame).not.toContain("Current target · finished goal")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("Goal band follows synchronized todo updates", async () => {
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/session/session-test") {
+      return json({
+        id: "session-test",
+        title: "Goal session",
+        slug: "session-test",
+        projectID: "project-test",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      })
+    }
+    if (url.pathname === "/session/session-test/message" || url.pathname === "/session/session-test/diff") {
+      return json([])
+    }
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
+    }
+    if (url.pathname === "/session/session-test/todo") {
+      return json([
+        { content: "Inspect", status: "completed", priority: "high" },
+        { content: "Discard obsolete path", status: "cancelled", priority: "low" },
+        { content: "Verify source", status: "in_progress", priority: "high" },
+        { content: "Review", status: "pending", priority: "medium" },
+      ])
+    }
+  })
+
+  try {
+    await app.sync.session.sync("session-test")
+    await app.goal.start("ship task 6")
+    const frame = await captureFrame(app, (value) => value.includes("Current target · Verify source"))
+    expect(frame).toContain("50%")
+    expect(frame).toContain("Current target · Verify source")
+    expect(frame).toContain("2 of 4 resolved")
+
+    app.events.emit({
+      directory,
+      project: "project-test",
+      payload: {
+        id: "event-todo-updated",
+        type: "todo.updated",
+        properties: {
+          sessionID: "session-test",
+          todos: [
+            { content: "Inspect", status: "completed", priority: "high" },
+            { content: "Verify source", status: "completed", priority: "high" },
+            { content: "Final review", status: "in_progress", priority: "medium" },
+          ],
+        },
+      },
+    })
+
+    const updated = await captureFrame(app, (value) => value.includes("Current target · Final review"))
+    expect(updated).toContain("67%")
+    expect(updated).toContain("2 of 3 resolved")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("replacement Goal starts at zero without old todos", async () => {
+  let resolveReplacement!: (response: Response) => void
+  let starts = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      starts++
+      if (starts === 1) return json({ data: { goal: "old goal", active: true, iteration: 2, cap: 7 } })
+      return new Promise<Response>((resolve) => {
+        resolveReplacement = resolve
+      })
+    }
+  })
+
+  try {
+    await app.goal.start("old goal")
+    app.sync.set("todo", "session-test", [
+      { content: "Old completed", status: "completed", priority: "high" },
+      { content: "Old pending", status: "pending", priority: "medium" },
+    ])
+
+    const replacement = app.goal.start("new objective")
+    await waitFor(() => resolveReplacement !== undefined)
+    const frame = await captureFrame(app, (value) => value.includes("Starting · new objective"))
+
+    expect(frame).toContain("0%")
+    expect(frame).toContain("Current target · new objective")
+    expect(frame).toContain("0 of 0 resolved")
+    expect(frame).not.toContain("Old pending")
+
+    resolveReplacement(json({ data: { goal: "new objective", active: true, iteration: 1, cap: 7 } }))
+    await replacement
+  } finally {
+    resolveReplacement?.(json({ data: { goal: "new objective", active: true, iteration: 1, cap: 7 } }))
+    app.renderer.destroy()
+  }
+})
+
 test("Goal state transitions from replacement start to active to removed", async () => {
   let resolveStart!: (response: Response) => void
   const app = await mountGoalPrompt((url) => {
@@ -842,7 +1615,7 @@ test("Goal state transitions from replacement start to active to removed", async
   }
 })
 
-test("long Goal stays out of prompt chrome at narrow width", async () => {
+test("long Goal keeps prompt controls visible at narrow width", async () => {
   const goal = "ship a deliberately long goal through every validation stage"
   const app = await mountGoalPrompt(
     (url) => {
@@ -859,8 +1632,39 @@ test("long Goal stays out of prompt chrome at narrow width", async () => {
 
     expect(frame).toContain("model")
     expect(frame).toContain("controls")
-    expect(frame).not.toContain("Goal ·")
-    expect(frame).not.toContain(goal)
+    expect(frame).toContain("Goal · ship a deliberately long goal")
+    expect(frame).toContain("Current target")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("Goal band stays compact with long content at narrow width", async () => {
+  const goal = Array(12).fill("objective").join(" ")
+  const target = Array(12).fill("verification").join(" ")
+  const app = await mountGoalPrompt(
+    (url) => {
+      if (url.pathname === "/api/session/session-test/goal/start") {
+        return json({ data: { goal, active: true, iteration: 1, cap: 7 } })
+      }
+    },
+    { width: 24 },
+  )
+
+  try {
+    await app.goal.start(goal)
+    app.sync.set("todo", "session-test", [{ content: target, status: "in_progress", priority: "high" }])
+    const frame = await captureFrame(app, (value) => value.includes("Goal ·") && value.includes("model"))
+    const rows = frame.split("\n")
+    const goalRow = rows.findIndex((row) => row.includes("Goal ·"))
+    const resolvedRow = rows.findIndex((row) => row.includes("0 of 1 resolved"))
+    const barRows = rows.filter((row) => row.includes("━"))
+
+    expect(goalRow).toBeGreaterThanOrEqual(0)
+    expect(resolvedRow).toBeGreaterThan(goalRow)
+    expect(resolvedRow - goalRow).toBeLessThanOrEqual(5)
+    expect(barRows).toHaveLength(1)
+    expect(frame).toContain("model")
   } finally {
     app.renderer.destroy()
   }
@@ -964,6 +1768,7 @@ async function mountGoalPrompt(
     editorSelection?: EditorSelection
     width?: number
     right?: boolean
+    routed?: boolean
   } = {},
 ) {
   const tmp = await tmpdir()
@@ -987,6 +1792,10 @@ async function mountGoalPrompt(
     route: ReturnType<typeof useRoute>
     toast: ReturnType<typeof useToast>
     editor: ReturnType<typeof useEditorContext>
+    sync: ReturnType<typeof useSync>
+    sdk: ReturnType<typeof useSDK>
+    keymap: ReturnType<typeof createDefaultOpenTuiKeymap>
+    remountPrompt?: () => void
   }
   const app = await testRender(
     () => (
@@ -999,6 +1808,7 @@ async function mountGoalPrompt(
         home={options.home}
         editorSelection={options.editorSelection}
         right={options.right}
+        routed={options.routed}
       />
     ),
     { width: options.width ?? 80, height: 24 },
@@ -1009,8 +1819,8 @@ async function mountGoalPrompt(
     destroy()
   }
   await app.renderOnce()
-  await waitFor(() => !!state.local && !!state.dialog && !!state.goal)
-  return { ...app, ...state }
+  await waitFor(() => !!state.local && !!state.dialog && !!state.goal && !!state.sync && !!state.sdk && !!state.keymap)
+  return { ...app, ...state, state, events }
 }
 
 function Harness(props: {
@@ -1025,15 +1835,21 @@ function Harness(props: {
     route?: ReturnType<typeof useRoute>
     toast?: ReturnType<typeof useToast>
     editor?: ReturnType<typeof useEditorContext>
+    sync?: ReturnType<typeof useSync>
+    sdk?: ReturnType<typeof useSDK>
+    keymap?: ReturnType<typeof createDefaultOpenTuiKeymap>
+    remountPrompt?: () => void
   }
   sidebar?: boolean
   home?: boolean
   editorSelection?: EditorSelection
   right?: boolean
+  routed?: boolean
 }) {
   const renderer = useRenderer()
   const config = createTuiResolvedConfig({ plugin_enabled: {} })
   const keymap = createDefaultOpenTuiKeymap(renderer)
+  props.state.keymap = keymap
   const pluginRuntime = createPluginRuntime()
   const off = registerOpencodeKeymap(keymap, renderer, config)
   onCleanup(off)
@@ -1082,13 +1898,20 @@ function Harness(props: {
                                                     <LocationProvider>
                                                       <PromptSyncData state={props.state} />
                                                       <box flexGrow={1} justifyContent="flex-end">
-                                                        <Prompt
-                                                          sessionID={props.home ? undefined : "session-test"}
-                                                          right={props.right ? <text>controls</text> : undefined}
-                                                          ref={(ref) => {
-                                                            props.state.promptRef = ref
-                                                          }}
-                                                        />
+                                                        <Show
+                                                          when={props.routed ? true : undefined}
+                                                          fallback={
+                                                            <Prompt
+                                                              sessionID={props.home ? undefined : "session-test"}
+                                                              right={props.right ? <text>controls</text> : undefined}
+                                                              ref={(ref) => {
+                                                                props.state.promptRef = ref
+                                                              }}
+                                                            />
+                                                          }
+                                                        >
+                                                          <RoutedPrompt state={props.state} />
+                                                        </Show>
                                                       </box>
                                                       {props.sidebar && <Sidebar sessionID="session-test" />}
                                                     </LocationProvider>
@@ -1119,6 +1942,37 @@ function Harness(props: {
   )
 }
 
+function RoutedPrompt(props: {
+  state: {
+    promptRef?: PromptRef
+    remountPrompt?: () => void
+  }
+}) {
+  const route = useRoute()
+  const promptRef = usePromptRef()
+  const [revision, setRevision] = createSignal(0)
+  props.state.remountPrompt = () => setRevision((value) => value + 1)
+  const key = () => {
+    if (route.data.type === "home") return `home:${revision()}`
+    if (route.data.type === "session") return `${route.data.sessionID}:${revision()}`
+  }
+  return (
+    <Show when={key()} keyed>
+      {(value) => (
+        <Prompt
+          sessionID={
+            value.startsWith("home:") ? undefined : route.data.type === "session" ? route.data.sessionID : undefined
+          }
+          ref={(ref) => {
+            props.state.promptRef = ref
+            promptRef.set(ref)
+          }}
+        />
+      )}
+    </Show>
+  )
+}
+
 function PromptSyncData(props: {
   state: {
     promptRef?: PromptRef
@@ -1128,6 +1982,10 @@ function PromptSyncData(props: {
     route?: ReturnType<typeof useRoute>
     toast?: ReturnType<typeof useToast>
     editor?: ReturnType<typeof useEditorContext>
+    sync?: ReturnType<typeof useSync>
+    sdk?: ReturnType<typeof useSDK>
+    keymap?: ReturnType<typeof createDefaultOpenTuiKeymap>
+    remountPrompt?: () => void
   }
 }) {
   const sync = useSync()
@@ -1138,6 +1996,8 @@ function PromptSyncData(props: {
   props.state.route = useRoute()
   props.state.toast = useToast()
   props.state.editor = useEditorContext()
+  props.state.sync = sync
+  props.state.sdk = useSDK()
   onMount(() => {
     sync.set("session", [
       {
@@ -1151,6 +2011,9 @@ function PromptSyncData(props: {
       },
     ])
     sync.set("agent", [{ name: "Build", mode: "primary", hidden: false, permission: [], options: {} }])
+    sync.set("command", [
+      { name: "effect", description: "Effect skill", source: "skill", template: "$effect", hints: [] },
+    ])
     sync.set("provider_default", { test: "model" })
     sync.set("provider", [
       {

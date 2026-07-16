@@ -504,6 +504,7 @@ export function Autocomplete(props: {
               draft.parts.push({
                 type: "text",
                 text: sourceText,
+                metadata: { kind: "skill_reference", name: command.name },
                 source: { text: { start: store.index, end: store.index + Bun.stringWidth(sourceText), value: sourceText } },
               })
               props.setExtmark(partIndex, extmarkId)
