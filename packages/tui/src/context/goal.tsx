@@ -21,6 +21,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     const [selections, setSelections] = createStore<Record<string, boolean | undefined>>({})
     const [starts, setStarting] = createStore<Record<string, boolean | undefined>>({})
     const [homeSelected, setHomeSelected] = createSignal(false)
+    const [homeGoal, setHomeGoal] = createSignal<string>()
     const queues = new Map<string, Promise<void>>()
     const generations = new Map<string, number>()
     const selectionRevisions = new Map<string, number>()
@@ -60,6 +61,22 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
 
     function starting(id: string) {
       return starts[id] === true
+    }
+
+    function prepareHome(goal: string) {
+      setHomeGoal(goal)
+      setHomeSelected(true)
+    }
+
+    function clearHome() {
+      setHomeGoal(undefined)
+      setHomeSelected(false)
+    }
+
+    function pending(id = sessionID()) {
+      if (!id) return route.data.type === "home" ? homeGoal() : undefined
+      if (!starting(id)) return
+      return presentation.get(id)?.goal
     }
 
     function answering(id: string) {
@@ -217,19 +234,23 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     }
 
     function adoptHome(sessionID: string) {
+      setHomeGoal(undefined)
       setHomeSelected(false)
       advanceRevision(sessionID)
       setSelections(sessionID, true)
     }
 
     createEffect(() => {
-      if (route.data.type !== "home") setHomeSelected(false)
+      if (route.data.type === "home") return
+      setHomeGoal(undefined)
+      setHomeSelected(false)
     })
 
     createEffect(() => {
       const id = sessionID()
       if (!id) return
       const poll = () => {
+        if (presentation.has(id)) return
         const version = generation(id)
         return refresh(id).catch(() => {
           if (generation(id) === version) setStatuses(id, undefined)
@@ -256,6 +277,9 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       adoptHome,
       answering,
       starting,
+      prepareHome,
+      clearHome,
+      pending,
       revision,
       selected,
       clear,

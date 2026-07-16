@@ -82,7 +82,6 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
-import { useGoal } from "../../context/goal"
 
 addDefaultParsers(parsers.parsers)
 
@@ -193,16 +192,8 @@ export function Session() {
   const tuiConfig = useTuiConfig()
   const kv = useKV()
   const { theme } = useTheme()
-  const goal = useGoal()
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID))
-  const goalLabel = createMemo(() => {
-    if (!goal.answering(route.sessionID)) return
-    if (goal.starting(route.sessionID)) return "Goal · Starting"
-    const current = goal.current()
-    if (!current) return "Goal · Starting"
-    return `Goal · Pursuing ${current.goal}`
-  })
   const location = createMemo(() => {
     const current = session()
     return current ? { directory: current.directory, workspaceID: current.workspaceID } : undefined
@@ -1174,24 +1165,6 @@ export function Session() {
         <box flexDirection="row" flexGrow={1} minHeight={0}>
           <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
             <Show when={session()}>
-              <Show when={goalLabel()}>
-                {(label) => (
-                  <box
-                    width="100%"
-                    flexShrink={0}
-                    backgroundColor={theme.backgroundPanel}
-                    border={["left"]}
-                    borderColor={theme.accent}
-                    customBorderChars={SplitBorder.customBorderChars}
-                  >
-                    <box width="100%" paddingLeft={2} paddingRight={3} paddingTop={1} paddingBottom={1}>
-                      <text width="100%" fg={theme.accent} wrapMode="word">
-                        {label()}
-                      </text>
-                    </box>
-                  </box>
-                )}
-              </Show>
               <scrollbox
                 ref={(r) => (scroll = r)}
                 viewportOptions={{

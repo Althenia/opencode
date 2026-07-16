@@ -59,6 +59,8 @@ import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 import { useGoal } from "../../context/goal"
+import { usePromptRef } from "../../context/prompt"
+import { GoalStatusBand } from "../goal-status-band"
 
 registerOpencodeSpinner()
 
@@ -160,10 +162,14 @@ export function Prompt(props: PromptProps) {
   const project = useProject()
   const sync = useSync()
   const goal = useGoal()
+  const promptRef = usePromptRef()
   const tuiConfig = useTuiConfig()
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  const goalPending = createMemo(() => goal.pending(props.sessionID))
+  const goalObjective = createMemo(() => goalPending() ?? (props.sessionID ? goal.current()?.goal : undefined))
+  const goalTodos = createMemo(() => (props.sessionID ? (sync.data.todo[props.sessionID] ?? []) : []))
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -1023,42 +1029,6 @@ export function Prompt(props: PromptProps) {
     }
 
     const variant = local.model.variant.current()
-    let sessionID = props.sessionID
-    let finishMoveProgress = false
-    if (sessionID == null) {
-      const selectedWorkspace = workspace.selection()
-      const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
-
-      const directory = await move.getDirectory(store.prompt.input)
-      if (move.pending() && !directory) return false
-      finishMoveProgress = Boolean(move.progress())
-
-      const res = await sdk.client.session.create({
-        directory,
-        workspace: workspaceID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          id: selectedModel.modelID,
-          variant,
-        },
-      })
-
-      if (res.error) {
-        if (finishMoveProgress) move.finishSubmit()
-        console.log("Creating a session failed:", res.error)
-
-        toast.show({
-          message: "Creating a session failed. Open console for more details.",
-          variant: "error",
-        })
-
-        return true
-      }
-
-      sessionID = res.data.id
-    }
-
     const inputText = expandTrackedPastedText(
       store.prompt.input,
       input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
@@ -1068,11 +1038,7 @@ export function Prompt(props: PromptProps) {
         return [{ start: extmark.start, end: extmark.end, text: part.text }]
       }),
     )
-
-    // Filter out text parts (pasted content) since they're now expanded inline
     const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
-
-    // Capture mode before it gets reset
     const currentMode = store.mode
     const editorSelection = editorContext()
     const editorParts =
@@ -1091,8 +1057,65 @@ export function Prompt(props: PromptProps) {
             },
           ]
         : []
-
     const goalText = goalCommand ? inputText.slice("/goal".length).trim() : undefined
+    const submittedPrompt = {
+      input: store.prompt.input,
+      parts: [...store.prompt.parts],
+    }
+    const startsGoal = Boolean(goalText && goalText !== "stop")
+    const createdSession = props.sessionID == null
+    const restoreGoalPrompt = () => {
+      if (!startsGoal) return
+      goal.clearHome()
+      const target = promptRef.current ?? ref
+      target.set(submittedPrompt)
+      target.focus()
+    }
+
+    if (startsGoal) {
+      if (!props.sessionID && goalText) goal.prepareHome(goalText)
+      ref.reset()
+    }
+
+    let sessionID = props.sessionID
+    let finishMoveProgress = false
+    if (sessionID == null) {
+      const selectedWorkspace = workspace.selection()
+      const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
+
+      const directory = await move.getDirectory(submittedPrompt.input)
+      if (move.pending() && !directory) {
+        restoreGoalPrompt()
+        return false
+      }
+      finishMoveProgress = Boolean(move.progress())
+
+      const res = await sdk.client.session.create({
+        directory,
+        workspace: workspaceID,
+        agent: agent.name,
+        model: {
+          providerID: selectedModel.providerID,
+          id: selectedModel.modelID,
+          variant,
+        },
+      })
+
+      if (res.error) {
+        if (finishMoveProgress) move.finishSubmit()
+        restoreGoalPrompt()
+        console.log("Creating a session failed:", res.error)
+
+        toast.show({
+          message: "Creating a session failed. Open console for more details.",
+          variant: "error",
+        })
+
+        return true
+      }
+
+      sessionID = res.data.id
+    }
     if (goalText === "stop") {
       try {
         await goal.stop(sessionID)
@@ -1111,9 +1134,15 @@ export function Prompt(props: PromptProps) {
             ? { source: { start: part.source.text.start, end: part.source.text.end, text: part.source.text.value } }
             : {}),
         }))
+      if (createdSession) goal.adoptHome(sessionID)
+      const start = goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
+      if (createdSession) route.navigate({ type: "session", sessionID })
+
       try {
-        await goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
+        await start
       } catch (error) {
+        goal.clear(sessionID)
+        restoreGoalPrompt()
         toast.show({ title: "Failed to start Goal", message: errorMessage(error), variant: "error" })
         return false
       }
@@ -1181,19 +1210,14 @@ export function Prompt(props: PromptProps) {
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({
-      ...store.prompt,
+      ...submittedPrompt,
       mode: currentMode,
     })
-    input.extmarks.clear()
-    setStore("prompt", {
-      input: "",
-      parts: [],
-    })
-    setStore("extmarkToPartIndex", new Map())
+    if (!startsGoal) ref.reset()
     props.onSubmit?.()
 
     // temporary hack to make sure the message is sent
-    if (!props.sessionID) {
+    if (!props.sessionID && !startsGoal) {
       if (editorParts.length > 0) editor.preserveSelectionFromNewSession()
       setTimeout(() => {
         route.navigate({
@@ -1202,7 +1226,6 @@ export function Prompt(props: PromptProps) {
         })
       }, 50)
     }
-    input.clear()
     if (finishMoveProgress) move.finishSubmit()
     return true
   }
@@ -1409,6 +1432,7 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
+        <GoalStatusBand objective={goalObjective()} starting={Boolean(goalPending())} todos={goalTodos()} />
         <box
           width="100%"
           border={["left"]}

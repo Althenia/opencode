@@ -98,7 +98,78 @@ test("the first accepted home Goal prompt creates one session and starts Goal wi
     expect(app.goal.selected("session-home")).toBe(true)
     expect(calls.map((call) => call.method)).toEqual(["create", "goalStart"])
     expect(calls[1]?.body).toMatchObject({ goal: "ship task 6" })
-    expect(app.goal.selected()).toBe(false)
+    expect(app.goal.selected()).toBe(true)
+    expect(app.route.data).toMatchObject({ type: "session", sessionID: "session-home" })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("Home Goal shows Starting and clears input before goalStart resolves", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        return new Promise<Response>((resolve) => {
+          resolveStart = resolve
+        })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveStart !== undefined)
+
+    expect(app.promptRef?.current.input).toBe("")
+    expect(app.route.data).toMatchObject({ type: "session", sessionID: "session-home" })
+    const frame = await captureFrame(app, (value) => value.includes("Starting · ship task 6"))
+    expect(frame).toContain("Starting · ship task 6")
+    expect(frame).toContain("0%")
+    expect(frame).toContain("Current target · ship task 6")
+
+    resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    await waitFor(() => app.goal.active("session-home"))
+  } finally {
+    resolveStart?.(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
+    app.renderer.destroy()
+  }
+})
+
+test("failed Home session creation restores the Goal command", async () => {
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({ error: "create failed" }, { status: 500 })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => app.promptRef?.current.input === "/goal ship task 6")
+
+    expect(app.goal.pending()).toBeUndefined()
+    expect(app.route.data.type).toBe("home")
   } finally {
     app.renderer.destroy()
   }
@@ -188,6 +259,7 @@ test("failed /goal start preserves the command", async () => {
     await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
 
     expect(app.promptRef?.current.input).toBe("/goal ship task 6")
+    expect(app.goal.pending("session-test")).toBeUndefined()
   } finally {
     app.renderer.destroy()
   }
@@ -806,6 +878,68 @@ test("status polling records active goal status", async () => {
   }
 })
 
+test("Goal band follows synchronized todo updates", async () => {
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/session/session-test") {
+      return json({
+        id: "session-test",
+        title: "Goal session",
+        slug: "session-test",
+        projectID: "project-test",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      })
+    }
+    if (url.pathname === "/session/session-test/message" || url.pathname === "/session/session-test/diff") {
+      return json([])
+    }
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
+    }
+    if (url.pathname === "/session/session-test/todo") {
+      return json([
+        { content: "Inspect", status: "completed", priority: "high" },
+        { content: "Discard obsolete path", status: "cancelled", priority: "low" },
+        { content: "Verify source", status: "in_progress", priority: "high" },
+        { content: "Review", status: "pending", priority: "medium" },
+      ])
+    }
+  })
+
+  try {
+    await app.sync.session.sync("session-test")
+    await app.goal.start("ship task 6")
+    const frame = await captureFrame(app, (value) => value.includes("Current target · Verify source"))
+    expect(frame).toContain("50%")
+    expect(frame).toContain("Current target · Verify source")
+    expect(frame).toContain("2 of 4 resolved")
+
+    app.events.emit({
+      directory,
+      project: "project-test",
+      payload: {
+        id: "event-todo-updated",
+        type: "todo.updated",
+        properties: {
+          sessionID: "session-test",
+          todos: [
+            { content: "Inspect", status: "completed", priority: "high" },
+            { content: "Verify source", status: "completed", priority: "high" },
+            { content: "Final review", status: "in_progress", priority: "medium" },
+          ],
+        },
+      },
+    })
+
+    const updated = await captureFrame(app, (value) => value.includes("Current target · Final review"))
+    expect(updated).toContain("67%")
+    expect(updated).toContain("2 of 3 resolved")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("Goal state transitions from replacement start to active to removed", async () => {
   let resolveStart!: (response: Response) => void
   const app = await mountGoalPrompt((url) => {
@@ -842,7 +976,7 @@ test("Goal state transitions from replacement start to active to removed", async
   }
 })
 
-test("long Goal stays out of prompt chrome at narrow width", async () => {
+test("long Goal keeps prompt controls visible at narrow width", async () => {
   const goal = "ship a deliberately long goal through every validation stage"
   const app = await mountGoalPrompt(
     (url) => {
@@ -859,8 +993,8 @@ test("long Goal stays out of prompt chrome at narrow width", async () => {
 
     expect(frame).toContain("model")
     expect(frame).toContain("controls")
-    expect(frame).not.toContain("Goal ·")
-    expect(frame).not.toContain(goal)
+    expect(frame).toContain("Goal · ship a deliberately long goal")
+    expect(frame).toContain("Current target")
   } finally {
     app.renderer.destroy()
   }
@@ -987,6 +1121,7 @@ async function mountGoalPrompt(
     route: ReturnType<typeof useRoute>
     toast: ReturnType<typeof useToast>
     editor: ReturnType<typeof useEditorContext>
+    sync: ReturnType<typeof useSync>
   }
   const app = await testRender(
     () => (
@@ -1009,8 +1144,8 @@ async function mountGoalPrompt(
     destroy()
   }
   await app.renderOnce()
-  await waitFor(() => !!state.local && !!state.dialog && !!state.goal)
-  return { ...app, ...state }
+  await waitFor(() => !!state.local && !!state.dialog && !!state.goal && !!state.sync)
+  return { ...app, ...state, events }
 }
 
 function Harness(props: {
@@ -1025,6 +1160,7 @@ function Harness(props: {
     route?: ReturnType<typeof useRoute>
     toast?: ReturnType<typeof useToast>
     editor?: ReturnType<typeof useEditorContext>
+    sync?: ReturnType<typeof useSync>
   }
   sidebar?: boolean
   home?: boolean
@@ -1128,6 +1264,7 @@ function PromptSyncData(props: {
     route?: ReturnType<typeof useRoute>
     toast?: ReturnType<typeof useToast>
     editor?: ReturnType<typeof useEditorContext>
+    sync?: ReturnType<typeof useSync>
   }
 }) {
   const sync = useSync()
@@ -1138,6 +1275,7 @@ function PromptSyncData(props: {
   props.state.route = useRoute()
   props.state.toast = useToast()
   props.state.editor = useEditorContext()
+  props.state.sync = sync
   onMount(() => {
     sync.set("session", [
       {

@@ -586,7 +586,7 @@ test("an active final goal attempt does not show the exhaustion dialog", async (
   }
 })
 
-test("session timeline keeps the active Goal above its first message", async () => {
+test("session timeline keeps the active Goal below its first message", async () => {
   await using tmp = await tmpdir()
   await mkdir(path.join(tmp.path, "state"), { recursive: true })
   await Bun.write(path.join(tmp.path, "state", "kv.json"), "{}")
@@ -662,16 +662,14 @@ test("session timeline keeps the active Goal above its first message", async () 
   )
 
   try {
-    const frame = await captureFrame(app, (value) => value.includes("Goal · Pursuing"))
+    const frame = await captureFrame(app, (value) => value.includes("Current target"))
     const rows = frame.split("\n")
-    const goalRow = rows.findIndex((row) => row.includes("Goal · Pursuing"))
+    const goalRow = rows.findIndex((row) => row.includes("Goal ·"))
     const messageRow = rows.findIndex((row) => row.includes("First timeline message"))
-    expect(goalRow).toBeGreaterThanOrEqual(0)
-    expect(messageRow).toBeGreaterThanOrEqual(0)
-    expect(goalRow).toBeLessThan(messageRow)
-    expect(frame.replace(/[┃\s]+/g, " ")).toContain(`Goal · Pursuing ${goalText}`)
+    expect(goalRow).toBeGreaterThan(messageRow)
+    expect(frame).toContain("Current target")
+    expect(frame).toContain("0%")
     expect(frame).toContain("Explore · model · ultra")
-    expect(frame).not.toContain("2/7")
   } finally {
     app.renderer.destroy()
   }
@@ -687,6 +685,7 @@ function PromptHarness(props: {
   const config = createTuiResolvedConfig({ plugin_enabled: {} })
   const keymap = createDefaultOpenTuiKeymap(renderer)
   const pluginRuntime = createPluginRuntime()
+  pluginRuntime.Slot = (props) => props.children
   const off = registerOpencodeKeymap(keymap, renderer, config)
   onCleanup(off)
 
