@@ -5,6 +5,7 @@ export const { use: usePromptRef, provider: PromptRefProvider } = createSimpleCo
   name: "PromptRef",
   init: () => {
     let current: PromptRef | undefined
+    let submissionRevision = 0
 
     return {
       get current() {
@@ -12,6 +13,12 @@ export const { use: usePromptRef, provider: PromptRefProvider } = createSimpleCo
       },
       set(ref: PromptRef | undefined) {
         current = ref
+      },
+      get submissionRevision() {
+        return submissionRevision
+      },
+      beginSubmission() {
+        return ++submissionRevision
       },
     }
   },

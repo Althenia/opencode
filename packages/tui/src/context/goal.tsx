@@ -159,14 +159,18 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       files?: Array<{ uri: string; name?: string; source?: { start: number; end: number; text: string } }>,
     ) {
       if (!id) return
-      const previousSelection = selected(id) && (statuses[id] !== undefined || !starting(id))
+      const initialSelection = selected(id) && (statuses[id] !== undefined || !starting(id))
+      let previousSelection = initialSelection
       const ownership = advanceRevision(id)
       setSelections(id, true)
       const version = generation(id)
       const messageID = SessionMessage.ID.create()
       presentation.set(id, { goal, messageID, revision: ownership })
       beginStart(id)
-      return serialize(id, () => requestStart(id, goal, messageID, version, files))
+      return serialize(id, () => {
+        previousSelection = statuses[id] === undefined ? initialSelection : selected(id)
+        return requestStart(id, goal, messageID, version, files)
+      })
         .catch((error) => {
           if (presentation.get(id)?.revision === ownership) presentation.delete(id)
           if (revision(id) === ownership) setSelections(id, previousSelection)

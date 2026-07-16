@@ -432,6 +432,60 @@ test("failed Home-created Goal start does not restore after navigating away", as
   }
 })
 
+test("newer normal submission prevents failed Home Goal restoration", async () => {
+  let resolveStart!: (response: Response) => void
+  const prompts: unknown[] = []
+  const app = await mountGoalPrompt(
+    async (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        return new Promise<Response>((resolve) => {
+          resolveStart = resolve
+        })
+      }
+      if (url.pathname === "/session/session-home/message") {
+        prompts.push(await request?.json())
+        return json({ data: {} })
+      }
+    },
+    { home: true, routed: true },
+  )
+
+  try {
+    await waitFor(() => !!app.state.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    const homePrompt = app.state.promptRef
+    homePrompt?.set({ input: "/goal goal A", parts: [] })
+    const start = homePrompt?.submit()
+    await waitFor(
+      () => resolveStart !== undefined && app.route.data.type === "session" && app.route.data.sessionID === "session-home",
+    )
+    await waitFor(() => app.state.promptRef !== homePrompt)
+
+    app.state.promptRef?.set({ input: "newer normal prompt", parts: [] })
+    await app.state.promptRef?.submit()
+    await waitFor(() => prompts.length === 1 && app.state.promptRef?.current.input === "")
+
+    resolveStart(json({ error: "goal A failed" }, { status: 409 }))
+    await start
+
+    expect(app.state.promptRef?.current.input).toBe("")
+  } finally {
+    resolveStart?.(json({ error: "goal A failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
 test("/goal autocomplete handles blank cancellation and starts Goal through keyboard input", async () => {
   const calls: Array<{ method: string; body?: unknown }> = []
   const app = await mountGoalPrompt(async (url, request) => {
@@ -912,6 +966,42 @@ test("overlapping same-session start failures do not change yolo mode", async ()
     expect(app.local.permission.mode).toBe("normal")
     expect(app.goal.current()).toBeUndefined()
   } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("queued replacement failure preserves the active Goal completed ahead of it", async () => {
+  let resolveFirst!: (response: Response) => void
+  let starts = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      starts++
+      if (starts === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirst = resolve
+        })
+      }
+      return json({ error: "goal B failed" }, { status: 409 })
+    }
+  })
+
+  try {
+    const first = app.goal.start("goal A")
+    await waitFor(() => resolveFirst !== undefined)
+    const second = app.goal.start("goal B").then(
+      () => false,
+      () => true,
+    )
+
+    resolveFirst(json({ data: { goal: "goal A", active: true, iteration: 1, cap: 7 } }))
+    await first
+
+    expect(await second).toBe(true)
+    expect(app.goal.current()).toMatchObject({ goal: "goal A", active: true })
+    expect(app.goal.selected("session-test")).toBe(true)
+    expect(app.goal.answering("session-test")).toBe(true)
+  } finally {
+    resolveFirst?.(json({ data: { goal: "goal A", active: true, iteration: 1, cap: 7 } }))
     app.renderer.destroy()
   }
 })
