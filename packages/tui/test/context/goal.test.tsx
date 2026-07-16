@@ -3,7 +3,7 @@ import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
-import { Show, onCleanup, onMount } from "solid-js"
+import { Show, createSignal, onCleanup, onMount } from "solid-js"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "../fixture/tui-sdk"
 import { TestTuiContexts } from "../fixture/tui-environment"
@@ -482,6 +482,57 @@ test("newer normal submission prevents failed Home Goal restoration", async () =
     expect(app.state.promptRef?.current.input).toBe("")
   } finally {
     resolveStart?.(json({ error: "goal A failed" }, { status: 409 }))
+    app.renderer.destroy()
+  }
+})
+
+test("newer failed Home submission prevents restoration but clears owned Goal optimism", async () => {
+  let resolveGoalCreate!: (response: Response) => void
+  let creates = 0
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        creates++
+        if (creates === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveGoalCreate = resolve
+          })
+        }
+        return json({ error: "normal submission failed" }, { status: 500 })
+      }
+    },
+    { home: true, routed: true },
+  )
+
+  try {
+    await waitFor(() => !!app.state.promptRef && !!app.state.remountPrompt)
+    await waitFor(() => !!app.local.model.current())
+    const goalPrompt = app.state.promptRef
+    if (!goalPrompt) throw new Error("Goal prompt did not mount")
+    goalPrompt.set({ input: "/goal goal A", parts: [] })
+    const goalSubmission = goalPrompt.submit()
+    await waitFor(() => resolveGoalCreate !== undefined && app.goal.pending() === "goal A")
+
+    app.state.remountPrompt?.()
+    await app.renderOnce()
+    await waitFor(() => app.state.promptRef !== goalPrompt)
+    const normalPrompt = app.state.promptRef
+    if (!normalPrompt) throw new Error("Normal prompt did not mount")
+    normalPrompt.set({ input: "newer normal prompt", parts: [] })
+    await normalPrompt.submit()
+    normalPrompt.reset()
+    expect(app.route.data).toEqual({ type: "home" })
+    expect(app.state.promptRef?.current.input).toBe("")
+
+    resolveGoalCreate(json({ error: "goal A create failed" }, { status: 500 }))
+    await goalSubmission
+
+    await waitFor(() => app.goal.pending() === undefined)
+    expect(app.goal.pending()).toBeUndefined()
+    expect(app.state.promptRef?.current.input).toBe("")
+    expect(await captureFrame(app, (value) => value.includes("model"))).not.toContain("Starting · goal A")
+  } finally {
+    resolveGoalCreate?.(json({ error: "goal A create failed" }, { status: 500 }))
     app.renderer.destroy()
   }
 })
@@ -1744,6 +1795,7 @@ async function mountGoalPrompt(
     sync: ReturnType<typeof useSync>
     sdk: ReturnType<typeof useSDK>
     keymap: ReturnType<typeof createDefaultOpenTuiKeymap>
+    remountPrompt?: () => void
   }
   const app = await testRender(
     () => (
@@ -1786,6 +1838,7 @@ function Harness(props: {
     sync?: ReturnType<typeof useSync>
     sdk?: ReturnType<typeof useSDK>
     keymap?: ReturnType<typeof createDefaultOpenTuiKeymap>
+    remountPrompt?: () => void
   }
   sidebar?: boolean
   home?: boolean
@@ -1892,19 +1945,24 @@ function Harness(props: {
 function RoutedPrompt(props: {
   state: {
     promptRef?: PromptRef
+    remountPrompt?: () => void
   }
 }) {
   const route = useRoute()
   const promptRef = usePromptRef()
+  const [revision, setRevision] = createSignal(0)
+  props.state.remountPrompt = () => setRevision((value) => value + 1)
   const key = () => {
-    if (route.data.type === "home") return "home"
-    if (route.data.type === "session") return route.data.sessionID
+    if (route.data.type === "home") return `home:${revision()}`
+    if (route.data.type === "session") return `${route.data.sessionID}:${revision()}`
   }
   return (
     <Show when={key()} keyed>
       {(value) => (
         <Prompt
-          sessionID={value === "home" ? undefined : value}
+          sessionID={
+            value.startsWith("home:") ? undefined : route.data.type === "session" ? route.data.sessionID : undefined
+          }
           ref={(ref) => {
             props.state.promptRef = ref
             promptRef.set(ref)
@@ -1927,6 +1985,7 @@ function PromptSyncData(props: {
     sync?: ReturnType<typeof useSync>
     sdk?: ReturnType<typeof useSDK>
     keymap?: ReturnType<typeof createDefaultOpenTuiKeymap>
+    remountPrompt?: () => void
   }
 }) {
   const sync = useSync()

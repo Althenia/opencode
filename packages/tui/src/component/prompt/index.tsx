@@ -1093,8 +1093,8 @@ export function Prompt(props: PromptProps) {
     const homeOwnership = createdSession && startsGoal && goalText ? goal.prepareHome(goalText) : undefined
     const restoreGoalPrompt = (sessionID?: string) => {
       if (!startsGoal) return
-      if (promptRef.submissionRevision !== submissionRevision) return
       if (!sessionID && !goal.clearHome(homeOwnership)) return
+      if (promptRef.submissionRevision !== submissionRevision) return
       if (sessionID && (route.data.type !== "session" || route.data.sessionID !== sessionID)) return
       if (!sessionID && route.data.type !== "home") return
       const target = promptRef.current ?? ref
