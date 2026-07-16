@@ -1089,9 +1089,11 @@ export function Prompt(props: PromptProps) {
     }
     const startsGoal = Boolean(goalText && goalText !== "stop")
     const createdSession = props.sessionID == null
-    const restoreGoalPrompt = () => {
+    const restoreGoalPrompt = (sessionID?: string) => {
       if (!startsGoal) return
       goal.clearHome()
+      if (sessionID && (route.data.type !== "session" || route.data.sessionID !== sessionID)) return
+      if (!sessionID && route.data.type !== "home") return
       const target = promptRef.current ?? ref
       if (target.current.input || target.current.parts.length > 0) return
       target.set(submittedPrompt)
@@ -1183,7 +1185,7 @@ export function Prompt(props: PromptProps) {
       } catch (error) {
         if (goal.revision(sessionID) === startRevision) {
           if (createdSession) goal.clear(sessionID)
-          restoreGoalPrompt()
+          restoreGoalPrompt(sessionID)
         }
         toast.show({ title: "Failed to start Goal", message: errorMessage(error), variant: "error" })
         return false

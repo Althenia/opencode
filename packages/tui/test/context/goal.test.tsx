@@ -226,6 +226,38 @@ test("failed Home session creation restores the Goal command", async () => {
   }
 })
 
+test("failed Home session creation does not restore after navigating away", async () => {
+  let resolveCreate!: (response: Response) => void
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          resolveCreate = resolve
+        })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => resolveCreate !== undefined && app.promptRef?.current.input === "")
+
+    app.route.navigate({ type: "session", sessionID: "session-other" })
+    resolveCreate(json({ error: "create failed" }, { status: 500 }))
+    await waitFor(() => app.goal.pending() === undefined)
+
+    expect(app.route.data).toEqual({ type: "session", sessionID: "session-other" })
+    expect(app.promptRef?.current.input).toBe("")
+  } finally {
+    resolveCreate?.(json({ error: "create failed" }, { status: 500 }))
+    app.renderer.destroy()
+  }
+})
+
 test("rejected Home session creation restores the exact Goal prompt", async () => {
   let rejectCreate!: (error: Error) => void
   const app = await mountGoalPrompt(() => undefined, { home: true })
@@ -272,6 +304,52 @@ test("rejected Home session creation restores the exact Goal prompt", async () =
   } finally {
     app.sdk.client.session.create = createSession
     rejectCreate?.(new Error("network down"))
+    app.renderer.destroy()
+  }
+})
+
+test("failed Home-created Goal start does not restore after navigating away", async () => {
+  let resolveStart!: (response: Response) => void
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") {
+        return json({
+          id: "session-home",
+          title: "Home Goal",
+          slug: "session-home",
+          projectID: "project-test",
+          directory,
+          version: "0.0.0-test",
+          time: { created: 0, updated: 0 },
+        })
+      }
+      if (url.pathname === "/api/session/session-home/goal/start") {
+        return new Promise<Response>((resolve) => {
+          resolveStart = resolve
+        })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(
+      () => resolveStart !== undefined && app.route.data.type === "session" && app.route.data.sessionID === "session-home",
+    )
+
+    app.route.navigate({ type: "session", sessionID: "session-other" })
+    resolveStart(json({ error: "goal failed" }, { status: 409 }))
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.route.data).toEqual({ type: "session", sessionID: "session-other" })
+    expect(app.promptRef?.current.input).toBe("")
+    expect(app.goal.pending("session-home")).toBeUndefined()
+  } finally {
+    resolveStart?.(json({ error: "goal failed" }, { status: 409 }))
     app.renderer.destroy()
   }
 })
