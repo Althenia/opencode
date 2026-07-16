@@ -1,9 +1,11 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import path from "path"
 import { Effect, Layer, Record, Result, Schema, Context } from "effect"
+import { Credential } from "@opencode-ai/core/credential"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/core/global"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Integration } from "@opencode-ai/core/integration"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
@@ -53,7 +55,32 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fsys = yield* FSUtil.Service
+    const credentials = yield* Credential.Service
     const decode = Schema.decodeUnknownOption(Info)
+
+    const read = Effect.fnUntraced(function* () {
+      const data = (yield* fsys.readJson(file).pipe(Effect.orElseSucceed(() => ({})))) as Record<string, unknown>
+      return Record.filterMap(data, (value) => Result.fromOption(decode(value), () => undefined))
+    })
+
+    const project = Effect.fnUntraced(function* (providerID: string, info: Info) {
+      if (providerID !== "openai") return
+      const value =
+        info.type === "api"
+          ? Credential.Key.make({ type: "key", key: info.key, metadata: info.metadata })
+          : info.type === "oauth"
+            ? Credential.OAuth.make({
+                type: "oauth",
+                methodID: Integration.MethodID.make("chatgpt-browser"),
+                refresh: info.refresh,
+                access: info.access,
+                expires: info.expires,
+                metadata: info.accountId ? { accountID: info.accountId } : undefined,
+              })
+            : undefined
+      if (!value) return
+      yield* credentials.create({ integrationID: Integration.ID.make(providerID), value })
+    })
 
     const all = Effect.fn("Auth.all")(function* () {
       if (process.env.OPENCODE_AUTH_CONTENT) {
@@ -62,8 +89,7 @@ const layer = Layer.effect(
         } catch (err) {}
       }
 
-      const data = (yield* fsys.readJson(file).pipe(Effect.orElseSucceed(() => ({})))) as Record<string, unknown>
-      return Record.filterMap(data, (value) => Result.fromOption(decode(value), () => undefined))
+      return yield* read()
     })
 
     const get = Effect.fn("Auth.get")(function* (providerID: string) {
@@ -78,6 +104,7 @@ const layer = Layer.effect(
       yield* fsys
         .writeJson(file, { ...data, [norm]: info }, 0o600)
         .pipe(Effect.mapError(fail("Failed to write auth data")))
+      yield* project(norm, info)
     })
 
     const remove = Effect.fn("Auth.remove")(function* (key: string) {
@@ -86,12 +113,23 @@ const layer = Layer.effect(
       delete data[key]
       delete data[norm]
       yield* fsys.writeJson(file, data, 0o600).pipe(Effect.mapError(fail("Failed to write auth data")))
+      if (norm === "openai") {
+        yield* Effect.forEach(yield* credentials.list(Integration.ID.make(norm)), (item) => credentials.remove(item.id), {
+          discard: true,
+        })
+      }
     })
+
+    const openaiID = Integration.ID.make("openai")
+    if ((yield* credentials.list(openaiID)).length === 0) {
+      const legacy = (yield* read()).openai
+      if (legacy) yield* project(openaiID, legacy)
+    }
 
     return Service.of({ get, all, set, remove })
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [FSUtil.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [FSUtil.node, Credential.node] })
 
 export * as Auth from "."

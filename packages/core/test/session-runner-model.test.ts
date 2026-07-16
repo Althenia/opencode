@@ -383,6 +383,31 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("routes OpenAI OAuth through the ChatGPT Codex endpoint", () =>
+    Effect.gen(function* () {
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...model({ type: "aisdk", package: "@ai-sdk/openai" }),
+          providerID: ProviderV2.ID.openai,
+          request: { headers: {}, body: {} },
+        }),
+        Credential.OAuth.make({
+          type: "oauth",
+          methodID: Integration.MethodID.make("chatgpt-browser"),
+          access: "secret",
+          refresh: "refresh",
+          expires: Date.now() + 60_000,
+          metadata: { accountID: "account-id" },
+        }),
+      )
+
+      expect(resolved.route).toMatchObject({
+        endpoint: { baseURL: "https://chatgpt.com/backend-api/codex" },
+        defaults: { headers: { "ChatGPT-Account-Id": "account-id" } },
+      })
+    }),
+  )
+
   it.effect("rejects catalog APIs without a native route", () =>
     Effect.gen(function* () {
       const failure = yield* SessionRunnerModel.fromCatalogModel(

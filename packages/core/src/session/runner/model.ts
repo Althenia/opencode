@@ -134,11 +134,21 @@ export const fromCatalogModel = (
   model: ModelV2.Info,
   credential?: Credential.Value,
 ): Effect.Effect<Model, UnsupportedApiError> => {
+  const chatGPT =
+    credential?.type === "oauth" &&
+    model.providerID === ProviderV2.ID.openai &&
+    model.api.type === "aisdk" &&
+    model.api.package === "@ai-sdk/openai" &&
+    credential.methodID.startsWith("chatgpt-")
   const resolved =
-    credential?.type !== "key" || credential.metadata === undefined
+    (credential?.type !== "key" || credential.metadata === undefined) && !chatGPT
       ? model
       : produce(model, (draft) => {
-          Object.assign(draft.request.body, credential.metadata)
+          if (credential?.type === "key" && credential.metadata) Object.assign(draft.request.body, credential.metadata)
+          if (!chatGPT) return
+          draft.api.url = "https://chatgpt.com/backend-api/codex"
+          const accountID = credential.metadata?.accountID
+          if (typeof accountID === "string") draft.request.headers["ChatGPT-Account-Id"] = accountID
         })
   const key = apiKey(resolved, credential)
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
