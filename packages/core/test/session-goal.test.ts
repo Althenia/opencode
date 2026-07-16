@@ -486,7 +486,7 @@ describe("GoalSupervisor", () => {
     }),
   )
 
-  it.effect("starts active state and emits the raw goal as the first steer prompt", () =>
+  it.effect("starts active state with a supervised first steer prompt", () =>
     Effect.gen(function* () {
       const fake = makeSession()
       const events = yield* makeEvents
@@ -502,12 +502,13 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts).toHaveLength(1)
       expect(fake.prompts[0]).toMatchObject({ sessionID, delivery: "steer", resume: true })
       expect(fake.prompts[0]?.id).toBeDefined()
-      expect(fake.prompts[0]?.prompt.text).toBe("ship task 4")
-      expect(fake.prompts[0]?.prompt.text).not.toContain("Iteration")
+      expect(fake.prompts[0]?.prompt.text).toContain("Original goal: ship task 4")
+      expect(fake.prompts[0]?.prompt.text).toContain("Use todowrite to maintain a goal-oriented task list")
+      expect(fake.prompts[0]?.prompt.text).toContain("When instructions conflict, follow the latest user instruction.")
     }),
   )
 
-  it.effect("uses the supplied message ID only for the initial raw-goal prompt", () =>
+  it.effect("uses the supplied message ID only for the initial supervised prompt", () =>
     Effect.gen(function* () {
       const fake = makeSession(["not done"])
       const events = yield* makeEvents
@@ -523,7 +524,8 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts[0]?.id).toBe(supplied)
-      expect(fake.prompts[0]?.prompt.text).toBe("supplied")
+      expect(fake.prompts[0]?.prompt.text).toContain("Original goal: supplied")
+      expect(fake.prompts[0]?.prompt.text).toContain("Use todowrite to maintain a goal-oriented task list")
       expect(fake.prompts[0]).toMatchObject({ delivery: "steer", resume: true })
       expect(fake.prompts[1]).toMatchObject({ delivery: "queue", resume: true })
       expect(fake.prompts[1]?.prompt.text).toContain("Original goal: supplied")

@@ -237,7 +237,7 @@ export const make = Effect.gen(function* () {
     return yield* prompt(
       sessionID,
       owner,
-      initial?.text ?? promptText(state, owner),
+      promptText(state, owner),
       "work",
       initial ? "steer" : "queue",
       initial?.messageID,
