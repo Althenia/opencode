@@ -1364,7 +1364,7 @@ function UserMessage(props: {
     const texts = props.parts
       .map((x) => {
         if (x.type === "text" && !x.synthetic) {
-          return displaySkillReferences(x.text, skills())
+          return displaySkillReferences(x.text, skills(), x.metadata)
         }
         return null
       })

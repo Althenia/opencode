@@ -28,7 +28,7 @@ import { useEvent } from "../../context/event"
 import { editorSelectionKey, useEditorContext, type EditorSelection } from "../../context/editor"
 import { normalizePromptContent, openEditor } from "../../editor"
 import { useExit } from "../../context/exit"
-import { promptOffsetWidth } from "../../prompt/display"
+import { displaySlice, promptOffsetWidth } from "../../prompt/display"
 import { createStore, produce, unwrap } from "solid-js/store"
 import { usePromptHistory, type PromptInfo } from "../../prompt/history"
 import { computePromptTraits } from "../../prompt/traits"
@@ -713,7 +713,7 @@ export function Prompt(props: PromptProps) {
         start = part.source.text.start
         end = part.source.text.end
         virtualText = part.source.text.value
-        styleId = pasteStyleId
+        styleId = part.metadata?.kind === "skill_reference" ? skillStyleId : pasteStyleId
       }
 
       if (virtualText) {
@@ -1029,15 +1029,36 @@ export function Prompt(props: PromptProps) {
     }
 
     const variant = local.model.variant.current()
+    const trackedTextParts = input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+      const partIndex = store.extmarkToPartIndex.get(extmark.id)
+      const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
+      if (part?.type !== "text") return []
+      return [
+        {
+          start: extmark.start,
+          end: extmark.end,
+          text: part.text,
+          skill:
+            part.metadata?.kind === "skill_reference" && typeof part.metadata.name === "string"
+              ? part.metadata.name
+              : undefined,
+        },
+      ]
+    })
+    const pastedTextParts = trackedTextParts.filter((part) => !part.skill)
     const inputText = expandTrackedPastedText(
       store.prompt.input,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const partIndex = store.extmarkToPartIndex.get(extmark.id)
-        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
-        if (part?.type !== "text") return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
+      pastedTextParts.map((part) => ({ start: part.start, end: part.end, text: part.text })),
     )
+    const skillReferences = trackedTextParts.flatMap((part) => {
+      if (!part.skill || part.text !== `$${part.skill}`) return []
+      if (displaySlice(store.prompt.input, part.start, part.end) !== part.text) return []
+      if (pastedTextParts.some((pasted) => pasted.start < part.end && part.start < pasted.end)) return []
+      const shift = pastedTextParts
+        .filter((pasted) => pasted.end <= part.start)
+        .reduce((total, pasted) => total + promptOffsetWidth(pasted.text) - (pasted.end - pasted.start), 0)
+      return [{ start: part.start + shift, end: part.end + shift, name: part.skill }]
+    })
     const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
     const currentMode = store.mode
     const editorSelection = editorContext()
@@ -1207,6 +1228,7 @@ export function Prompt(props: PromptProps) {
               {
                 type: "text",
                 text: inputText,
+                ...(skillReferences.length > 0 ? { metadata: { skillReferences } } : {}),
               },
               ...nonTextParts,
             ],

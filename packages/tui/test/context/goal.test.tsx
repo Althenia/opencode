@@ -391,6 +391,85 @@ test("free text steers an active goal through the normal prompt endpoint", async
   }
 })
 
+test("selected skill autocomplete persists only its exact reference range", async () => {
+  const calls: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname !== "/session/session-test/message") return
+    calls.push(await request?.json())
+    return json({ data: {} })
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await waitFor(() => app.promptRef?.focused === true)
+
+    await app.mockInput.typeText("echo $effect ")
+    await app.mockInput.typeText("$eff")
+    expect(await captureFrame(app, (value) => value.includes("✦ effect"))).toContain("✦ effect")
+    app.mockInput.pressEnter()
+    await waitFor(() => app.promptRef?.current.input === "echo $effect $effect ")
+    app.mockInput.pressEnter()
+    await waitFor(() => calls.length === 1)
+
+    expect(calls[0]).toMatchObject({
+      parts: [
+        {
+          type: "text",
+          text: "echo $effect $effect ",
+          metadata: { skillReferences: [{ start: 13, end: 20, name: "effect" }] },
+        },
+      ],
+    })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("submitted skill reference ranges account for tracked pasted-text expansion", async () => {
+  const calls: unknown[] = []
+  const app = await mountGoalPrompt(async (url, request) => {
+    if (url.pathname !== "/session/session-test/message") return
+    calls.push(await request?.json())
+    return json({ data: {} })
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({
+      input: "[Pasted ~3 lines] $effect",
+      parts: [
+        {
+          type: "text",
+          text: "alpha\nbeta\ngamma",
+          source: { text: { start: 0, end: 17, value: "[Pasted ~3 lines]" } },
+        },
+        {
+          type: "text",
+          text: "$effect",
+          metadata: { kind: "skill_reference", name: "effect" },
+          source: { text: { start: 18, end: 25, value: "$effect" } },
+        },
+      ],
+    })
+    await app.promptRef?.submit()
+    await waitFor(() => calls.length === 1)
+
+    expect(calls[0]).toMatchObject({
+      parts: [
+        {
+          type: "text",
+          text: "alpha\nbeta\ngamma $effect",
+          metadata: { skillReferences: [{ start: 17, end: 24, name: "effect" }] },
+        },
+      ],
+    })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("goal start does not switch yolo before the server responds", async () => {
   let resolveStart!: (response: Response) => void
   const app = await mountGoalPrompt((url) => {
@@ -1372,6 +1451,9 @@ function PromptSyncData(props: {
       },
     ])
     sync.set("agent", [{ name: "Build", mode: "primary", hidden: false, permission: [], options: {} }])
+    sync.set("command", [
+      { name: "effect", description: "Effect skill", source: "skill", template: "$effect", hints: [] },
+    ])
     sync.set("provider_default", { test: "model" })
     sync.set("provider", [
       {

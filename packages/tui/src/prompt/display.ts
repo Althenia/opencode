@@ -63,10 +63,37 @@ export function displaySkillReference(value: string) {
   return value.startsWith("$") ? `✦ ${value.slice(1)}` : value
 }
 
-export function displaySkillReferences(value: string, skills: ReadonlySet<string>) {
-  return value.replace(
-    /(^|\s)\$([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$|[.,!?;:])/g,
-    (match, prefix: string, name: string) =>
-      skills.has(name) ? `${prefix}${displaySkillReference(`$${name}`)}` : match,
-  )
+export function displaySkillReferences(value: string, skills: ReadonlySet<string>, metadata?: unknown) {
+  if (!metadata || typeof metadata !== "object" || !("skillReferences" in metadata)) return value
+  if (!Array.isArray(metadata.skillReferences)) return value
+
+  const result = metadata.skillReferences
+    .filter(
+      (reference): reference is { start: number; end: number; name: string } =>
+        reference !== null &&
+        typeof reference === "object" &&
+        "start" in reference &&
+        Number.isSafeInteger(reference.start) &&
+        "end" in reference &&
+        Number.isSafeInteger(reference.end) &&
+        "name" in reference &&
+        typeof reference.name === "string" &&
+        reference.start >= 0 &&
+        reference.end > reference.start &&
+        skills.has(reference.name) &&
+        displaySlice(value, reference.start, reference.end) === `$${reference.name}`,
+    )
+    .sort((a, b) => a.start - b.start)
+    .reduce(
+      (output, reference) => {
+        if (reference.start < output.end) return output
+        output.value +=
+          displaySlice(value, output.end, reference.start) + displaySkillReference(`$${reference.name}`)
+        output.end = reference.end
+        return output
+      },
+      { value: "", end: 0 },
+    )
+
+  return result.value + displaySlice(value, result.end)
 }
