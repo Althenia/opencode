@@ -62,3 +62,11 @@ export function skillReferenceTriggerIndex(value: string, offset = promptOffsetW
 export function displaySkillReference(value: string) {
   return value.startsWith("$") ? `✦ ${value.slice(1)}` : value
 }
+
+export function displaySkillReferences(value: string, skills: ReadonlySet<string>) {
+  return value.replace(
+    /(^|\s)\$([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$|[.,!?;:])/g,
+    (match, prefix: string, name: string) =>
+      skills.has(name) ? `${prefix}${displaySkillReference(`$${name}`)}` : match,
+  )
+}

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   displayCharAt,
   displaySkillReference,
+  displaySkillReferences,
   displaySlice,
   mentionTriggerIndex,
   skillReferenceTriggerIndex,
@@ -47,5 +48,13 @@ describe("prompt display", () => {
 
   test("replaces skill reference prefix with an icon marker", () => {
     expect(displaySkillReference("$dispatching-parallel-agents")).toBe("✦ dispatching-parallel-agents")
+  })
+
+  test("renders only known timeline skill references with the skill glyph", () => {
+    const skills = new Set(["writing-test", "effect"])
+    expect(displaySkillReferences("$writing-test", skills)).toBe("✦ writing-test")
+    expect(displaySkillReferences("Use $effect, then continue", skills)).toBe("Use ✦ effect, then continue")
+    expect(displaySkillReferences("Pay $20 and keep $UNKNOWN", skills)).toBe("Pay $20 and keep $UNKNOWN")
+    expect(displaySkillReferences("price$effect", skills)).toBe("price$effect")
   })
 })

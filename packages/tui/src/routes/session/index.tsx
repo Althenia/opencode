@@ -82,6 +82,7 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
+import { displaySkillReferences } from "../../prompt/display"
 
 addDefaultParsers(parsers.parsers)
 
@@ -1356,11 +1357,14 @@ function UserMessage(props: {
 }) {
   const ctx = use()
   const local = useLocal()
+  const skills = createMemo(
+    () => new Set(ctx.sync.data.command.filter((command) => command.source === "skill").map((command) => command.name)),
+  )
   const text = createMemo(() => {
     const texts = props.parts
       .map((x) => {
         if (x.type === "text" && !x.synthetic) {
-          return x.text
+          return displaySkillReferences(x.text, skills())
         }
         return null
       })
