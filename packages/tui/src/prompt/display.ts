@@ -80,6 +80,7 @@ export function displaySkillReferences(value: string, skills: ReadonlySet<string
         typeof reference.name === "string" &&
         reference.start >= 0 &&
         reference.end > reference.start &&
+        reference.end <= promptOffsetWidth(value) &&
         skills.has(reference.name) &&
         displaySlice(value, reference.start, reference.end) === `$${reference.name}`,
     )

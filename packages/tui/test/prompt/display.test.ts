@@ -84,6 +84,11 @@ describe("prompt display", () => {
         skillReferences: [{ start: 0, end: 11, name: "effect" }],
       }),
     ).toBe("Run $effect")
+    expect(
+      displaySkillReferences("Run $effect", skills, {
+        skillReferences: [{ start: 4, end: 12, name: "effect" }],
+      }),
+    ).toBe("Run $effect")
     expect(displaySkillReferences("Run $effect", skills, { skillReferences: "effect" })).toBe("Run $effect")
   })
 })
