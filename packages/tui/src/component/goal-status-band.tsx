@@ -1,4 +1,5 @@
 import type { Todo } from "@opencode-ai/sdk/v2"
+import { useTerminalDimensions } from "@opentui/solid"
 import { Show, createMemo } from "solid-js"
 import { useTheme } from "../context/theme"
 
@@ -21,8 +22,10 @@ export function GoalStatusBand(props: {
   todos: readonly Todo[]
 }) {
   const { theme } = useTheme()
+  const dimensions = useTerminalDimensions()
   const summary = createMemo(() => summarizeGoal(props.objective ?? "", props.todos))
-  const filled = createMemo(() => Math.round((summary().percentage / 100) * BAR_WIDTH))
+  const barWidth = createMemo(() => Math.max(1, Math.min(BAR_WIDTH, dimensions().width - 6)))
+  const filled = createMemo(() => Math.round((summary().percentage / 100) * barWidth()))
 
   return (
     <Show when={props.objective}>
@@ -38,19 +41,23 @@ export function GoalStatusBand(props: {
           paddingTop={1}
           paddingBottom={1}
         >
-          <box width="100%" flexDirection="row" justifyContent="space-between" gap={1}>
-            <text fg={theme.text} wrapMode="word">
+          <box width="100%" height={2} overflow="hidden" flexDirection="row" justifyContent="space-between" gap={1}>
+            <text fg={theme.text} wrapMode="word" flexShrink={1}>
               <b>{props.starting ? "Starting" : "Goal"}</b> · {objective()}
             </text>
-            <text fg={theme.accent}>{summary().percentage}%</text>
+            <text fg={theme.accent} flexShrink={0}>
+              {summary().percentage}%
+            </text>
           </box>
-          <text>
+          <text width="100%" wrapMode="none" truncate>
             <span style={{ fg: theme.accent }}>{"━".repeat(filled())}</span>
-            <span style={{ fg: theme.border }}>{"━".repeat(BAR_WIDTH - filled())}</span>
+            <span style={{ fg: theme.border }}>{"━".repeat(barWidth() - filled())}</span>
           </text>
-          <text fg={theme.textMuted} wrapMode="word">
-            Current target · <span style={{ fg: theme.text }}>{summary().target}</span>
-          </text>
+          <box height={2} overflow="hidden">
+            <text fg={theme.textMuted} wrapMode="word">
+              Current target · <span style={{ fg: theme.text }}>{summary().target}</span>
+            </text>
+          </box>
           <text fg={theme.textMuted}>
             {summary().resolved} of {summary().total} resolved
           </text>

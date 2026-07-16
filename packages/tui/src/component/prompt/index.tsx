@@ -168,8 +168,12 @@ export function Prompt(props: PromptProps) {
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
   const goalPending = createMemo(() => goal.pending(props.sessionID))
-  const goalObjective = createMemo(() => goalPending() ?? (props.sessionID ? goal.current()?.goal : undefined))
-  const goalTodos = createMemo(() => (props.sessionID ? (sync.data.todo[props.sessionID] ?? []) : []))
+  const goalObjective = createMemo(() =>
+    goalPending() ?? (props.sessionID && goal.active(props.sessionID) ? goal.current()?.goal : undefined),
+  )
+  const goalTodos = createMemo(() =>
+    goalPending() || !props.sessionID ? [] : (sync.data.todo[props.sessionID] ?? []),
+  )
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -1089,6 +1093,7 @@ export function Prompt(props: PromptProps) {
       if (!startsGoal) return
       goal.clearHome()
       const target = promptRef.current ?? ref
+      if (target.current.input || target.current.parts.length > 0) return
       target.set(submittedPrompt)
       target.focus()
     }
@@ -1170,13 +1175,16 @@ export function Prompt(props: PromptProps) {
         }))
       if (createdSession) goal.adoptHome(sessionID)
       const start = goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
+      const startRevision = goal.revision(sessionID)
       if (createdSession) route.navigate({ type: "session", sessionID })
 
       try {
         await start
       } catch (error) {
-        if (createdSession) goal.clear(sessionID)
-        restoreGoalPrompt()
+        if (goal.revision(sessionID) === startRevision) {
+          if (createdSession) goal.clear(sessionID)
+          restoreGoalPrompt()
+        }
         toast.show({ title: "Failed to start Goal", message: errorMessage(error), variant: "error" })
         return false
       }
