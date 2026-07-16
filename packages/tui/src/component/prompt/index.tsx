@@ -360,6 +360,8 @@ export function Prompt(props: PromptProps) {
     return true
   }
 
+  const goalAnswering = () => Boolean(props.sessionID && goal.answering(props.sessionID))
+
   const promptCommands = createMemo(() =>
     [
       {
@@ -387,10 +389,16 @@ export function Prompt(props: PromptProps) {
       },
       {
         name: "goal.start",
-        title: "Start goal mode",
+        title: goalAnswering() ? "Stop goal mode" : "Start goal mode",
         category: "Session",
         slashName: "goal",
         run: async () => {
+          if (props.sessionID && goal.answering(props.sessionID)) {
+            await goal.stop(props.sessionID)
+            goal.deselect(props.sessionID)
+            dialog.clear()
+            return
+          }
           if (!(await requestGoalText())) return
           void submit()
         },

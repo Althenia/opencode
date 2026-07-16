@@ -255,25 +255,28 @@ test("disabling yolo mode does not stop active goal supervision", async () => {
   }
 })
 
-test("goal palette command selects goal mode without starting supervision", async () => {
+test("Goal mode entry shows one Start action when inactive", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   const events = createEventSource()
+  const provider = { id: "test", name: "test", source: "custom", env: [], options: {}, models: {} }
+  const session = {
+    id: "dummy",
+    title: "Demo session",
+    slug: "dummy",
+    projectID: "proj_test",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
   let startedGoal = false
   let prompted = false
   const calls = createFetch((url) => {
-    if (url.pathname === "/session/dummy") {
-      return json({
-        id: "dummy",
-        title: "Demo session",
-        slug: "dummy",
-        projectID: "project",
-        directory,
-        version: "0.0.0-test",
-        time: { created: 0, updated: 0 },
-      })
-    }
+    if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
+    if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
+    if (url.pathname === "/session") return json([session])
+    if (url.pathname === "/session/dummy") return json(session)
     if (url.pathname === "/api/session/dummy/goal/status") {
       return json({ data: null })
     }
@@ -282,7 +285,7 @@ test("goal palette command selects goal mode without starting supervision", asyn
       return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
     }
     if (url.pathname === "/session/dummy/message" && url.searchParams.has("limit")) {
-      return json({ data: [] })
+      return json([])
     }
     if (url.pathname === "/session/dummy/message") {
       prompted = true
@@ -290,6 +293,7 @@ test("goal palette command selects goal mode without starting supervision", asyn
     }
   }, events)
   let api: TuiPluginApi | undefined
+  let disposeSlots = () => {}
   let started!: () => void
   const ready = new Promise<void>((resolve) => {
     started = resolve
@@ -308,14 +312,21 @@ test("goal palette command selects goal mode without starting supervision", asyn
         pluginHost: {
           async start(input) {
             api = input.api
+            disposeSlots = input.runtime.setupSlots(input.api).dispose
             started()
           },
-          async dispose() {},
+          async dispose() {
+            disposeSlots()
+          },
         },
       }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
     )
 
     await ready
+    api?.keymap.dispatchCommand("command.palette.show")
+    const frame = await captureFrame(setup, (value) => value.includes("Start goal mode"))
+    expect(frame.match(/Start goal mode/g)).toHaveLength(1)
+    expect(frame).not.toContain("Stop goal mode")
     api?.keymap.dispatchCommand("goal.stop")
     await Bun.sleep(50)
     expect(prompted).toBe(false)
@@ -379,13 +390,29 @@ test("goal palette stop command does not create a session on the home route", as
   }
 })
 
-test("goal palette command stops active supervision", async () => {
+test("Goal mode entry shows one Stop action when active", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   const events = createEventSource()
+  const provider = { id: "test", name: "test", source: "custom", env: [], options: {}, models: {} }
+  const session = {
+    id: "dummy",
+    title: "Demo session",
+    slug: "dummy",
+    projectID: "proj_test",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
   let stopped = false
   const calls = createFetch((url) => {
+    if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
+    if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
+    if (url.pathname === "/session") return json([session])
+    if (url.pathname === "/session/dummy") return json(session)
+    if (url.pathname === "/session/dummy/message") return json([])
+    if (url.pathname === "/session/dummy/todo" || url.pathname === "/session/dummy/diff") return json([])
     if (url.pathname === "/api/session/dummy/goal/status") {
       return json({ data: stopped ? null : { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
     }
@@ -395,6 +422,7 @@ test("goal palette command stops active supervision", async () => {
     }
   }, events)
   let api: TuiPluginApi | undefined
+  let disposeSlots = () => {}
   let started!: () => void
   const ready = new Promise<void>((resolve) => {
     started = resolve
@@ -413,15 +441,23 @@ test("goal palette command stops active supervision", async () => {
         pluginHost: {
           async start(input) {
             api = input.api
+            disposeSlots = input.runtime.setupSlots(input.api).dispose
             started()
           },
-          async dispose() {},
+          async dispose() {
+            disposeSlots()
+          },
         },
       }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
     )
 
     await ready
-    api?.keymap.dispatchCommand("goal.stop")
+    await captureFrame(setup, (frame) => frame.includes("Current target"))
+    api?.keymap.dispatchCommand("command.palette.show")
+    const frame = await captureFrame(setup, (value) => value.includes("Stop goal mode"))
+    expect(frame.match(/Stop goal mode/g)).toHaveLength(1)
+    expect(frame).not.toContain("Start goal mode")
+    api?.keymap.dispatchCommand("goal.start")
     await waitFor(() => stopped)
     api?.keymap.dispatchCommand("app.exit")
     await task
@@ -664,11 +700,11 @@ test("session timeline keeps the active Goal below its first message", async () 
   try {
     const frame = await captureFrame(app, (value) => value.includes("Current target"))
     const rows = frame.split("\n")
-    const goalRow = rows.findIndex((row) => row.includes("Goal ·"))
+    const targetRow = rows.findIndex((row) => row.includes("Current target"))
     const messageRow = rows.findIndex((row) => row.includes("First timeline message"))
-    expect(goalRow).toBeGreaterThanOrEqual(0)
+    expect(targetRow).toBeGreaterThanOrEqual(0)
     expect(messageRow).toBeGreaterThanOrEqual(0)
-    expect(goalRow).toBeGreaterThan(messageRow)
+    expect(targetRow).toBeGreaterThan(messageRow)
     expect(frame).toContain("Current target")
     expect(frame).toContain("0%")
     expect(frame).toContain("Explore · model · ultra")

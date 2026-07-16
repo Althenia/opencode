@@ -1029,6 +1029,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "goal.stop",
         title: "Stop goal mode",
         category: "Session",
+        hidden: true,
         enabled: () => route.data.type === "session" && goal.active(route.data.sessionID),
         run: async () => {
           if (route.data.type !== "session" || !goal.active(route.data.sessionID)) return

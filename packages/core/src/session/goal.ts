@@ -166,6 +166,8 @@ export const make = Effect.gen(function* () {
       active.failedVerification && `Failed verification: ${active.failedVerification}`,
       "Inspect the current tool and test evidence in the transcript before continuing.",
       "Use todowrite to maintain a goal-oriented task list: derive remaining work from the goal, latest user instructions, and current evidence; update statuses as work completes; execute the highest-priority unblocked item.",
+      "Before starting or delegating work, use todowrite to mark the matching item in_progress and keep future work pending.",
+      "When a subagent is implementing, testing, or reviewing an item, keep its parent todo in_progress until the subagent result is reviewed and accepted; do not advance the current target to later work early.",
       "Handle ordinary approval and clarification autonomously using best judgment. Ask the user only for a configured permission request, explicit consent before a destructive operation, or an irrecoverable failure or blocker that cannot be resolved from the current context.",
       "Continue working toward the goal.",
       "When the goal is complete, include GOAL COMPLETE.",

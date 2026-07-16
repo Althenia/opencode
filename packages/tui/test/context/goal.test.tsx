@@ -138,10 +138,13 @@ test("Home Goal shows Starting and clears input before goalStart resolves", asyn
 
     expect(app.promptRef?.current.input).toBe("")
     expect(app.route.data).toMatchObject({ type: "session", sessionID: "session-home" })
-    const frame = await captureFrame(app, (value) => value.includes("Starting · ship task 6"))
+    const frame = await captureFrame(
+      app,
+      (value) => value.includes("Starting · ship task 6") && value.includes("0 of 0 resolved · 0%"),
+    )
+    expect(frame).not.toContain("Goal ·")
     expect(frame).toContain("Starting · ship task 6")
-    expect(frame).toContain("0%")
-    expect(frame).toContain("Current target · ship task 6")
+    expect(frame).toContain("0 of 0 resolved · 0%")
 
     resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
     await waitFor(() => app.goal.active("session-home"))
@@ -1480,7 +1483,7 @@ test("inactive exhausted Goal status stays persisted without rendering the band"
   }
 })
 
-test("Goal band follows synchronized todo updates", async () => {
+test("Goal band shows todo-driven progress from synchronized updates", async () => {
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/session/session-test") {
       return json({
@@ -1512,10 +1515,13 @@ test("Goal band follows synchronized todo updates", async () => {
   try {
     await app.sync.session.sync("session-test")
     await app.goal.start("ship task 6")
-    const frame = await captureFrame(app, (value) => value.includes("Current target · Verify source"))
-    expect(frame).toContain("50%")
+    const frame = await captureFrame(
+      app,
+      (value) => value.includes("Current target · Verify source") && value.includes("2 of 4 resolved · 50%"),
+    )
     expect(frame).toContain("Current target · Verify source")
-    expect(frame).toContain("2 of 4 resolved")
+    expect(frame).toContain("2 of 4 resolved · 50%")
+    expect(frame).not.toContain("Goal · ship task 6")
 
     app.events.emit({
       directory,
@@ -1534,9 +1540,11 @@ test("Goal band follows synchronized todo updates", async () => {
       },
     })
 
-    const updated = await captureFrame(app, (value) => value.includes("Current target · Final review"))
-    expect(updated).toContain("67%")
-    expect(updated).toContain("2 of 3 resolved")
+    const updated = await captureFrame(
+      app,
+      (value) => value.includes("Current target · Final review") && value.includes("2 of 3 resolved · 67%"),
+    )
+    expect(updated).toContain("2 of 3 resolved · 67%")
   } finally {
     app.renderer.destroy()
   }
@@ -1564,11 +1572,14 @@ test("replacement Goal starts at zero without old todos", async () => {
 
     const replacement = app.goal.start("new objective")
     await waitFor(() => resolveReplacement !== undefined)
-    const frame = await captureFrame(app, (value) => value.includes("Starting · new objective"))
+    const frame = await captureFrame(
+      app,
+      (value) => value.includes("Starting · new objective") && value.includes("0 of 0 resolved · 0%"),
+    )
 
-    expect(frame).toContain("0%")
-    expect(frame).toContain("Current target · new objective")
-    expect(frame).toContain("0 of 0 resolved")
+    expect(frame).not.toContain("Goal ·")
+    expect(frame).toContain("Starting · new objective")
+    expect(frame).toContain("0 of 0 resolved · 0%")
     expect(frame).not.toContain("Old pending")
 
     resolveReplacement(json({ data: { goal: "new objective", active: true, iteration: 1, cap: 7 } }))
@@ -1632,8 +1643,8 @@ test("long Goal keeps prompt controls visible at narrow width", async () => {
 
     expect(frame).toContain("model")
     expect(frame).toContain("controls")
-    expect(frame).toContain("Goal · ship a deliberately long goal")
-    expect(frame).toContain("Current target")
+    expect(frame).not.toContain("Goal ·")
+    expect(frame).toContain("Current target · ship a deliberately long goal")
   } finally {
     app.renderer.destroy()
   }
@@ -1654,17 +1665,46 @@ test("Goal band stays compact with long content at narrow width", async () => {
   try {
     await app.goal.start(goal)
     app.sync.set("todo", "session-test", [{ content: target, status: "in_progress", priority: "high" }])
-    const frame = await captureFrame(app, (value) => value.includes("Goal ·") && value.includes("model"))
+    const frame = await captureFrame(app, (value) => value.includes("Current target") && value.includes("model"))
     const rows = frame.split("\n")
-    const goalRow = rows.findIndex((row) => row.includes("Goal ·"))
-    const resolvedRow = rows.findIndex((row) => row.includes("0 of 1 resolved"))
     const barRows = rows.filter((row) => row.includes("━"))
+    const barRow = rows.findIndex((row) => row.includes("━"))
+    const targetRow = rows.findIndex((row) => row.includes("Current target"))
+    const summaryRows = rows.filter((row) => row.includes("0/1 · 0%"))
+    const resolvedRow = rows.findIndex((row) => row.includes("0/1 · 0%"))
 
-    expect(goalRow).toBeGreaterThanOrEqual(0)
-    expect(resolvedRow).toBeGreaterThan(goalRow)
-    expect(resolvedRow - goalRow).toBeLessThanOrEqual(5)
     expect(barRows).toHaveLength(1)
+    expect(barRows[0]?.match(/━/g)).toHaveLength(19)
+    expect(summaryRows).toHaveLength(1)
+    expect(barRow).toBeGreaterThanOrEqual(0)
+    expect(targetRow).toBeGreaterThan(barRow)
+    expect(resolvedRow).toBeGreaterThan(targetRow)
+    expect(resolvedRow - barRow).toBeLessThanOrEqual(3)
+    expect(frame).not.toContain("Goal ·")
     expect(frame).toContain("model")
+
+    const digitTodos = [
+      { content: "Done", status: "completed" as const, priority: "high" as const },
+      { content: target, status: "in_progress" as const, priority: "high" as const },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        content: `Pending ${index}`,
+        status: "pending" as const,
+        priority: "low" as const,
+      })),
+    ]
+    app.sync.set("todo", "session-test", digitTodos)
+    const nine = await captureFrame(app, (value) => value.includes("1/11 · 9%"))
+    const nineRows = nine.split("\n")
+    const nineSummaryRow = nineRows.findIndex((row) => row.includes("1/11 · 9%"))
+
+    app.sync.set("todo", "session-test", digitTodos.slice(0, -1))
+    const ten = await captureFrame(app, (value) => value.includes("1/10 · 10%"))
+    const tenRows = ten.split("\n")
+    const tenSummaryRow = tenRows.findIndex((row) => row.includes("1/10 · 10%"))
+
+    expect(nineRows.filter((row) => row.includes("1/11 · 9%"))).toHaveLength(1)
+    expect(tenRows.filter((row) => row.includes("1/10 · 10%"))).toHaveLength(1)
+    expect(tenSummaryRow).toBe(nineSummaryRow)
   } finally {
     app.renderer.destroy()
   }

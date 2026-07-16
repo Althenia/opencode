@@ -504,6 +504,10 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts[0]?.id).toBeDefined()
       expect(fake.prompts[0]?.prompt.text).toContain("Original goal: ship task 4")
       expect(fake.prompts[0]?.prompt.text).toContain("Use todowrite to maintain a goal-oriented task list")
+      expect(fake.prompts[0]?.prompt.text).toContain(
+        "keep its parent todo in_progress until the subagent result is reviewed and accepted",
+      )
+      expect(fake.prompts[0]?.prompt.text).toContain("do not advance the current target to later work early")
       expect(fake.prompts[0]?.prompt.text).toContain("When instructions conflict, follow the latest user instruction.")
     }),
   )
@@ -529,6 +533,9 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts[0]).toMatchObject({ delivery: "steer", resume: true })
       expect(fake.prompts[1]).toMatchObject({ delivery: "queue", resume: true })
       expect(fake.prompts[1]?.prompt.text).toContain("Original goal: supplied")
+      expect(fake.prompts[1]?.prompt.text).toContain(
+        "keep its parent todo in_progress until the subagent result is reviewed and accepted",
+      )
       expect(fake.prompts[1]?.prompt.text).toContain("Continue working toward the goal.")
       expect(fake.prompts[1]?.id).toBeDefined()
       expect(fake.prompts[1]?.id).not.toBe(supplied)

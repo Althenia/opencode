@@ -15,6 +15,7 @@ Skill references have a related display inconsistency: autocomplete renders `$wr
 - Show compact, deterministic Goal progress above the composer.
 - Keep the first Goal prompt as durable direction while the current target follows live todo state and later user context.
 - Render known skill references with the existing `✦` skill glyph in submitted timeline messages.
+- Expose one context-sensitive Goal action in the command palette instead of separate Start and Stop entries.
 - Reuse current Goal, todo, sync, and theme infrastructure without adding a database migration or icon dependency.
 
 ## Non-goals
@@ -44,12 +45,15 @@ If session creation or Goal start fails, the optimistic state is removed, the or
 
 The selected layout is a full-width compact band directly above the composer. It contains:
 
-1. `Goal · <original objective>` and the percentage.
-2. A horizontal progress bar using existing theme colors.
-3. `Current target · <derived target>`.
-4. A compact resolved count such as `5 of 8 resolved`.
+1. A progress bar spanning the available content width.
+2. `Starting · <original objective>` while admission is pending, otherwise `Current target · <derived target>`.
+3. A summary such as `5 of 8 resolved · 63%`, shortened to `5/8 · 63%` when the available row is too narrow.
 
-The band does not duplicate the full todo list already available in the sidebar. It remains stable in height as values change and fits narrow terminals by wrapping the objective and target before truncating meaningful text.
+The band does not repeat the original Goal as a separate header and does not duplicate the full todo list already available in the sidebar. It remains stable in height as values change and fits narrow terminals by wrapping the target before truncating meaningful text.
+
+### Command palette
+
+The command palette exposes one Goal mode action. It is titled `Start goal mode` when the current route has no active Goal and `Stop goal mode` when the current session has an active Goal. Starting opens the existing Goal text prompt; stopping uses the existing stop and deselect flow. The low-level `goal.stop` command remains hidden for lifecycle and keymap dispatches.
 
 ### Progress calculation
 
@@ -77,7 +81,9 @@ The first `/goal <text>` prompt remains the durable objective. The displayed cur
 
 The Goal supervisor continues treating later user prompts as steering context. Its first provider turn must include the same supervision instructions used by continuation turns, including the requirement to create and maintain the goal-oriented todo list. The visible timeline still presents only the user's original objective, not internal supervision instructions.
 
-As later prompts change direction, the model updates the existing todo list through `todowrite`; the band then changes target and percentage from that authoritative todo state. The original objective remains visible for orientation and auditability.
+As later prompts change direction, the model updates the existing todo list through `todowrite`; the band then changes target and percentage from that authoritative todo state. The original objective remains durable session direction and is used as the target fallback, but is not repeated as a separate band header.
+
+Before starting or delegating work, the Goal supervisor marks the matching todo `in_progress`. Delegated work remains `in_progress` until its result has been reviewed and accepted. The supervisor must not advance the current target to future work while an earlier delegated item is still executing or awaiting review.
 
 ### Skill references
 
@@ -116,7 +122,7 @@ Progress and target selection remain pure derived calculations in the TUI. The H
 
 ### Goal supervision
 
-Initial and continuation turns share the same Goal supervision prompt builder. The initial turn keeps its `steer` delivery, caller-provided message ID, and attachments, but sends the complete supervision text to the provider so todo maintenance begins on the first turn.
+Initial and continuation turns share the same Goal supervision prompt builder. The initial turn keeps its `steer` delivery, caller-provided message ID, and attachments, but sends the complete supervision text to the provider so todo maintenance begins on the first turn. The supervision text explicitly keeps the todo representing active delegated work `in_progress` until review completes.
 
 The existing prompted-event presentation marker continues replacing that internal text with the original objective for the legacy TUI timeline.
 
@@ -142,6 +148,7 @@ User-message rendering receives the current known skill-command names and applie
 - The TUI navigates after session creation without waiting for `goalStart` completion.
 - Session creation and Goal start failures restore the exact original command and remove optimistic state.
 - Rapid or overlapping starts preserve revision ownership and cannot display stale objectives.
+- The command palette shows exactly one Goal mode entry whose title and action follow active state.
 
 ### Progress and target
 
@@ -150,10 +157,12 @@ User-message rendering receives the current known skill-command names and applie
 - `in_progress` wins over `pending`; `pending` wins over the original objective.
 - `todo.updated` changes percentage and target for the matching session only.
 - Long objectives and targets fit the compact band without overlapping metadata.
+- The progress bar spans the available width and the Goal objective is not rendered as a separate header.
 
 ### Goal supervision
 
 - The first admitted provider prompt contains todo-maintenance and latest-context instructions.
+- Active delegated work remains the `in_progress` todo until its result is reviewed.
 - The visible prompted event still displays only the original objective.
 - Later external steering remains reflected in subsequent supervision prompts.
 
@@ -166,8 +175,9 @@ User-message rendering receives the current known skill-command names and applie
 ## Acceptance Criteria
 
 - Pressing Enter on `/goal <text>` produces visible `Starting · 0%` feedback without waiting for Goal start completion.
-- The compact band shows deterministic todo progress, resolved count, original objective, and current target.
+- The compact band shows a full-width progress bar, resolved count, percentage, and current target without a duplicate Goal header.
 - The first provider turn is explicitly instructed to create and maintain a goal-oriented todo list using full Goal supervision instructions.
 - Later user context can change the current target through todo updates without rewriting the original objective.
 - Known skill references use `✦` in timeline user messages and `$` in the composer.
+- The command palette never shows separate Start and Stop Goal entries together.
 - No database schema, Goal HTTP contract, generated client, dependency, or icon asset changes are required.
