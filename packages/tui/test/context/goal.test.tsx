@@ -21,13 +21,13 @@ import { PermissionProvider } from "../../src/context/permission"
 import { ProjectProvider } from "../../src/context/project"
 import { PromptRefProvider, usePromptRef } from "../../src/context/prompt"
 import { RouteProvider, useRoute } from "../../src/context/route"
-import { SDKProvider } from "../../src/context/sdk"
+import { SDKProvider, useSDK } from "../../src/context/sdk"
 import { SyncProvider, useSync } from "../../src/context/sync"
 import { ThemeProvider } from "../../src/context/theme"
 import { TuiConfigProvider } from "../../src/config"
 import { FrecencyProvider } from "../../src/component/prompt/frecency"
 import { Prompt, type PromptRef } from "../../src/component/prompt"
-import { PromptHistoryProvider } from "../../src/component/prompt/history"
+import { PromptHistoryProvider, type PromptInfo } from "../../src/component/prompt/history"
 import { PromptStashProvider } from "../../src/component/prompt/stash"
 import { Sidebar } from "../../src/routes/session/sidebar"
 import { createPluginRuntime, PluginRuntimeProvider } from "../../src/plugin/runtime"
@@ -175,6 +175,56 @@ test("failed Home session creation restores the Goal command", async () => {
   }
 })
 
+test("rejected Home session creation restores the exact Goal prompt", async () => {
+  let rejectCreate!: (error: Error) => void
+  const app = await mountGoalPrompt(() => undefined, { home: true })
+  const createSession = app.sdk.client.session.create
+  app.sdk.client.session.create = (() =>
+    new Promise<never>((_, reject) => {
+      rejectCreate = reject
+    })) as typeof app.sdk.client.session.create
+  const submitted = {
+    input: "/goal ship task 6 [Image 1]",
+    parts: [
+      {
+        type: "file" as const,
+        mime: "image/png",
+        filename: "diagram.png",
+        url: "data:image/png;base64,AA==",
+        source: {
+          type: "file" as const,
+          path: "diagram.png",
+          text: { start: 18, end: 27, value: "[Image 1]" },
+        },
+      },
+    ],
+  } satisfies PromptInfo
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set(submitted)
+    app.promptRef?.submit()
+    await waitFor(() => rejectCreate !== undefined && app.promptRef?.current.input === "")
+
+    rejectCreate(new Error("network down"))
+    await waitFor(() => app.promptRef?.current.input === submitted.input)
+
+    expect(app.promptRef?.current).toEqual(submitted)
+    expect(app.promptRef?.focused).toBe(true)
+    expect(app.goal.pending()).toBeUndefined()
+    expect(app.goal.selected()).toBe(false)
+    expect(app.route.data.type).toBe("home")
+
+    await app.mockInput.typeText(" ")
+    expect(app.promptRef?.current.parts).toEqual(submitted.parts)
+  } finally {
+    app.sdk.client.session.create = createSession
+    rejectCreate?.(new Error("network down"))
+    app.renderer.destroy()
+  }
+})
+
 test("/goal autocomplete handles blank cancellation and starts Goal through keyboard input", async () => {
   const calls: Array<{ method: string; body?: unknown }> = []
   const app = await mountGoalPrompt(async (url, request) => {
@@ -259,6 +309,35 @@ test("failed /goal start preserves the command", async () => {
     await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
 
     expect(app.promptRef?.current.input).toBe("/goal ship task 6")
+    expect(app.goal.pending("session-test")).toBeUndefined()
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("failed replacement Goal start preserves the active Goal", async () => {
+  let starts = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/start") {
+      starts++
+      if (starts === 1) return json({ data: { goal: "existing goal", active: true, iteration: 2, cap: 7 } })
+      return json({ error: "replacement failed" }, { status: 409 })
+    }
+  })
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    await app.goal.start("existing goal")
+
+    app.promptRef?.set({ input: "/goal replacement goal", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(() => app.toast.currentToast?.title === "Failed to start Goal")
+
+    expect(app.promptRef?.current.input).toBe("/goal replacement goal")
+    expect(app.goal.current()).toMatchObject({ goal: "existing goal", active: true, iteration: 2, cap: 7 })
+    expect(app.goal.active("session-test")).toBe(true)
+    expect(app.goal.selected("session-test")).toBe(true)
     expect(app.goal.pending("session-test")).toBeUndefined()
   } finally {
     app.renderer.destroy()
@@ -1122,6 +1201,7 @@ async function mountGoalPrompt(
     toast: ReturnType<typeof useToast>
     editor: ReturnType<typeof useEditorContext>
     sync: ReturnType<typeof useSync>
+    sdk: ReturnType<typeof useSDK>
   }
   const app = await testRender(
     () => (
@@ -1144,7 +1224,7 @@ async function mountGoalPrompt(
     destroy()
   }
   await app.renderOnce()
-  await waitFor(() => !!state.local && !!state.dialog && !!state.goal && !!state.sync)
+  await waitFor(() => !!state.local && !!state.dialog && !!state.goal && !!state.sync && !!state.sdk)
   return { ...app, ...state, events }
 }
 
@@ -1161,6 +1241,7 @@ function Harness(props: {
     toast?: ReturnType<typeof useToast>
     editor?: ReturnType<typeof useEditorContext>
     sync?: ReturnType<typeof useSync>
+    sdk?: ReturnType<typeof useSDK>
   }
   sidebar?: boolean
   home?: boolean
@@ -1265,6 +1346,7 @@ function PromptSyncData(props: {
     toast?: ReturnType<typeof useToast>
     editor?: ReturnType<typeof useEditorContext>
     sync?: ReturnType<typeof useSync>
+    sdk?: ReturnType<typeof useSDK>
   }
 }) {
   const sync = useSync()
@@ -1276,6 +1358,7 @@ function PromptSyncData(props: {
   props.state.toast = useToast()
   props.state.editor = useEditorContext()
   props.state.sync = sync
+  props.state.sdk = useSDK()
   onMount(() => {
     sync.set("session", [
       {

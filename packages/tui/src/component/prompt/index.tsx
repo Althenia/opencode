@@ -1090,16 +1090,29 @@ export function Prompt(props: PromptProps) {
       }
       finishMoveProgress = Boolean(move.progress())
 
-      const res = await sdk.client.session.create({
-        directory,
-        workspace: workspaceID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          id: selectedModel.modelID,
-          variant,
-        },
-      })
+      const res = await sdk.client.session
+        .create({
+          directory,
+          workspace: workspaceID,
+          agent: agent.name,
+          model: {
+            providerID: selectedModel.providerID,
+            id: selectedModel.modelID,
+            variant,
+          },
+        })
+        .catch((error) => {
+          if (!startsGoal) throw error
+          if (finishMoveProgress) move.finishSubmit()
+          restoreGoalPrompt()
+          console.log("Creating a session failed:", error)
+          toast.show({
+            message: "Creating a session failed. Open console for more details.",
+            variant: "error",
+          })
+        })
+
+      if (!res) return true
 
       if (res.error) {
         if (finishMoveProgress) move.finishSubmit()
@@ -1141,7 +1154,7 @@ export function Prompt(props: PromptProps) {
       try {
         await start
       } catch (error) {
-        goal.clear(sessionID)
+        if (createdSession) goal.clear(sessionID)
         restoreGoalPrompt()
         toast.show({ title: "Failed to start Goal", message: errorMessage(error), variant: "error" })
         return false

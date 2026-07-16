@@ -153,6 +153,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       files?: Array<{ uri: string; name?: string; source?: { start: number; end: number; text: string } }>,
     ) {
       if (!id) return
+      const previousSelection = selected(id) && (statuses[id] !== undefined || !starting(id))
       const ownership = advanceRevision(id)
       setSelections(id, true)
       const version = generation(id)
@@ -162,7 +163,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       return serialize(id, () => requestStart(id, goal, messageID, version, files))
         .catch((error) => {
           if (presentation.get(id)?.revision === ownership) presentation.delete(id)
-          if (revision(id) === ownership) setSelections(id, false)
+          if (revision(id) === ownership) setSelections(id, previousSelection)
           throw error
         })
         .finally(() => endStart(id))
