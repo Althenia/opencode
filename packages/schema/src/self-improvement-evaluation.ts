@@ -276,7 +276,7 @@ export class Baseline extends Schema.Class<Baseline>("SelfImprovementEvaluation.
   evaluatorSignatureDigest: SelfImprovement.Digest,
   bootstrapAuthorityID: SelfImprovementLifecycle.PrincipalID,
 }) {}
-export class EvaluationRun extends Schema.Class<EvaluationRun>("SelfImprovementEvaluation.EvaluationRun")({
+class EvaluationRunClass extends Schema.Class<EvaluationRunClass>("SelfImprovementEvaluation.EvaluationRun")({
   id: SelfImprovementLifecycle.EvaluationRunID,
   locationID: SelfImprovementLifecycle.LocationID,
   versionID: SelfImprovementLifecycle.ArtifactVersionID,
@@ -296,7 +296,23 @@ export class EvaluationRun extends Schema.Class<EvaluationRun>("SelfImprovementE
   cutoffSampleSetDigest: SelfImprovement.Digest.pipe(optional),
   decidedAt: SelfImprovementLifecycle.TimestampMillis.pipe(optional),
 }) {}
-export class MetricSample extends Schema.Class<MetricSample>("SelfImprovementEvaluation.MetricSample")({
+
+export const EvaluationRun = EvaluationRunClass.check(
+  Schema.makeFilter(
+    (value) =>
+      value.acceptanceStart <= value.acceptanceEnd &&
+      value.acceptanceEnd <= value.cutoffAt &&
+      ((value.state === "open" && value.cutoffSampleSetDigest === undefined && value.decidedAt === undefined) ||
+        (value.state === "deciding" &&
+          value.cutoffSampleSetDigest !== undefined &&
+          value.decidedAt === undefined) ||
+        (value.state === "decided" && value.cutoffSampleSetDigest !== undefined && value.decidedAt !== undefined) ||
+        (value.state === "cancelled" && value.cutoffSampleSetDigest === undefined && value.decidedAt === undefined)),
+  ),
+)
+export type EvaluationRun = typeof EvaluationRun.Type
+
+class MetricSampleClass extends Schema.Class<MetricSampleClass>("SelfImprovementEvaluation.MetricSample")({
   id: SelfImprovementLifecycle.MetricSampleID,
   runID: SelfImprovementLifecycle.EvaluationRunID,
   sampleIDDigest: SelfImprovement.Digest,
@@ -308,6 +324,11 @@ export class MetricSample extends Schema.Class<MetricSample>("SelfImprovementEva
   startedAt: SelfImprovementLifecycle.TimestampMillis,
   terminalAt: SelfImprovementLifecycle.TimestampMillis,
 }) {}
+
+export const MetricSample = MetricSampleClass.check(
+  Schema.makeFilter((value) => value.startedAt <= value.terminalAt),
+)
+export type MetricSample = typeof MetricSample.Type
 export interface GateFinding extends Schema.Schema.Type<typeof GateFinding> {}
 export const GateFinding = Schema.Struct({
   id: SelfImprovementLifecycle.GateFindingID,

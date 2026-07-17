@@ -276,6 +276,61 @@ test("evaluation runs bind creation inputs and omit absent decision fields when 
   }
 })
 
+test("evaluation runs enforce ordered windows and state-specific decision fields", () => {
+  const run = {
+    id: SelfImprovementLifecycle.EvaluationRunID.create(),
+    locationID,
+    versionID: SelfImprovementLifecycle.ArtifactVersionID.create(),
+    stage: "shadow",
+    workload: "typescript",
+    workloadRevision: 1,
+    suiteID: SelfImprovementLifecycle.SuiteID.create(),
+    suiteRevision: 1,
+    baselineID: SelfImprovementLifecycle.BaselineID.create(),
+    state: "open",
+    trustedProducerIDs: ["evaluator"],
+    acceptanceStart: 1,
+    acceptanceEnd: 2,
+    cutoffAt: 3,
+    requestDigest: digest,
+    createdAt: 1,
+  } as const
+  expect(decode(SelfImprovementEvaluation.EvaluationRun, run)).toEqual(run)
+  expect(
+    decode(SelfImprovementEvaluation.EvaluationRun, {
+      ...run,
+      state: "deciding",
+      cutoffSampleSetDigest: digest,
+    }),
+  ).toEqual({ ...run, state: "deciding", cutoffSampleSetDigest: digest })
+  expect(
+    decode(SelfImprovementEvaluation.EvaluationRun, {
+      ...run,
+      state: "decided",
+      cutoffSampleSetDigest: digest,
+      decidedAt: 4,
+    }),
+  ).toEqual({ ...run, state: "decided", cutoffSampleSetDigest: digest, decidedAt: 4 })
+  expect(decode(SelfImprovementEvaluation.EvaluationRun, { ...run, state: "cancelled" })).toEqual({
+    ...run,
+    state: "cancelled",
+  })
+  for (const invalid of [
+    { ...run, acceptanceStart: 3, acceptanceEnd: 2 },
+    { ...run, acceptanceEnd: 4, cutoffAt: 3 },
+    { ...run, cutoffSampleSetDigest: digest },
+    { ...run, decidedAt: 4 },
+    { ...run, state: "deciding" },
+    { ...run, state: "deciding", cutoffSampleSetDigest: digest, decidedAt: 4 },
+    { ...run, state: "decided", decidedAt: 4 },
+    { ...run, state: "decided", cutoffSampleSetDigest: digest },
+    { ...run, state: "cancelled", cutoffSampleSetDigest: digest },
+    { ...run, state: "cancelled", decidedAt: 4 },
+  ]) {
+    expect(() => decode(SelfImprovementEvaluation.EvaluationRun, invalid)).toThrow()
+  }
+})
+
 test("samples and findings bind exact outcomes, IDs, and gate order", () => {
   const runID = SelfImprovementLifecycle.EvaluationRunID.create()
   const sample = {
@@ -291,6 +346,9 @@ test("samples and findings bind exact outcomes, IDs, and gate order", () => {
     terminalAt: 2,
   }
   expect(decode(SelfImprovementEvaluation.MetricSample, sample)).toEqual(sample)
+  expect(() =>
+    decode(SelfImprovementEvaluation.MetricSample, { ...sample, startedAt: 3, terminalAt: 2 }),
+  ).toThrow()
   const finding = {
     id: SelfImprovementLifecycle.GateFindingID.create(),
     evaluationRunID: runID,

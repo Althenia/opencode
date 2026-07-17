@@ -7,7 +7,7 @@ import { optional, statics } from "./schema"
 import { SelfImprovement } from "./self-improvement"
 
 const unique = <S extends Schema.Top>(schema: S) => Schema.Array(schema).check(Schema.isUnique())
-const generatedID = <const Prefix extends string, const Brand extends string>(prefix: Prefix, brand: Brand) =>
+const generatedID = <const Brand extends string>(prefix: string, brand: Brand) =>
   Schema.String.pipe(Schema.brand(brand))
     .annotate({ identifier: brand })
     .check(Schema.isStartsWith(prefix))

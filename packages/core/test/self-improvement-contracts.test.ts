@@ -201,6 +201,7 @@ const schemaInventory = {
     SelfImprovementLifecycle.LifecycleReason,
     SelfImprovementLifecycle.ArtifactKey,
     SelfImprovementLifecycle.TypedArtifactReference,
+    SelfImprovementLifecycle.Principal,
     SelfImprovementLifecycle.CapabilityDeny,
     SelfImprovementLifecycle.CapabilityManifest,
     SelfImprovementLifecycle.GeneratedContentMetadata,

@@ -394,12 +394,22 @@ export class ListMetricRunsRequest extends Schema.Class<ListMetricRunsRequest>(
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}
-export class MetricRunView extends Schema.Class<MetricRunView>("SelfImprovementApi.MetricRunView")({
+const MetricRunViewFields = Schema.Struct({
   run: SelfImprovementEvaluation.EvaluationRun,
   aggregates: SelfImprovementEvaluation.MetricAggregates.pipe(optional),
   sampleCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   samples: Schema.Array(SelfImprovementEvaluation.MetricSample).pipe(optional),
-}) {}
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      value.samples === undefined ||
+      (value.sampleCount === value.samples.length && value.samples.every((sample) => sample.runID === value.run.id)),
+  ),
+)
+
+export class MetricRunView extends Schema.Class<MetricRunView>("SelfImprovementApi.MetricRunView")(
+  MetricRunViewFields,
+) {}
 export interface ListMetricRunsResponse extends Schema.Schema.Type<typeof ListMetricRunsResponse> {}
 export const ListMetricRunsResponse = page(MetricRunView).annotate({
   identifier: "SelfImprovementApi.ListMetricRunsResponse",
@@ -421,6 +431,9 @@ const EvaluationViewFields = Schema.Struct({
   Schema.makeFilter(
     (value) =>
       value.run.id === value.decision.runID &&
+      value.run.state === "decided" &&
+      value.run.cutoffSampleSetDigest === value.decision.cutoffSampleSetDigest &&
+      value.run.decidedAt === value.decision.decidedAt &&
       sameFindingIDs(value.orderedFindings, value.decision.findings) &&
       value.orderedFindings.every((finding) => finding.evaluationRunID === value.decision.runID),
   ),

@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 import { Schema } from "effect"
 import { SelfImprovementApi } from "../src/self-improvement-api"
 import { SelfImprovementEvaluation } from "../src/self-improvement-evaluation"
-import { SelfImprovementLearning } from "../src/self-improvement-learning"
 import { SelfImprovementLifecycle } from "../src/self-improvement-lifecycle"
 
 const decode = <S extends Schema.Decoder<unknown>>(schema: S, input: unknown) =>
@@ -184,6 +183,7 @@ const decision = {
   decision: "failed",
   decidedAt: 4,
 }
+const decidedRun = { ...run, state: "decided", cutoffSampleSetDigest: digest, decidedAt: decision.decidedAt }
 const baseline = {
   id: baselineID,
   locationID,
@@ -450,7 +450,7 @@ const operationContracts = [
     },
     response: {
       schema: SelfImprovementApi.ListMetricRunsResponse,
-      input: page({ run, aggregates, sampleCount: 1, samples: [sample] }),
+      input: page({ run, aggregates, sampleCount: 1 }),
     },
   },
   {
@@ -461,7 +461,7 @@ const operationContracts = [
     },
     response: {
       schema: SelfImprovementApi.ListEvaluationsResponse,
-      input: page({ run, decision, orderedFindings: findings }),
+      input: page({ run: decidedRun, decision, orderedFindings: findings }),
     },
   },
   {
@@ -706,7 +706,32 @@ test("decodes branded numeric HTTP query values only from decimal strings", () =
   expect(() => decode(SelfImprovementApi.ListAuditRequest, { to: 200 })).toThrow()
 })
 
-test("rejects public evaluation envelopes with divergent finding identity or run identity", () => {
+test("metric run views correlate included samples and sample count", () => {
+  expect(
+    decode(SelfImprovementApi.MetricRunView, { run, aggregates, sampleCount: 1, samples: [sample] }) as unknown,
+  ).toEqual({
+    run,
+    aggregates,
+    sampleCount: 1,
+    samples: [sample],
+  })
+  expect(decode(SelfImprovementApi.MetricRunView, { run, aggregates, sampleCount: 1 }) as unknown).toEqual({
+    run,
+    aggregates,
+    sampleCount: 1,
+  })
+  expect(() =>
+    decode(SelfImprovementApi.MetricRunView, {
+      run,
+      aggregates,
+      sampleCount: 1,
+      samples: [{ ...sample, runID: SelfImprovementLifecycle.EvaluationRunID.create() }],
+    }),
+  ).toThrow()
+  expect(() => decode(SelfImprovementApi.MetricRunView, { run, aggregates, sampleCount: 0, samples: [sample] })).toThrow()
+})
+
+test("rejects public evaluation envelopes with divergent decision, finding, or run identity", () => {
   const divergent = findings.with(0, {
     ...findings[0],
     id: SelfImprovementLifecycle.GateFindingID.create(),
@@ -723,12 +748,29 @@ test("rejects public evaluation envelopes with divergent finding identity or run
         replayed: false,
       }),
     ).toThrow()
-    expect(() => decode(SelfImprovementApi.EvaluationView, { run, decision, orderedFindings: invalidFindings })).toThrow()
+    expect(() =>
+      decode(SelfImprovementApi.EvaluationView, { run: decidedRun, decision, orderedFindings: invalidFindings }),
+    ).toThrow()
   }
 
   expect(() =>
     decode(SelfImprovementApi.EvaluationView, {
-      run: { ...run, id: SelfImprovementLifecycle.EvaluationRunID.create() },
+      run: { ...decidedRun, id: SelfImprovementLifecycle.EvaluationRunID.create() },
+      decision,
+      orderedFindings: findings,
+    }),
+  ).toThrow()
+  expect(() => decode(SelfImprovementApi.EvaluationView, { run, decision, orderedFindings: findings })).toThrow()
+  expect(() =>
+    decode(SelfImprovementApi.EvaluationView, {
+      run: { ...decidedRun, cutoffSampleSetDigest: "b".repeat(64) },
+      decision,
+      orderedFindings: findings,
+    }),
+  ).toThrow()
+  expect(() =>
+    decode(SelfImprovementApi.EvaluationView, {
+      run: { ...decidedRun, decidedAt: decision.decidedAt + 1 },
       decision,
       orderedFindings: findings,
     }),

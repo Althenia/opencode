@@ -194,13 +194,15 @@ export const ContextDesiredTarget = Schema.Union([DesiredPresent, DesiredAbsent]
 export type ContextDesiredTarget = typeof ContextDesiredTarget.Type
 export class ContextDesiredState extends Schema.Class<ContextDesiredState>(
   "SelfImprovementLearning.ContextDesiredState",
-)({
-  locationID: SelfImprovementLifecycle.LocationID,
-  artifactID: SelfImprovementLifecycle.ArtifactID,
-  rolloutSlot: Schema.Literals(["shadow", "canary", "active"]),
-  desired: ContextDesiredTarget,
-  desiredRevision: SelfImprovementLifecycle.Revision,
-}) {}
+)(
+  Schema.Struct({
+    locationID: SelfImprovementLifecycle.LocationID,
+    artifactID: SelfImprovementLifecycle.ArtifactID,
+    rolloutSlot: Schema.Literals(["shadow", "canary", "active"]),
+    desired: ContextDesiredTarget,
+    desiredRevision: SelfImprovementLifecycle.Revision,
+  }).check(Schema.makeFilter((value) => value.desired.state === "absent" || value.desired.stage === value.rolloutSlot)),
+) {}
 export class PendingTransitionIntent extends Schema.Class<PendingTransitionIntent>(
   "SelfImprovementLearning.PendingTransitionIntent",
 )({
@@ -216,34 +218,44 @@ export class PendingTransitionIntent extends Schema.Class<PendingTransitionInten
   idempotencyRecordID: SelfImprovementLifecycle.IdempotencyRecordID,
   idempotencyDigest: SelfImprovement.Digest,
 }) {}
-export class ContextOutbox extends Schema.Class<ContextOutbox>("SelfImprovementLearning.ContextOutbox")({
-  id: SelfImprovementLifecycle.ContextOutboxID,
-  locationID: SelfImprovementLifecycle.LocationID,
-  artifactID: SelfImprovementLifecycle.ArtifactID,
-  expectedArtifactRevision: SelfImprovementLifecycle.Revision,
-  expectedStage: SelfImprovementLifecycle.ArtifactStage,
-  desiredStateRevision: SelfImprovementLifecycle.Revision,
-  intent: PendingTransitionIntent,
-  status: ContextOutboxStatus,
-  attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  nextRetryAt: SelfImprovementLifecycle.TimestampMillis,
-  casResultDigest: SelfImprovement.Digest.pipe(optional),
-  createdAt: SelfImprovementLifecycle.TimestampMillis,
-}) {}
+export class ContextOutbox extends Schema.Class<ContextOutbox>("SelfImprovementLearning.ContextOutbox")(
+  Schema.Struct({
+    id: SelfImprovementLifecycle.ContextOutboxID,
+    locationID: SelfImprovementLifecycle.LocationID,
+    artifactID: SelfImprovementLifecycle.ArtifactID,
+    expectedArtifactRevision: SelfImprovementLifecycle.Revision,
+    expectedStage: SelfImprovementLifecycle.ArtifactStage,
+    desiredStateRevision: SelfImprovementLifecycle.Revision,
+    intent: PendingTransitionIntent,
+    status: ContextOutboxStatus,
+    attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    nextRetryAt: SelfImprovementLifecycle.TimestampMillis,
+    casResultDigest: SelfImprovement.Digest.pipe(optional),
+    createdAt: SelfImprovementLifecycle.TimestampMillis,
+  }).check(Schema.makeFilter((value) => value.expectedStage === value.intent.previousStage)),
+) {}
 export class ContextSelectionEvidence extends Schema.Class<ContextSelectionEvidence>(
   "SelfImprovementLearning.ContextSelectionEvidence",
-)({
-  id: SelfImprovementLifecycle.ContextSelectionEvidenceID,
-  artifactID: SelfImprovementLifecycle.ArtifactID,
-  versionID: SelfImprovementLifecycle.ArtifactVersionID,
-  versionDigest: SelfImprovement.Digest,
-  locationID: SelfImprovementLifecycle.LocationID,
-  stage: SelfImprovementLifecycle.ArtifactStage,
-  contextEpoch: SelfImprovementLifecycle.Revision,
-  sessionDigest: SelfImprovement.Digest,
-  cohortResult: ContextCohortResult,
-  outboxID: SelfImprovementLifecycle.ContextOutboxID,
-}) {}
+)(
+  Schema.Struct({
+    id: SelfImprovementLifecycle.ContextSelectionEvidenceID,
+    artifactID: SelfImprovementLifecycle.ArtifactID,
+    versionID: SelfImprovementLifecycle.ArtifactVersionID,
+    versionDigest: SelfImprovement.Digest,
+    locationID: SelfImprovementLifecycle.LocationID,
+    stage: SelfImprovementLifecycle.ArtifactStage,
+    contextEpoch: SelfImprovementLifecycle.Revision,
+    sessionDigest: SelfImprovement.Digest,
+    cohortResult: ContextCohortResult,
+    outboxID: SelfImprovementLifecycle.ContextOutboxID,
+  }).check(
+    Schema.makeFilter(
+      (value) =>
+        value.stage ===
+        (value.cohortResult === "shadow-isolated" ? "shadow" : value.cohortResult === "active" ? "active" : "canary"),
+    ),
+  ),
+) {}
 export class AuditPayload extends Schema.Class<AuditPayload>("SelfImprovementLearning.AuditPayload")({
   artifactID: SelfImprovementLifecycle.ArtifactID.pipe(optional),
   versionID: SelfImprovementLifecycle.ArtifactVersionID.pipe(optional),

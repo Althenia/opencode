@@ -208,6 +208,22 @@ test("lifecycle contracts require modeled fields, reject excess fields, and omit
     definition: { description: "review", content: "Review changes" },
     references: [],
   }
+  const artifactVersionInput = {
+    id: SelfImprovementLifecycle.ArtifactVersionID.create(),
+    artifactID: SelfImprovementLifecycle.ArtifactID.create(),
+    versionNumber: 1,
+    source: "human",
+    behaviorClass: "instruction-only",
+    proposal,
+    canonicalJson: "{}",
+    proposalDigest: digest,
+    inputSnapshotDigest: digest,
+    versionDigest: digest,
+    capabilityManifest: manifest,
+    capabilityManifestDigest: digest,
+    creatorID: "principal",
+    createdAt: 1,
+  }
   const fixtures: ReadonlyArray<{
     schema: Schema.Decoder<unknown>
     input: Record<string, unknown>
@@ -279,22 +295,7 @@ test("lifecycle contracts require modeled fields, reject excess fields, and omit
     },
     {
       schema: SelfImprovementLifecycle.ArtifactVersion,
-      input: {
-        id: SelfImprovementLifecycle.ArtifactVersionID.create(),
-        artifactID: SelfImprovementLifecycle.ArtifactID.create(),
-        versionNumber: 1,
-        source: "human",
-        behaviorClass: "instruction-only",
-        proposal,
-        canonicalJson: "{}",
-        proposalDigest: digest,
-        inputSnapshotDigest: digest,
-        versionDigest: digest,
-        capabilityManifest: manifest,
-        capabilityManifestDigest: digest,
-        creatorID: "principal",
-        createdAt: 1,
-      },
+      input: artifactVersionInput,
       required: [
         "id",
         "artifactID",
@@ -436,12 +437,7 @@ test("lifecycle contracts require modeled fields, reject excess fields, and omit
   }
   expect(decode(SelfImprovementLifecycle.Artifact, artifact)).toEqual(artifact)
 
-  expect(decode(SelfImprovementLifecycle.Artifact, fixtures[6]!.input)).toEqual(fixtures[6]!.input)
-  expect(decode(SelfImprovementLifecycle.ArtifactVersion, fixtures[7]!.input)).toEqual(fixtures[7]!.input)
-  expect(decode(SelfImprovementLifecycle.StageTransition, fixtures[8]!.input)).toEqual(fixtures[8]!.input)
-  expect(() =>
-    decode(SelfImprovementLifecycle.ArtifactVersion, { ...fixtures[7]!.input, locationID }),
-  ).toThrow()
+  expect(() => decode(SelfImprovementLifecycle.ArtifactVersion, { ...artifactVersionInput, locationID })).toThrow()
 })
 
 test("approval decisions keep approved and rejected fields disjoint", () => {

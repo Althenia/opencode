@@ -312,6 +312,18 @@ test("context records preserve desired revision, exact transition intent, outbox
     desiredRevision: 2,
   }
   expect(decode(SelfImprovementLearning.ContextDesiredState, desired)).toEqual(desired)
+  expect(
+    decode(SelfImprovementLearning.ContextDesiredState, {
+      ...desired,
+      desired: { state: "absent" },
+    }),
+  ).toEqual({ ...desired, desired: { state: "absent" } })
+  expect(() =>
+    decode(SelfImprovementLearning.ContextDesiredState, {
+      ...desired,
+      desired: { ...desired.desired, stage: "shadow" },
+    }),
+  ).toThrow()
   const outboxID = SelfImprovementLifecycle.ContextOutboxID.create()
   const outbox = {
     id: outboxID,
@@ -329,6 +341,7 @@ test("context records preserve desired revision, exact transition intent, outbox
   expect(decode(SelfImprovementLearning.ContextOutbox, outbox)).toEqual(outbox)
   expect(() => decode(SelfImprovementLearning.ContextOutbox, { ...outbox, locationID: undefined })).toThrow()
   expect(() => decode(SelfImprovementLearning.ContextOutbox, { ...outbox, attempts: -1 })).toThrow()
+  expect(() => decode(SelfImprovementLearning.ContextOutbox, { ...outbox, expectedStage: "active" })).toThrow()
 
   const selection = {
     id: SelfImprovementLifecycle.ContextSelectionEvidenceID.create(),
@@ -343,6 +356,25 @@ test("context records preserve desired revision, exact transition intent, outbox
     outboxID,
   }
   expect(decode(SelfImprovementLearning.ContextSelectionEvidence, selection)).toEqual(selection)
+  for (const [cohortResult, stage] of [
+    ["shadow-isolated", "shadow"],
+    ["canary-in", "canary"],
+    ["canary-out", "canary"],
+    ["active", "active"],
+  ] as const) {
+    expect(decode(SelfImprovementLearning.ContextSelectionEvidence, { ...selection, cohortResult, stage })).toEqual({
+      ...selection,
+      cohortResult,
+      stage,
+    })
+    expect(() =>
+      decode(SelfImprovementLearning.ContextSelectionEvidence, {
+        ...selection,
+        cohortResult,
+        stage: stage === "active" ? "shadow" : "active",
+      }),
+    ).toThrow()
+  }
   for (const field of Object.keys(selection)) {
     expect(() => decode(SelfImprovementLearning.ContextSelectionEvidence, { ...selection, [field]: undefined })).toThrow()
   }
