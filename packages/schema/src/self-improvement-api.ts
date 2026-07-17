@@ -1,22 +1,31 @@
 export * as SelfImprovementApi from "./self-improvement-api"
 
-import { Effect, Schema } from "effect"
+import { Effect, Schema, SchemaGetter } from "effect"
 import { optional } from "./schema"
 import { SelfImprovement } from "./self-improvement"
 import { SelfImprovementEvaluation } from "./self-improvement-evaluation"
 import { SelfImprovementLearning } from "./self-improvement-learning"
 import { SelfImprovementLifecycle } from "./self-improvement-lifecycle"
 
-const PageLimitValue = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+const PageLimitValue = Schema.Number.annotate({ identifier: "SelfImprovementApi.PageLimit" }).check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 1, maximum: 100 }),
+)
 export const PageLimit = Schema.NumberFromString.pipe(
   Schema.decodeTo(PageLimitValue),
   Schema.withDecodingDefault(Effect.succeed("50")),
-).annotate({ identifier: "SelfImprovementApi.PageLimit" })
+)
 export type PageLimit = typeof PageLimit.Type
-export const Cursor = Schema.NonEmptyString.pipe(Schema.brand("SelfImprovementApi.Cursor")).annotate({
-  identifier: "SelfImprovementApi.Cursor",
-})
+export const Cursor = Schema.String.annotate({ identifier: "SelfImprovementApi.Cursor" }).check(Schema.isNonEmpty()).pipe(
+  Schema.brand("SelfImprovementApi.Cursor"),
+)
 export type Cursor = typeof Cursor.Type
+const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transform((value) => value === "true"),
+    encode: SchemaGetter.transform((value) => (value ? "true" : "false")),
+  }),
+)
 export class PageRequest extends Schema.Class<PageRequest>("SelfImprovementApi.PageRequest")({
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
@@ -361,7 +370,7 @@ export class ListMetricRunsRequest extends Schema.Class<ListMetricRunsRequest>(
   versionID: SelfImprovementLifecycle.ArtifactVersionID.pipe(optional),
   stage: SelfImprovementLifecycle.ArtifactStage.pipe(optional),
   state: SelfImprovementEvaluation.RunState.pipe(optional),
-  includeSamples: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  includeSamples: BooleanFromString.pipe(Schema.withDecodingDefault(Effect.succeed("false"))),
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}
@@ -550,8 +559,8 @@ export const IdempotencyRecord = Schema.Struct({
   createdAt: SelfImprovementLifecycle.TimestampMillis,
   expiresAt: SelfImprovementLifecycle.TimestampMillis,
 })
-  .check(Schema.makeFilter((value) => value.expiresAt === value.createdAt + 30 * 86_400_000))
   .annotate({ identifier: "SelfImprovementApi.IdempotencyRecord" })
+  .check(Schema.makeFilter((value) => value.expiresAt === value.createdAt + 30 * 86_400_000))
 
 export const LocationSource = Schema.Literals([
   "header-grant",

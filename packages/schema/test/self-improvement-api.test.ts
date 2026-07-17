@@ -446,7 +446,7 @@ const operationContracts = [
     name: "listMetricRuns",
     request: {
       schema: SelfImprovementApi.ListMetricRunsRequest,
-      input: { versionID, stage: "shadow", state: "open", includeSamples: false, limit: "10", cursor: "a" },
+      input: { versionID, stage: "shadow", state: "open", includeSamples: "false", limit: "10", cursor: "a" },
     },
     response: {
       schema: SelfImprovementApi.ListMetricRunsResponse,
@@ -589,6 +589,41 @@ test("page limits decode HTTP query strings from 1 through 100 with default 50",
   expect(() => decode(SelfImprovementApi.ListArtifactsRequest, { limit: "101" })).toThrow()
   expect(() => decode(SelfImprovementApi.ListArtifactsRequest, { limit: 1 })).toThrow()
   expect(decode(SelfImprovementApi.ListVersionsRequest, { artifactID })).toEqual({ artifactID, limit: 50 })
+})
+
+test("exposes stable identifiers on public filtered schemas", () => {
+  expect([
+    SelfImprovementApi.PageLimit.ast.annotations?.identifier,
+    SelfImprovementApi.Cursor.ast.annotations?.identifier,
+    SelfImprovementApi.IdempotencyRecord.ast.annotations?.identifier,
+  ]).toEqual([
+    "SelfImprovementApi.PageLimit",
+    "SelfImprovementApi.Cursor",
+    "SelfImprovementApi.IdempotencyRecord",
+  ])
+})
+
+test("decodes and re-encodes includeSamples HTTP query strings", () => {
+  const included = decode(SelfImprovementApi.ListMetricRunsRequest, { includeSamples: "true" })
+  const excluded = decode(SelfImprovementApi.ListMetricRunsRequest, { includeSamples: "false" })
+  expect(included).toEqual({
+    includeSamples: true,
+    limit: 50,
+  })
+  expect(excluded).toEqual({
+    includeSamples: false,
+    limit: 50,
+  })
+  expect(decode(SelfImprovementApi.ListMetricRunsRequest, {})).toEqual({ includeSamples: false, limit: 50 })
+  expect(() => decode(SelfImprovementApi.ListMetricRunsRequest, { includeSamples: "yes" })).toThrow()
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListMetricRunsRequest)(included)).toEqual({
+    includeSamples: "true",
+    limit: "50",
+  })
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListMetricRunsRequest)(excluded)).toEqual({
+    includeSamples: "false",
+    limit: "50",
+  })
 })
 
 test("private API wire contracts are closed and preserve HTTP encodings", () => {
