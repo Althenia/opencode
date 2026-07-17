@@ -370,6 +370,15 @@ test("evaluation decisions constrain reward and retain an optional exact approva
       approvalBinding: { ...approvalBinding, evaluationRunID: undefined },
     }),
   ).toThrow()
+  expect(() =>
+    decode(SelfImprovementEvaluation.EvaluationDecision, {
+      ...decision,
+      approvalBinding: {
+        ...approvalBinding,
+        evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.create(),
+      },
+    }),
+  ).toThrow()
 })
 
 test("every exported evaluation schema has a stable unique identifier", () => {

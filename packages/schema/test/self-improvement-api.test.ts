@@ -591,6 +591,29 @@ test("page limits decode HTTP query strings from 1 through 100 with default 50",
   expect(decode(SelfImprovementApi.ListVersionsRequest, { artifactID })).toEqual({ artifactID, limit: 50 })
 })
 
+test("numeric HTTP values reject non-canonical unsigned decimal strings", () => {
+  const invalid = ["", " 1", "1 ", "+1", "1e0", "0x1", "-1", "01"]
+  for (const value of invalid) {
+    expect(() => decode(SelfImprovementApi.PageRequest, { limit: value })).toThrow()
+    expect(() => decode(SelfImprovementApi.ArtifactMutationHeaders, {
+      "X-OpenCode-Location-ID": locationID,
+      "Idempotency-Key": "retry-1",
+      "If-Match": value,
+    })).toThrow()
+    expect(() => decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: value })).toThrow()
+    expect(() => decode(SelfImprovementApi.ListAuditRequest, { from: value })).toThrow()
+    expect(() => decode(SelfImprovementApi.ListAuditRequest, { to: value })).toThrow()
+  }
+
+  expect(Number(decode(SelfImprovementApi.ArtifactMutationHeaders, {
+    "X-OpenCode-Location-ID": locationID,
+    "Idempotency-Key": "retry-1",
+    "If-Match": "0",
+  })["If-Match"])).toBe(0)
+  expect(Number(decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: "0" }).suiteRevision)).toBe(0)
+  expect(Number(decode(SelfImprovementApi.ListAuditRequest, { from: "0", to: "0" }).from)).toBe(0)
+})
+
 test("exposes stable identifiers on public filtered schemas", () => {
   expect([
     SelfImprovementApi.PageLimit.ast.annotations?.identifier,

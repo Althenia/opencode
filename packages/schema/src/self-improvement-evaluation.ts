@@ -340,7 +340,13 @@ const EvaluationDecisionFields = Schema.Struct({
   decision: Schema.Literals(["passed", "failed"]),
   approvalBinding: SelfImprovementLifecycle.ApprovalBinding.pipe(optional),
   decidedAt: SelfImprovementLifecycle.TimestampMillis,
-}).check(Schema.makeFilter((value) => value.findings.every((finding) => finding.evaluationRunID === value.runID)))
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      value.findings.every((finding) => finding.evaluationRunID === value.runID) &&
+      (value.approvalBinding === undefined || value.approvalBinding.evaluationRunID === value.runID),
+  ),
+)
 
 export class EvaluationDecision extends Schema.Class<EvaluationDecision>(
   "SelfImprovementEvaluation.EvaluationDecision",

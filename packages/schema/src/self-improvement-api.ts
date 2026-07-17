@@ -7,11 +7,14 @@ import { SelfImprovementEvaluation } from "./self-improvement-evaluation"
 import { SelfImprovementLearning } from "./self-improvement-learning"
 import { SelfImprovementLifecycle } from "./self-improvement-lifecycle"
 
+const UnsignedDecimalFromString = Schema.String.check(Schema.isPattern(/^(0|[1-9]\d*)$/)).pipe(
+  Schema.decodeTo(Schema.NumberFromString),
+)
 const PageLimitValue = Schema.Number.annotate({ identifier: "SelfImprovementApi.PageLimit" }).check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 1, maximum: 100 }),
 )
-export const PageLimit = Schema.NumberFromString.pipe(
+export const PageLimit = UnsignedDecimalFromString.pipe(
   Schema.decodeTo(PageLimitValue),
   Schema.withDecodingDefault(Effect.succeed("50")),
 )
@@ -26,14 +29,16 @@ const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
     encode: SchemaGetter.transform((value) => (value ? "true" : "false")),
   }),
 )
-const RevisionFromString = Schema.NumberFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.Revision))
-const TimestampMillisFromString = Schema.NumberFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.TimestampMillis))
+const RevisionFromString = UnsignedDecimalFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.Revision))
+const TimestampMillisFromString = UnsignedDecimalFromString.pipe(
+  Schema.decodeTo(SelfImprovementLifecycle.TimestampMillis),
+)
 export class PageRequest extends Schema.Class<PageRequest>("SelfImprovementApi.PageRequest")({
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}
 export const IfMatchRevision = Schema.suspend(() =>
-  Schema.NumberFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.Revision)),
+  UnsignedDecimalFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.Revision)),
 ).annotate({ identifier: "SelfImprovementApi.IfMatchRevision" })
 export type IfMatchRevision = typeof IfMatchRevision.Type
 export interface LocationHeaders extends Schema.Schema.Type<typeof LocationHeaders> {}
