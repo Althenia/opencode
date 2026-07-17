@@ -25,7 +25,7 @@ const observationInput = {
   taskIDDigest: "d".repeat(64),
   producerID: "runtime-evidence",
   occurredAt: 1,
-  expiresAt: 2,
+  expiresAt: 1 + 30 * 86_400_000,
 }
 
 test("pins learning, reward, routing, context, and cohort vocabularies", () => {
@@ -65,15 +65,42 @@ test("pins learning, reward, routing, context, and cohort vocabularies", () => {
 })
 
 test("observation accepts only redacted stable identifiers and digests", () => {
+  const observationEncoded: unknown = observationInput
+  const decoded = Schema.decodeUnknownSync(SelfImprovementLearning.Observation)(observationEncoded, {
+    errors: "all",
+    onExcessProperty: "error",
+  })
   expect(decode(SelfImprovementLearning.Observation, observationInput)).toEqual(observationInput)
+  expect(decoded).toBeInstanceOf(SelfImprovementLearning.Observation)
+  expect(new SelfImprovementLearning.Observation(decoded)).toBeInstanceOf(SelfImprovementLearning.Observation)
   for (const invalid of [
     { ...observationInput, transcript: "raw" },
     { ...observationInput, providerSettings: {} },
     { ...observationInput, locationID: undefined },
     { ...observationInput, patternDigest: "not-a-digest" },
+    { ...observationInput, expiresAt: observationInput.expiresAt - 1 },
+    { ...observationInput, expiresAt: observationInput.expiresAt + 1 },
   ]) {
     expect(() => decode(SelfImprovementLearning.Observation, invalid)).toThrow()
   }
+  expect(
+    () =>
+      new SelfImprovementLearning.Observation({
+        id: decoded.id,
+        locationID: decoded.locationID,
+        patternDigest: decoded.patternDigest,
+        identityDigest: decoded.identityDigest,
+        workload: decoded.workload,
+        workloadRevision: decoded.workloadRevision,
+        errorClass: decoded.errorClass,
+        orderedToolSymbolDigest: decoded.orderedToolSymbolDigest,
+        outcomeClass: decoded.outcomeClass,
+        taskIDDigest: decoded.taskIDDigest,
+        producerID: decoded.producerID,
+        occurredAt: decoded.occurredAt,
+        expiresAt: SelfImprovementLifecycle.TimestampMillis.make(decoded.expiresAt - 1),
+      }),
+  ).toThrow()
 })
 
 test("generation leases and arms preserve Location-owned immutable selection inputs", () => {
@@ -245,9 +272,7 @@ test("desired context and retention unions reject partial states", () => {
   expect(decode(SelfImprovementLearning.ContextDesiredTarget, { state: "absent" })).toEqual({ state: "absent" })
   expect(() => decode(SelfImprovementLearning.ContextDesiredTarget, { state: "present", versionID })).toThrow()
   expect(() => decode(SelfImprovementLearning.ContextDesiredTarget, { state: "absent", versionID })).toThrow()
-  expect(() =>
-    decode(SelfImprovementLearning.RetentionMetadata, { _tag: "observation-30d", createdAt: 1 }),
-  ).toThrow()
+  expect(() => decode(SelfImprovementLearning.RetentionMetadata, { _tag: "observation-30d", createdAt: 1 })).toThrow()
   expect(() =>
     decode(SelfImprovementLearning.RetentionMetadata, {
       _tag: "evidence-180d",
@@ -376,7 +401,9 @@ test("context records preserve desired revision, exact transition intent, outbox
     ).toThrow()
   }
   for (const field of Object.keys(selection)) {
-    expect(() => decode(SelfImprovementLearning.ContextSelectionEvidence, { ...selection, [field]: undefined })).toThrow()
+    expect(() =>
+      decode(SelfImprovementLearning.ContextSelectionEvidence, { ...selection, [field]: undefined }),
+    ).toThrow()
   }
 })
 

@@ -301,14 +301,14 @@ const EvaluationRunFields = Schema.Struct({
       value.acceptanceStart <= value.acceptanceEnd &&
       value.acceptanceEnd <= value.cutoffAt &&
       ((value.state === "open" && value.cutoffSampleSetDigest === undefined && value.decidedAt === undefined) ||
-        (value.state === "deciding" &&
-          value.cutoffSampleSetDigest !== undefined &&
-          value.decidedAt === undefined) ||
+        (value.state === "deciding" && value.cutoffSampleSetDigest !== undefined && value.decidedAt === undefined) ||
         (value.state === "decided" && value.cutoffSampleSetDigest !== undefined && value.decidedAt !== undefined) ||
         (value.state === "cancelled" && value.cutoffSampleSetDigest === undefined && value.decidedAt === undefined)),
   ),
 )
-export class EvaluationRun extends Schema.Class<EvaluationRun>("SelfImprovementEvaluation.EvaluationRun")(EvaluationRunFields) {}
+export class EvaluationRun extends Schema.Class<EvaluationRun>("SelfImprovementEvaluation.EvaluationRun")(
+  EvaluationRunFields,
+) {}
 
 const MetricSampleFields = Schema.Struct({
   id: SelfImprovementLifecycle.MetricSampleID,
@@ -322,7 +322,9 @@ const MetricSampleFields = Schema.Struct({
   startedAt: SelfImprovementLifecycle.TimestampMillis,
   terminalAt: SelfImprovementLifecycle.TimestampMillis,
 }).check(Schema.makeFilter((value) => value.startedAt <= value.terminalAt))
-export class MetricSample extends Schema.Class<MetricSample>("SelfImprovementEvaluation.MetricSample")(MetricSampleFields) {}
+export class MetricSample extends Schema.Class<MetricSample>("SelfImprovementEvaluation.MetricSample")(
+  MetricSampleFields,
+) {}
 export interface GateFinding extends Schema.Schema.Type<typeof GateFinding> {}
 export const GateFinding = Schema.Struct({
   id: SelfImprovementLifecycle.GateFindingID,

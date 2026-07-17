@@ -485,9 +485,9 @@ test("pins the private API and routing hygiene inventory", () => {
       operation.path.startsWith("/private/self-improvement"),
     ),
   ).toBe(true)
-  expect(Object.values(SelfImprovementApi.PrivateApiOperations).some((operation) => operation.path.includes("stage"))).toBe(
-    false,
-  )
+  expect(
+    Object.values(SelfImprovementApi.PrivateApiOperations).some((operation) => operation.path.includes("stage")),
+  ).toBe(false)
   expect(SelfImprovementLearning.RoutingPrecedence).toEqual([
     "session-user",
     "role",

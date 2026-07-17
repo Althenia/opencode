@@ -62,21 +62,23 @@ export const ContextCohortResult = Schema.Literals(["shadow-isolated", "canary-i
 })
 export type ContextCohortResult = typeof ContextCohortResult.Type
 
-export class Observation extends Schema.Class<Observation>("SelfImprovementLearning.Observation")({
-  id: SelfImprovementLifecycle.ObservationID,
-  locationID: SelfImprovementLifecycle.LocationID,
-  patternDigest: SelfImprovement.Digest,
-  identityDigest: SelfImprovement.Digest,
-  workload: SelfImprovementEvaluation.Workload,
-  workloadRevision: SelfImprovementLifecycle.Revision,
-  errorClass: Schema.NonEmptyString,
-  orderedToolSymbolDigest: SelfImprovement.Digest,
-  outcomeClass: ObservationOutcomeClass,
-  taskIDDigest: SelfImprovement.Digest,
-  producerID: SelfImprovementLifecycle.PrincipalID,
-  occurredAt: SelfImprovementLifecycle.TimestampMillis,
-  expiresAt: SelfImprovementLifecycle.TimestampMillis,
-}) {}
+export class Observation extends Schema.Class<Observation>("SelfImprovementLearning.Observation")(
+  Schema.Struct({
+    id: SelfImprovementLifecycle.ObservationID,
+    locationID: SelfImprovementLifecycle.LocationID,
+    patternDigest: SelfImprovement.Digest,
+    identityDigest: SelfImprovement.Digest,
+    workload: SelfImprovementEvaluation.Workload,
+    workloadRevision: SelfImprovementLifecycle.Revision,
+    errorClass: Schema.NonEmptyString,
+    orderedToolSymbolDigest: SelfImprovement.Digest,
+    outcomeClass: ObservationOutcomeClass,
+    taskIDDigest: SelfImprovement.Digest,
+    producerID: SelfImprovementLifecycle.PrincipalID,
+    occurredAt: SelfImprovementLifecycle.TimestampMillis,
+    expiresAt: SelfImprovementLifecycle.TimestampMillis,
+  }).check(Schema.makeFilter((value) => value.expiresAt === value.occurredAt + 30 * 86_400_000)),
+) {}
 export class GenerationLease extends Schema.Class<GenerationLease>("SelfImprovementLearning.GenerationLease")({
   id: SelfImprovementLifecycle.GenerationLeaseID,
   locationID: SelfImprovementLifecycle.LocationID,
@@ -281,11 +283,7 @@ export class EvidenceRetention extends Schema.TaggedClass<EvidenceRetention>(
 export class GovernedMetadataRetention extends Schema.TaggedClass<GovernedMetadataRetention>(
   "SelfImprovementLearning.GovernedMetadataRetention",
 )("governed-metadata", { createdAt: SelfImprovementLifecycle.TimestampMillis }) {}
-export const RetentionMetadata = Schema.Union([
-  ObservationRetention,
-  EvidenceRetention,
-  GovernedMetadataRetention,
-])
+export const RetentionMetadata = Schema.Union([ObservationRetention, EvidenceRetention, GovernedMetadataRetention])
   .pipe(Schema.toTaggedUnion("_tag"))
   .annotate({ identifier: "SelfImprovementLearning.RetentionMetadata" })
   .check(

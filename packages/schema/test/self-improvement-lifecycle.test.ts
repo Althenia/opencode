@@ -343,14 +343,7 @@ test("lifecycle contracts require modeled fields, reject excess fields, and omit
     {
       schema: SelfImprovementLifecycle.ApprovalBinding,
       input: binding,
-      required: [
-        "versionID",
-        "versionDigest",
-        "suiteID",
-        "suiteRevision",
-        "evaluationRunID",
-        "shadowEvidenceDigest",
-      ],
+      required: ["versionID", "versionDigest", "suiteID", "suiteRevision", "evaluationRunID", "shadowEvidenceDigest"],
     },
     {
       schema: SelfImprovementLifecycle.ApprovalRequest,
@@ -365,7 +358,7 @@ test("lifecycle contracts require modeled fields, reject excess fields, and omit
     },
     {
       schema: SelfImprovementLifecycle.ApprovalGranted,
-      input: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 2 },
+      input: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 1 + 86_400_000 },
       required: ["_tag", "approverID", "decidedAt", "expiresAt"],
     },
     {
@@ -380,7 +373,7 @@ test("lifecycle contracts require modeled fields, reject excess fields, and omit
         requestID: SelfImprovementLifecycle.ApprovalRequestID.create(),
         locationID,
         binding,
-        decision: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 2 },
+        decision: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 1 + 86_400_000 },
       },
       required: ["id", "requestID", "locationID", "binding", "decision"],
     },
@@ -464,9 +457,45 @@ test("approval decisions keep approved and rejected fields disjoint", () => {
   }
   expect(decode(SelfImprovementLifecycle.ApprovalDecision, rejected)).toEqual(rejected)
   expect(() => decode(SelfImprovementLifecycle.ApprovalDecision, { ...rejected, expiresAt: 2 })).toThrow()
-  const approved = { _tag: "approved", approverID: "location-approver", decidedAt: 1, expiresAt: 2 }
-  expect(decode(SelfImprovementLifecycle.ApprovalDecision, approved)).toEqual(approved)
-  expect(() => decode(SelfImprovementLifecycle.ApprovalDecision, { ...approved, reason: "approval-rejected" })).toThrow()
+  const approved = {
+    _tag: "approved",
+    approverID: "location-approver",
+    decidedAt: 1,
+    expiresAt: 1 + 86_400_000,
+  }
+  const approvedEncoded: unknown = approved
+  const decoded = Schema.decodeUnknownSync(SelfImprovementLifecycle.ApprovalGranted)(approvedEncoded, {
+    errors: "all",
+    onExcessProperty: "error",
+  })
+  expect(decode(SelfImprovementLifecycle.ApprovalGranted, approved)).toEqual(approved)
+  expect(decoded).toBeInstanceOf(SelfImprovementLifecycle.ApprovalGranted)
+  expect(new SelfImprovementLifecycle.ApprovalGranted(decoded)).toBeInstanceOf(SelfImprovementLifecycle.ApprovalGranted)
+  for (const invalid of [
+    { ...approved, expiresAt: approved.expiresAt - 1 },
+    { ...approved, expiresAt: approved.expiresAt + 1 },
+    { ...approved, consumedAt: approved.decidedAt - 1 },
+    { ...approved, consumedAt: approved.expiresAt + 1 },
+  ]) {
+    expect(() => decode(SelfImprovementLifecycle.ApprovalGranted, invalid)).toThrow()
+  }
+  expect(
+    () =>
+      new SelfImprovementLifecycle.ApprovalGranted({
+        approverID: decoded.approverID,
+        decidedAt: decoded.decidedAt,
+        expiresAt: SelfImprovementLifecycle.TimestampMillis.make(decoded.expiresAt - 1),
+      }),
+  ).toThrow()
+  for (const consumedAt of [approved.decidedAt, approved.expiresAt]) {
+    expect(decode(SelfImprovementLifecycle.ApprovalGranted, { ...approved, consumedAt })).toEqual({
+      ...approved,
+      consumedAt,
+    })
+  }
+  expect(() =>
+    decode(SelfImprovementLifecycle.ApprovalDecision, { ...approved, reason: "approval-rejected" }),
+  ).toThrow()
 })
 
 test("artifact and version source metadata states remain consistent", () => {
@@ -491,7 +520,12 @@ test("artifact and version source metadata states remain consistent", () => {
     artifactID: artifact.id,
     versionNumber: 1,
     behaviorClass: "instruction-only" as const,
-    proposal: { kind: "skill" as const, name: "reviewer", definition: { description: "review", content: "Review changes" }, references: [] },
+    proposal: {
+      kind: "skill" as const,
+      name: "reviewer",
+      definition: { description: "review", content: "Review changes" },
+      references: [],
+    },
     canonicalJson: "{}",
     proposalDigest: "a".repeat(64),
     inputSnapshotDigest: "a".repeat(64),

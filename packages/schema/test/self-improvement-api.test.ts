@@ -78,7 +78,7 @@ const approval = {
   requestID: SelfImprovementLifecycle.ApprovalRequestID.create(),
   locationID,
   binding,
-  decision: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 2 },
+  decision: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 1 + 86_400_000 },
 }
 const rejectedApproval = {
   ...approval,
@@ -98,7 +98,7 @@ const observation = {
   taskIDDigest: digest,
   producerID: "runtime-evidence",
   occurredAt: 1,
-  expiresAt: 2,
+  expiresAt: 1 + 30 * 86_400_000,
 }
 const metrics = {
   taskQuality: { earnedAllowlistedPoints: 0, possibleAllowlistedPoints: 0 },
@@ -528,10 +528,7 @@ test("strictly decodes and encodes every operation request and response", () => 
 test("strictly decodes and encodes all three header schemas", () => {
   const contracts = [
     [SelfImprovementApi.LocationHeaders, { "X-OpenCode-Location-ID": locationID }],
-    [
-      SelfImprovementApi.MutationHeaders,
-      { "X-OpenCode-Location-ID": locationID, "Idempotency-Key": "retry-1" },
-    ],
+    [SelfImprovementApi.MutationHeaders, { "X-OpenCode-Location-ID": locationID, "Idempotency-Key": "retry-1" }],
     [
       SelfImprovementApi.ArtifactMutationHeaders,
       { "X-OpenCode-Location-ID": locationID, "Idempotency-Key": "retry-1", "If-Match": "7" },
@@ -546,36 +543,39 @@ test("strictly decodes and encodes all three header schemas", () => {
 })
 
 test("defines exactly the 22 app-private operations", () => {
-  expect(Object.values(SelfImprovementApi.PrivateApiOperations).map(({ method, path }) => `${method} ${path}`)).toEqual([
-    "GET /private/self-improvement/artifacts",
-    "POST /private/self-improvement/artifacts",
-    "GET /private/self-improvement/artifacts/{artifactID}",
-    "GET /private/self-improvement/artifacts/{artifactID}/versions",
-    "POST /private/self-improvement/artifacts/{artifactID}/versions",
-    "GET /private/self-improvement/artifacts/{artifactID}/versions/{versionID}",
-    "POST /private/self-improvement/artifacts/{artifactID}/versions/{versionID}/archive",
-    "POST /private/self-improvement/artifacts/{artifactID}/tombstone",
-    "POST /private/self-improvement/approvals/{approvalRequestID}/approve",
-    "POST /private/self-improvement/approvals/{approvalRequestID}/reject",
-    "POST /private/self-improvement/observations",
-    "POST /private/self-improvement/metric-runs",
-    "POST /private/self-improvement/metric-runs/{runID}/samples",
-    "POST /private/self-improvement/metric-runs/{runID}/decisions",
-    "GET /private/self-improvement/baselines",
-    "GET /private/self-improvement/metric-runs",
-    "GET /private/self-improvement/evaluations",
-    "GET /private/self-improvement/transitions",
-    "GET /private/self-improvement/approvals",
-    "GET /private/self-improvement/context-evidence",
-    "GET /private/self-improvement/routing-decisions",
-    "GET /private/self-improvement/audit",
-  ])
+  expect(Object.values(SelfImprovementApi.PrivateApiOperations).map(({ method, path }) => `${method} ${path}`)).toEqual(
+    [
+      "GET /private/self-improvement/artifacts",
+      "POST /private/self-improvement/artifacts",
+      "GET /private/self-improvement/artifacts/{artifactID}",
+      "GET /private/self-improvement/artifacts/{artifactID}/versions",
+      "POST /private/self-improvement/artifacts/{artifactID}/versions",
+      "GET /private/self-improvement/artifacts/{artifactID}/versions/{versionID}",
+      "POST /private/self-improvement/artifacts/{artifactID}/versions/{versionID}/archive",
+      "POST /private/self-improvement/artifacts/{artifactID}/tombstone",
+      "POST /private/self-improvement/approvals/{approvalRequestID}/approve",
+      "POST /private/self-improvement/approvals/{approvalRequestID}/reject",
+      "POST /private/self-improvement/observations",
+      "POST /private/self-improvement/metric-runs",
+      "POST /private/self-improvement/metric-runs/{runID}/samples",
+      "POST /private/self-improvement/metric-runs/{runID}/decisions",
+      "GET /private/self-improvement/baselines",
+      "GET /private/self-improvement/metric-runs",
+      "GET /private/self-improvement/evaluations",
+      "GET /private/self-improvement/transitions",
+      "GET /private/self-improvement/approvals",
+      "GET /private/self-improvement/context-evidence",
+      "GET /private/self-improvement/routing-decisions",
+      "GET /private/self-improvement/audit",
+    ],
+  )
   expect(Object.keys(SelfImprovementApi.PrivateApiOperations).some((key) => key.toLowerCase().includes("stage"))).toBe(
     false,
   )
   expect(
     Object.values(SelfImprovementApi.PrivateApiOperations).every(
-      (operation) => ["GET", "POST"].includes(operation.method) && operation.path.startsWith("/private/self-improvement"),
+      (operation) =>
+        ["GET", "POST"].includes(operation.method) && operation.path.startsWith("/private/self-improvement"),
     ),
   ).toBe(true)
 })
@@ -595,21 +595,27 @@ test("numeric HTTP values reject non-canonical unsigned decimal strings", () => 
   const invalid = ["", " 1", "1 ", "+1", "1e0", "0x1", "-1", "01"]
   for (const value of invalid) {
     expect(() => decode(SelfImprovementApi.PageRequest, { limit: value })).toThrow()
-    expect(() => decode(SelfImprovementApi.ArtifactMutationHeaders, {
-      "X-OpenCode-Location-ID": locationID,
-      "Idempotency-Key": "retry-1",
-      "If-Match": value,
-    })).toThrow()
+    expect(() =>
+      decode(SelfImprovementApi.ArtifactMutationHeaders, {
+        "X-OpenCode-Location-ID": locationID,
+        "Idempotency-Key": "retry-1",
+        "If-Match": value,
+      }),
+    ).toThrow()
     expect(() => decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: value })).toThrow()
     expect(() => decode(SelfImprovementApi.ListAuditRequest, { from: value })).toThrow()
     expect(() => decode(SelfImprovementApi.ListAuditRequest, { to: value })).toThrow()
   }
 
-  expect(Number(decode(SelfImprovementApi.ArtifactMutationHeaders, {
-    "X-OpenCode-Location-ID": locationID,
-    "Idempotency-Key": "retry-1",
-    "If-Match": "0",
-  })["If-Match"])).toBe(0)
+  expect(
+    Number(
+      decode(SelfImprovementApi.ArtifactMutationHeaders, {
+        "X-OpenCode-Location-ID": locationID,
+        "Idempotency-Key": "retry-1",
+        "If-Match": "0",
+      })["If-Match"],
+    ),
+  ).toBe(0)
   expect(Number(decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: "0" }).suiteRevision)).toBe(0)
   expect(Number(decode(SelfImprovementApi.ListAuditRequest, { from: "0", to: "0" }).from)).toBe(0)
 })
@@ -639,17 +645,11 @@ test("exposes stable identifiers on public filtered schemas", () => {
     SelfImprovementApi.PageLimit.ast.annotations?.identifier,
     SelfImprovementApi.Cursor.ast.annotations?.identifier,
     SelfImprovementApi.IdempotencyRecord.ast.annotations?.identifier,
-  ]).toEqual([
-    "SelfImprovementApi.PageLimit",
-    "SelfImprovementApi.Cursor",
-    "SelfImprovementApi.IdempotencyRecord",
-  ])
+  ]).toEqual(["SelfImprovementApi.PageLimit", "SelfImprovementApi.Cursor", "SelfImprovementApi.IdempotencyRecord"])
 })
 
 test("exposes the If-Match revision transport identifier", () => {
-  expect(SelfImprovementApi.IfMatchRevision.ast.annotations?.identifier).toBe(
-    "SelfImprovementApi.IfMatchRevision",
-  )
+  expect(SelfImprovementApi.IfMatchRevision.ast.annotations?.identifier).toBe("SelfImprovementApi.IfMatchRevision")
 })
 
 test("decodes and re-encodes includeSamples HTTP query strings", () => {
@@ -728,7 +728,9 @@ test("metric run views correlate included samples and sample count", () => {
       samples: [{ ...sample, runID: SelfImprovementLifecycle.EvaluationRunID.create() }],
     }),
   ).toThrow()
-  expect(() => decode(SelfImprovementApi.MetricRunView, { run, aggregates, sampleCount: 0, samples: [sample] })).toThrow()
+  expect(() =>
+    decode(SelfImprovementApi.MetricRunView, { run, aggregates, sampleCount: 0, samples: [sample] }),
+  ).toThrow()
 })
 
 test("rejects public evaluation envelopes with divergent decision, finding, or run identity", () => {

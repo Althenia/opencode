@@ -125,7 +125,8 @@ test("metric components preserve valid zero denominators and reject invalid cont
   ).toThrow()
   expect(() => decode(SelfImprovementEvaluation.MetricComponents, { ...zeroMetrics, latencyMs: -1 })).toThrow()
   expect(() => decode(SelfImprovementEvaluation.TaskOutcome, "cancelled")).toThrow()
-  for (const outcome of ["success", "failure"]) expect(decode(SelfImprovementEvaluation.TaskOutcome, outcome)).toBe(outcome)
+  for (const outcome of ["success", "failure"])
+    expect(decode(SelfImprovementEvaluation.TaskOutcome, outcome)).toBe(outcome)
 })
 
 test("suite revision is Location-owned and cannot weaken required gates or thresholds", () => {
@@ -364,8 +365,12 @@ test("evaluation records remain constructable checked classes", () => {
   }
   const decodedRun = Schema.decodeUnknownSync(SelfImprovementEvaluation.EvaluationRun)(run)
   const decodedSample = Schema.decodeUnknownSync(SelfImprovementEvaluation.MetricSample)(sample)
-  expect(new SelfImprovementEvaluation.EvaluationRun(decodedRun)).toBeInstanceOf(SelfImprovementEvaluation.EvaluationRun)
-  expect(new SelfImprovementEvaluation.MetricSample(decodedSample)).toBeInstanceOf(SelfImprovementEvaluation.MetricSample)
+  expect(new SelfImprovementEvaluation.EvaluationRun(decodedRun)).toBeInstanceOf(
+    SelfImprovementEvaluation.EvaluationRun,
+  )
+  expect(new SelfImprovementEvaluation.MetricSample(decodedSample)).toBeInstanceOf(
+    SelfImprovementEvaluation.MetricSample,
+  )
   expect(decodedRun).toBeInstanceOf(SelfImprovementEvaluation.EvaluationRun)
   expect(decodedSample).toBeInstanceOf(SelfImprovementEvaluation.MetricSample)
 })
@@ -385,9 +390,7 @@ test("samples and findings bind exact outcomes, IDs, and gate order", () => {
     terminalAt: 2,
   }
   expect(decode(SelfImprovementEvaluation.MetricSample, sample)).toEqual(sample)
-  expect(() =>
-    decode(SelfImprovementEvaluation.MetricSample, { ...sample, startedAt: 3, terminalAt: 2 }),
-  ).toThrow()
+  expect(() => decode(SelfImprovementEvaluation.MetricSample, { ...sample, startedAt: 3, terminalAt: 2 })).toThrow()
   const finding = {
     id: SelfImprovementLifecycle.GateFindingID.create(),
     evaluationRunID: runID,
@@ -510,37 +513,40 @@ test("every exported evaluation schema has a stable unique identifier", () => {
     SelfImprovementEvaluation.GateFinding,
     SelfImprovementEvaluation.EvaluationDecision,
   ]
-  const expected = schemas.map((_, index) => [
-    "SelfImprovementEvaluation.Workload",
-    "SelfImprovementEvaluation.RunState",
-    "SelfImprovementEvaluation.TaskOutcome",
-    "SelfImprovementEvaluation.GateID",
-    "SelfImprovementEvaluation.RequiredGateSequence",
-    "SelfImprovementEvaluation.GateResult",
-    "SelfImprovementEvaluation.HigherIsBetterNonRegression",
-    "SelfImprovementEvaluation.LowerIsBetterNonRegression",
-    "SelfImprovementEvaluation.MaximumRatioThreshold",
-    "SelfImprovementEvaluation.PositiveAggregateRewardThreshold",
-    "SelfImprovementEvaluation.MetricThresholds",
-    "SelfImprovementEvaluation.GateThresholdTightening",
-    "SelfImprovementEvaluation.ArtifactGateOverride",
-    "SelfImprovementEvaluation.TaskQualityMetric",
-    "SelfImprovementEvaluation.CorrectnessMetric",
-    "SelfImprovementEvaluation.RepeatFixRateMetric",
-    "SelfImprovementEvaluation.PrecisionMetric",
-    "SelfImprovementEvaluation.LatencyMetric",
-    "SelfImprovementEvaluation.TokensPerSuccessMetric",
-    "SelfImprovementEvaluation.CacheHitRatioMetric",
-    "SelfImprovementEvaluation.MetricComponents",
-    "SelfImprovementEvaluation.MetricTotals",
-    "SelfImprovementEvaluation.MetricAggregates",
-    "SelfImprovementEvaluation.SuiteRevision",
-    "SelfImprovementEvaluation.Baseline",
-    "SelfImprovementEvaluation.EvaluationRun",
-    "SelfImprovementEvaluation.MetricSample",
-    "SelfImprovementEvaluation.GateFinding",
-    "SelfImprovementEvaluation.EvaluationDecision",
-  ][index])
+  const expected = schemas.map(
+    (_, index) =>
+      [
+        "SelfImprovementEvaluation.Workload",
+        "SelfImprovementEvaluation.RunState",
+        "SelfImprovementEvaluation.TaskOutcome",
+        "SelfImprovementEvaluation.GateID",
+        "SelfImprovementEvaluation.RequiredGateSequence",
+        "SelfImprovementEvaluation.GateResult",
+        "SelfImprovementEvaluation.HigherIsBetterNonRegression",
+        "SelfImprovementEvaluation.LowerIsBetterNonRegression",
+        "SelfImprovementEvaluation.MaximumRatioThreshold",
+        "SelfImprovementEvaluation.PositiveAggregateRewardThreshold",
+        "SelfImprovementEvaluation.MetricThresholds",
+        "SelfImprovementEvaluation.GateThresholdTightening",
+        "SelfImprovementEvaluation.ArtifactGateOverride",
+        "SelfImprovementEvaluation.TaskQualityMetric",
+        "SelfImprovementEvaluation.CorrectnessMetric",
+        "SelfImprovementEvaluation.RepeatFixRateMetric",
+        "SelfImprovementEvaluation.PrecisionMetric",
+        "SelfImprovementEvaluation.LatencyMetric",
+        "SelfImprovementEvaluation.TokensPerSuccessMetric",
+        "SelfImprovementEvaluation.CacheHitRatioMetric",
+        "SelfImprovementEvaluation.MetricComponents",
+        "SelfImprovementEvaluation.MetricTotals",
+        "SelfImprovementEvaluation.MetricAggregates",
+        "SelfImprovementEvaluation.SuiteRevision",
+        "SelfImprovementEvaluation.Baseline",
+        "SelfImprovementEvaluation.EvaluationRun",
+        "SelfImprovementEvaluation.MetricSample",
+        "SelfImprovementEvaluation.GateFinding",
+        "SelfImprovementEvaluation.EvaluationDecision",
+      ][index],
+  )
   const identifiers = schemas.map((schema) => schema.ast.annotations?.identifier)
   expect(identifiers).toEqual(expected)
   expect(new Set(identifiers).size).toBe(expected.length)

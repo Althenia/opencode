@@ -46,8 +46,12 @@ type Assert<Condition extends true> = Condition
 export type LiveTypeAssertions = {
   readonly proposalParse: Assert<Equal<LiveDependencies["proposalParse"], typeof SelfImprovementProposal.parse>>
   readonly policyEvaluate: Assert<Equal<LiveDependencies["policyEvaluate"], Policy.Interface["evaluate"]>>
-  readonly catalogProviderGet: Assert<Equal<LiveDependencies["catalogProviderGet"], Catalog.Interface["provider"]["get"]>>
-  readonly catalogProviderAll: Assert<Equal<LiveDependencies["catalogProviderAll"], Catalog.Interface["provider"]["all"]>>
+  readonly catalogProviderGet: Assert<
+    Equal<LiveDependencies["catalogProviderGet"], Catalog.Interface["provider"]["get"]>
+  >
+  readonly catalogProviderAll: Assert<
+    Equal<LiveDependencies["catalogProviderAll"], Catalog.Interface["provider"]["all"]>
+  >
   readonly catalogProviderAvailable: Assert<
     Equal<LiveDependencies["catalogProviderAvailable"], Catalog.Interface["provider"]["available"]>
   >
@@ -79,7 +83,9 @@ export const SystemContextFunctions: {
 }
 export const locationID = (location: Location.Ref): SelfImprovementLifecycle.LocationID =>
   SelfImprovementLifecycle.LocationID.make(
-    Hash.sha256(`self-improvement/location/v1\0directory\0${location.directory}\0workspace\0${location.workspaceID ?? ""}`),
+    Hash.sha256(
+      `self-improvement/location/v1\0directory\0${location.directory}\0workspace\0${location.workspaceID ?? ""}`,
+    ),
   )
 
 export const S01Traceability = {

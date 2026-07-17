@@ -99,7 +99,8 @@ export const Glossary = {
     "A trusted, redacted observation in the same Location whose HMAC identity has the same workload, error class, ordered tool/symbol digest, and outcome class within the rolling 30-day window",
   "eligible-arm":
     "An active allowlisted arm that passes all pre-selection policy, availability, capability, stage, and bucket checks",
-  "positive-evidence": "Complete trusted evidence with all applicable gates passing and aggregate reward greater than zero",
+  "positive-evidence":
+    "Complete trusted evidence with all applicable gates passing and aggregate reward greater than zero",
   "improving-sample":
     "A valid candidate sample whose paired aggregate contribution improves at least one metric and violates no applicable non-regression or budget gate",
   "complete-audit-chain":
@@ -241,17 +242,17 @@ export class CapabilityDeny extends Schema.Class<CapabilityDeny>("SelfImprovemen
   ]),
   resourceID: Schema.NonEmptyString,
 }) {}
-export class CapabilityManifest extends Schema.Class<CapabilityManifest>(
-  "SelfImprovementLifecycle.CapabilityManifest",
-)({
-  toolIDs: unique(Schema.NonEmptyString),
-  filesystemScopeIDs: unique(Schema.NonEmptyString),
-  networkOriginIDs: unique(Schema.NonEmptyString),
-  modelRoutes: unique(Model.Ref),
-  childAgentTargets: unique(SelfImprovement.CandidateName),
-  artifactReferences: unique(TypedArtifactReference),
-  denies: unique(CapabilityDeny),
-}) {}
+export class CapabilityManifest extends Schema.Class<CapabilityManifest>("SelfImprovementLifecycle.CapabilityManifest")(
+  {
+    toolIDs: unique(Schema.NonEmptyString),
+    filesystemScopeIDs: unique(Schema.NonEmptyString),
+    networkOriginIDs: unique(Schema.NonEmptyString),
+    modelRoutes: unique(Model.Ref),
+    childAgentTargets: unique(SelfImprovement.CandidateName),
+    artifactReferences: unique(TypedArtifactReference),
+    denies: unique(CapabilityDeny),
+  },
+) {}
 export class GeneratedContentMetadata extends Schema.Class<GeneratedContentMetadata>(
   "SelfImprovementLifecycle.GeneratedContentMetadata",
 )({
@@ -327,21 +328,30 @@ export class ApprovalRequest extends Schema.Class<ApprovalRequest>("SelfImprovem
   creatorID: PrincipalID,
   requestedAt: TimestampMillis,
 }) {}
-export class ApprovalGranted extends Schema.TaggedClass<ApprovalGranted>(
-  "SelfImprovementLifecycle.ApprovalGranted",
-)("approved", {
-  approverID: PrincipalID,
-  decidedAt: TimestampMillis,
-  expiresAt: TimestampMillis,
-  consumedAt: TimestampMillis.pipe(optional),
-}) {}
-export class ApprovalRejected extends Schema.TaggedClass<ApprovalRejected>(
-  "SelfImprovementLifecycle.ApprovalRejected",
-)("rejected", {
-  approverID: PrincipalID,
-  decidedAt: TimestampMillis,
-  reason: ApprovalRejectionReason,
-}) {}
+export class ApprovalGranted extends Schema.TaggedClass<ApprovalGranted>("SelfImprovementLifecycle.ApprovalGranted")(
+  "approved",
+  Schema.Struct({
+    approverID: PrincipalID,
+    decidedAt: TimestampMillis,
+    expiresAt: TimestampMillis,
+    consumedAt: TimestampMillis.pipe(optional),
+  }).check(
+    Schema.makeFilter(
+      (value) =>
+        value.expiresAt === value.decidedAt + 86_400_000 &&
+        (value.consumedAt === undefined ||
+          (value.consumedAt >= value.decidedAt && value.consumedAt <= value.expiresAt)),
+    ),
+  ),
+) {}
+export class ApprovalRejected extends Schema.TaggedClass<ApprovalRejected>("SelfImprovementLifecycle.ApprovalRejected")(
+  "rejected",
+  {
+    approverID: PrincipalID,
+    decidedAt: TimestampMillis,
+    reason: ApprovalRejectionReason,
+  },
+) {}
 export const ApprovalDecision = Schema.Union([ApprovalGranted, ApprovalRejected])
   .pipe(Schema.toTaggedUnion("_tag"))
   .annotate({ identifier: "SelfImprovementLifecycle.ApprovalDecision" })

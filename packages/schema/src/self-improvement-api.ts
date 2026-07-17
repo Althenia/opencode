@@ -19,9 +19,9 @@ export const PageLimit = UnsignedDecimalFromString.pipe(
   Schema.withDecodingDefault(Effect.succeed("50")),
 )
 export type PageLimit = typeof PageLimit.Type
-export const Cursor = Schema.String.annotate({ identifier: "SelfImprovementApi.Cursor" }).check(Schema.isNonEmpty()).pipe(
-  Schema.brand("SelfImprovementApi.Cursor"),
-)
+export const Cursor = Schema.String.annotate({ identifier: "SelfImprovementApi.Cursor" })
+  .check(Schema.isNonEmpty())
+  .pipe(Schema.brand("SelfImprovementApi.Cursor"))
 export type Cursor = typeof Cursor.Type
 const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
   Schema.decodeTo(Schema.Boolean, {
@@ -189,13 +189,15 @@ export class ArtifactRolloutProjection extends Schema.Class<ArtifactRolloutProje
   transitionID: SelfImprovementLifecycle.StageTransitionID,
 }) {}
 
-export class ListArtifactsRequest extends Schema.Class<ListArtifactsRequest>("SelfImprovementApi.ListArtifactsRequest")({
-  kind: SelfImprovement.ArtifactKind.pipe(optional),
-  status: SelfImprovementLifecycle.ArtifactStatus.pipe(optional),
-  namePrefix: Schema.NonEmptyString.pipe(optional),
-  limit: PageLimit,
-  cursor: Cursor.pipe(optional),
-}) {}
+export class ListArtifactsRequest extends Schema.Class<ListArtifactsRequest>("SelfImprovementApi.ListArtifactsRequest")(
+  {
+    kind: SelfImprovement.ArtifactKind.pipe(optional),
+    status: SelfImprovementLifecycle.ArtifactStatus.pipe(optional),
+    namePrefix: Schema.NonEmptyString.pipe(optional),
+    limit: PageLimit,
+    cursor: Cursor.pipe(optional),
+  },
+) {}
 export interface ListArtifactsResponse extends Schema.Schema.Type<typeof ListArtifactsResponse> {}
 export const ListArtifactsResponse = page(SelfImprovementLifecycle.Artifact).annotate({
   identifier: "SelfImprovementApi.ListArtifactsResponse",
@@ -232,13 +234,15 @@ export interface ListVersionsResponse extends Schema.Schema.Type<typeof ListVers
 export const ListVersionsResponse = page(SelfImprovementLifecycle.ArtifactVersion).annotate({
   identifier: "SelfImprovementApi.ListVersionsResponse",
 })
-export class CreateVersionRequest extends Schema.Class<CreateVersionRequest>("SelfImprovementApi.CreateVersionRequest")({
-  artifactID: SelfImprovementLifecycle.ArtifactID,
-  proposalBytes: Schema.Uint8ArrayFromBase64,
-  behaviorClass: SelfImprovementLifecycle.BehaviorClass,
-  capabilityManifest: SelfImprovementLifecycle.CapabilityManifest,
-  expectedRevision: SelfImprovementLifecycle.Revision,
-}) {}
+export class CreateVersionRequest extends Schema.Class<CreateVersionRequest>("SelfImprovementApi.CreateVersionRequest")(
+  {
+    artifactID: SelfImprovementLifecycle.ArtifactID,
+    proposalBytes: Schema.Uint8ArrayFromBase64,
+    behaviorClass: SelfImprovementLifecycle.BehaviorClass,
+    capabilityManifest: SelfImprovementLifecycle.CapabilityManifest,
+    expectedRevision: SelfImprovementLifecycle.Revision,
+  },
+) {}
 export class CreateVersionResponse extends Schema.Class<CreateVersionResponse>(
   "SelfImprovementApi.CreateVersionResponse",
 )({
@@ -374,12 +378,14 @@ export class DecideMetricRunResponse extends Schema.Class<DecideMetricRunRespons
   "SelfImprovementApi.DecideMetricRunResponse",
 )(DecideMetricRunResponseFields) {}
 
-export class ListBaselinesRequest extends Schema.Class<ListBaselinesRequest>("SelfImprovementApi.ListBaselinesRequest")({
-  workload: SelfImprovementEvaluation.Workload.pipe(optional),
-  suiteRevision: RevisionFromString.pipe(optional),
-  limit: PageLimit,
-  cursor: Cursor.pipe(optional),
-}) {}
+export class ListBaselinesRequest extends Schema.Class<ListBaselinesRequest>("SelfImprovementApi.ListBaselinesRequest")(
+  {
+    workload: SelfImprovementEvaluation.Workload.pipe(optional),
+    suiteRevision: RevisionFromString.pipe(optional),
+    limit: PageLimit,
+    cursor: Cursor.pipe(optional),
+  },
+) {}
 export interface ListBaselinesResponse extends Schema.Schema.Type<typeof ListBaselinesResponse> {}
 export const ListBaselinesResponse = page(SelfImprovementEvaluation.Baseline).annotate({
   identifier: "SelfImprovementApi.ListBaselinesResponse",
@@ -459,15 +465,15 @@ export interface ListTransitionsResponse extends Schema.Schema.Type<typeof ListT
 export const ListTransitionsResponse = page(SelfImprovementLifecycle.StageTransition).annotate({
   identifier: "SelfImprovementApi.ListTransitionsResponse",
 })
-export class ListApprovalsRequest extends Schema.Class<ListApprovalsRequest>(
-  "SelfImprovementApi.ListApprovalsRequest",
-)({
-  artifactID: SelfImprovementLifecycle.ArtifactID.pipe(optional),
-  versionID: SelfImprovementLifecycle.ArtifactVersionID.pipe(optional),
-  approverID: SelfImprovementLifecycle.PrincipalID.pipe(optional),
-  limit: PageLimit,
-  cursor: Cursor.pipe(optional),
-}) {}
+export class ListApprovalsRequest extends Schema.Class<ListApprovalsRequest>("SelfImprovementApi.ListApprovalsRequest")(
+  {
+    artifactID: SelfImprovementLifecycle.ArtifactID.pipe(optional),
+    versionID: SelfImprovementLifecycle.ArtifactVersionID.pipe(optional),
+    approverID: SelfImprovementLifecycle.PrincipalID.pipe(optional),
+    limit: PageLimit,
+    cursor: Cursor.pipe(optional),
+  },
+) {}
 export interface ListApprovalsResponse extends Schema.Schema.Type<typeof ListApprovalsResponse> {}
 export const ListApprovalsResponse = page(SelfImprovementLifecycle.Approval).annotate({
   identifier: "SelfImprovementApi.ListApprovalsResponse",
@@ -486,9 +492,7 @@ const ContextEvidence = Schema.Union([
   Schema.Struct({ type: Schema.Literal("outbox"), value: SelfImprovementLearning.ContextOutbox }),
   Schema.Struct({ type: Schema.Literal("selection"), value: SelfImprovementLearning.ContextSelectionEvidence }),
 ]).pipe(Schema.toTaggedUnion("type"))
-export class ContextEvidenceView extends Schema.Class<ContextEvidenceView>(
-  "SelfImprovementApi.ContextEvidenceView",
-)({
+export class ContextEvidenceView extends Schema.Class<ContextEvidenceView>("SelfImprovementApi.ContextEvidenceView")({
   cursorID: Schema.NonEmptyString,
   createdAt: SelfImprovementLifecycle.TimestampMillis,
   evidence: ContextEvidence,
@@ -697,12 +701,7 @@ export const PrivateApiOperations = {
     headers: MutationHeaders,
     request: CreateArtifactRequest,
     response: CreateArtifactResponse,
-    errors: [
-      ApiErrors.admissionRejected,
-      ApiErrors.forbidden,
-      ApiErrors.nameReserved,
-      ApiErrors.idempotencyMismatch,
-    ],
+    errors: [ApiErrors.admissionRejected, ApiErrors.forbidden, ApiErrors.nameReserved, ApiErrors.idempotencyMismatch],
     successStatuses: [201],
     sideEffects: ["artifact-created", "draft-version-created", "transition-appended", "audit-appended"],
     mutation: true,
@@ -802,12 +801,7 @@ export const PrivateApiOperations = {
       ApiErrors.contextUnavailable,
     ],
     successStatuses: [200, 202],
-    sideEffects: [
-      "terminal-intent-recorded",
-      "context-removal-requested",
-      "transition-appended",
-      "audit-appended",
-    ],
+    sideEffects: ["terminal-intent-recorded", "context-removal-requested", "transition-appended", "audit-appended"],
     mutation: true,
   },
   tombstoneArtifact: {
