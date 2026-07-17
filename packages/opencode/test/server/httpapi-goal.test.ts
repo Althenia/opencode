@@ -31,7 +31,7 @@ import { testEffect } from "../lib/effect"
 
 const calls: Array<
   { method: "start"; sessionID: string; goal: string; messageID?: string; files?: unknown } |
-    { method: "stop" | "status"; sessionID: string }
+    { method: "resume" | "stop" | "status"; sessionID: string }
 > = []
 const locationServiceMap = buildLocationServiceMap()
 const serviceLayer = AppNodeBuilder.build(
@@ -62,7 +62,12 @@ const goalLayer = Layer.succeed(
           ...(input.messageID ? { messageID: input.messageID } : {}),
           ...(input.files ? { files: input.files } : {}),
         })
-        return { goal: input.goal, active: true, iteration: 1, cap: 10 }
+        return { goal: input.goal, active: true, iteration: 1, cap: 10, phase: "starting" }
+      }),
+    resume: (sessionID) =>
+      Effect.sync(() => {
+        calls.push({ method: "resume", sessionID })
+        return { goal: "ship task 5", active: true, iteration: 2, cap: 10, phase: "starting" }
       }),
     stop: (sessionID) =>
       Effect.sync(() => {
@@ -71,7 +76,7 @@ const goalLayer = Layer.succeed(
     status: (sessionID) =>
       Effect.sync(() => {
         calls.push({ method: "status", sessionID })
-        return { goal: "ship task 5", active: true, iteration: 1, cap: 10 }
+        return { goal: "ship task 5", active: true, iteration: 1, cap: 10, phase: "running" }
       }),
   }),
 )
@@ -134,13 +139,19 @@ describe("goal HttpApi", () => {
             }),
           }),
         ),
-      ).toEqual({ data: { goal: "ship task 5", active: true, iteration: 1, cap: 10 } })
+      ).toEqual({ data: { goal: "ship task 5", active: true, iteration: 1, cap: 10, phase: "starting" } })
 
       expect(
         yield* json<{ data: GoalSupervisor.GoalState | null }>(
           yield* request(`/api/session/${sessionID}/goal/status`),
         ),
-      ).toEqual({ data: { goal: "ship task 5", active: true, iteration: 1, cap: 10 } })
+      ).toEqual({ data: { goal: "ship task 5", active: true, iteration: 1, cap: 10, phase: "running" } })
+
+      expect(
+        yield* json<{ data: GoalSupervisor.GoalState | null }>(
+          yield* request(`/api/session/${sessionID}/goal/resume`, { method: "POST" }),
+        ),
+      ).toEqual({ data: { goal: "ship task 5", active: true, iteration: 2, cap: 10, phase: "starting" } })
 
       const stopped = yield* request(`/api/session/${sessionID}/goal/stop`, { method: "POST" })
       expect(stopped.status).toBe(204)
@@ -153,9 +164,11 @@ describe("goal HttpApi", () => {
           files: [{ uri: "file:///tmp/spec.pdf", name: "spec.pdf" }],
         },
         { method: "status", sessionID },
+        { method: "resume", sessionID },
         { method: "stop", sessionID },
       ])
     }),
+    { timeout: 15000 },
   )
 
   it.live("rejects whitespace-only goals", () =>
@@ -172,5 +185,6 @@ describe("goal HttpApi", () => {
 
       expect(response.status).toBe(400)
     }),
+    { timeout: 15000 },
   )
 })

@@ -13,17 +13,21 @@ import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { GoalTable } from "./sql"
 import { PromptInput } from "@opencode-ai/schema/prompt-input"
+import { SessionTodo } from "./todo"
 
 export const GOAL_MAX_ITERATIONS = 25
 const EVIDENCE_LIMIT = 1_000
 
 type DatabaseService = Database.Interface["db"]
 
+export type GoalPhase = "starting" | "running" | "stalled"
+
 export interface GoalState {
   readonly goal: string
   readonly active: boolean
   readonly iteration: number
   readonly cap: number
+  readonly phase: GoalPhase
 }
 
 export interface StartInput {
@@ -51,6 +55,7 @@ type Turn = SupervisorPrompt | { readonly kind: "external"; readonly revision: n
 
 export interface Interface {
   readonly start: (input: StartInput) => Effect.Effect<GoalState, PromptError>
+  readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<GoalState | undefined, PromptError>
   readonly stop: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly status: (sessionID: SessionSchema.ID) => Effect.Effect<GoalState | undefined>
 }
@@ -67,6 +72,8 @@ type ActiveGoal = {
   revision: number
   readonly scope: Scope.Closeable
   readonly supervisorPrompts: Map<SessionMessage.ID, SupervisorPrompt>
+  activeAssistantMessageID?: SessionMessage.ID
+  attached: boolean
 }
 
 export const make = Effect.gen(function* () {
@@ -115,7 +122,7 @@ export const make = Effect.gen(function* () {
   const status: Interface["status"] = Effect.fn("GoalSupervisor.status")((sessionID) =>
     Effect.sync(() => {
       const active = goals.get(sessionID)
-      return active && !active.failed ? snapshot(active.state) : undefined
+      return active ? snapshot(active.state) : undefined
     }),
   )
 
@@ -166,6 +173,7 @@ export const make = Effect.gen(function* () {
       active.failedVerification && `Failed verification: ${active.failedVerification}`,
       "Inspect the current tool and test evidence in the transcript before continuing.",
       "Use todowrite to maintain a goal-oriented task list: derive remaining work from the goal, latest user instructions, and current evidence; update statuses as work completes; execute the highest-priority unblocked item.",
+      "Every todowrite call while supervising this Goal must include the concise effective goal in the goal field.",
       "Before starting or delegating work, use todowrite to mark the matching item in_progress and keep future work pending.",
       "When a subagent is implementing, testing, or reviewing an item, keep its parent todo in_progress until the subagent result is reviewed and accepted; do not advance the current target to later work early.",
       "Handle ordinary approval and clarification autonomously using best judgment. Ask the user only for a configured permission request, explicit consent before a destructive operation, or an irrecoverable failure or blocker that cannot be resolved from the current context.",
@@ -193,6 +201,9 @@ export const make = Effect.gen(function* () {
 
   const isQuestionAsked = (event: EventV2.Payload): event is EventV2.Payload<typeof QuestionV2.Event.Asked> =>
     event.type === QuestionV2.Event.Asked.type
+
+  const isTodoUpdated = (event: EventV2.Payload): event is EventV2.Payload<typeof SessionTodo.Event.Updated> =>
+    event.type === SessionTodo.Event.Updated.type
 
   const prompt = Effect.fn("GoalSupervisor.prompt")(function* (
     sessionID: SessionSchema.ID,
@@ -303,6 +314,8 @@ export const make = Effect.gen(function* () {
         seenAssistantMessages.add(event.data.assistantMessageID)
         if (!pendingTurn) continue
         activeAssistantMessageID = event.data.assistantMessageID
+        active.activeAssistantMessageID = event.data.assistantMessageID
+        active.state = { ...active.state, phase: "running" }
         activeTurn = pendingTurn
         pendingTurn = undefined
         continue
@@ -312,6 +325,7 @@ export const make = Effect.gen(function* () {
         if (activeAssistantMessageID !== event.data.assistantMessageID) continue
         const failedTurn = activeTurn
         activeAssistantMessageID = undefined
+        active.activeAssistantMessageID = undefined
         activeTurn = undefined
         if (
           pendingExternal.size === 0 &&
@@ -320,8 +334,8 @@ export const make = Effect.gen(function* () {
           failedTurn.revision !== active.revision
         )
           continue
-        yield* retire(sessionID, owner, true)
-        return
+        active.state = { ...active.state, phase: "stalled" }
+        continue
       }
 
       if (
@@ -333,6 +347,7 @@ export const make = Effect.gen(function* () {
         continue
       const completedTurn = activeTurn
       activeAssistantMessageID = undefined
+      active.activeAssistantMessageID = undefined
       activeTurn = undefined
       if (completedTurn.kind !== "external" && completedTurn.revision !== active.revision) continue
 
@@ -372,15 +387,71 @@ export const make = Effect.gen(function* () {
     }),
   )
 
+  const attach = Effect.fn("GoalSupervisor.attach")(function* (sessionID: SessionSchema.ID, active: ActiveGoal) {
+    if (active.attached || goals.get(sessionID) !== active) return
+    active.attached = true
+    const todos = yield* events.listen((event) => {
+      if (
+        !isTodoUpdated(event) ||
+        event.data.sessionID !== sessionID ||
+        !event.data.goal ||
+        event.data.assistantMessageID !== active.activeAssistantMessageID ||
+        goals.get(sessionID) !== active
+      )
+        return Effect.void
+      return setState(sessionID, active, (state) => ({ ...state, goal: event.data.goal! })).pipe(
+        Effect.andThen(persistActive(sessionID, active)),
+      )
+    })
+    yield* Scope.addFinalizer(active.scope, todos)
+    const queue = yield* Queue.unbounded<GoalEvent>()
+    const subscription = yield* events
+      .all()
+      .pipe(
+        Stream.filter((event): event is GoalEvent => isGoalEvent(event) && event.data.sessionID === sessionID),
+        Stream.runForEach((event) => Queue.offer(queue, event)),
+        Effect.forkIn(active.scope, { startImmediately: true }),
+      )
+    yield* run(sessionID, active, queue).pipe(
+      Effect.ensuring(Fiber.interrupt(subscription)),
+      Effect.catch(() => Effect.void),
+      Effect.forkIn(active.scope),
+    )
+  })
+
+  const resume: Interface["resume"] = Effect.fn("GoalSupervisor.resume")(function* (sessionID) {
+    const active = goals.get(sessionID)
+    if (!active || !active.state.active) return
+    if (active.state.phase !== "stalled") return snapshot(active.state)
+    active.state = { ...active.state, phase: "starting" }
+    yield* attach(sessionID, active)
+    const started = yield* continueGoal(sessionID, active).pipe(
+      Effect.catch((error: PromptError) =>
+        Effect.sync(() => {
+          if (goals.get(sessionID) === active) active.state = { ...active.state, phase: "stalled" }
+        }).pipe(Effect.andThen(Effect.fail(error))),
+      ),
+    )
+    if (!started) return snapshot(active.state)
+    return snapshot(active.state)
+  })
+
   const start: Interface["start"] = Effect.fn("GoalSupervisor.start")(function* (input) {
     yield* stop(input.sessionID)
-    const state = { goal: input.goal, active: true, iteration: 0, cap: input.cap ?? GOAL_MAX_ITERATIONS }
+    const state = {
+      goal: input.goal,
+      active: true,
+      iteration: 0,
+      cap: input.cap ?? GOAL_MAX_ITERATIONS,
+      phase: "starting" as const,
+    }
     const active: ActiveGoal = {
       state,
       failed: false,
       revision: 0,
       scope: yield* Scope.fork(scope),
       supervisorPrompts: new Map(),
+      attached: false,
     }
     goals.set(input.sessionID, active)
     yield* persistGoal(input.sessionID, state)
@@ -416,16 +487,7 @@ export const make = Effect.gen(function* () {
       )
     })
     yield* Scope.addFinalizer(active.scope, questions)
-    const queue = yield* Queue.unbounded<GoalEvent>()
-    const subscription = yield* events
-      .all()
-      .pipe(
-        Stream.filter(
-          (event): event is GoalEvent => isGoalEvent(event) && event.data.sessionID === input.sessionID,
-        ),
-        Stream.runForEach((event) => Queue.offer(queue, event)),
-        Effect.forkIn(active.scope, { startImmediately: true }),
-      )
+    yield* attach(input.sessionID, active)
     if (goals.get(input.sessionID) !== active) return snapshot({ ...active.state, active: false })
     const started = yield* continueGoal(input.sessionID, active, {
       text: input.goal,
@@ -440,17 +502,6 @@ export const make = Effect.gen(function* () {
       ),
     )
     if (goals.get(input.sessionID) !== active) return snapshot({ ...active.state, active: false })
-    if (started)
-      yield* run(input.sessionID, active, queue).pipe(
-        Effect.ensuring(Fiber.interrupt(subscription)),
-        Effect.catch(() =>
-          Effect.sync(() => {
-            if (goals.get(input.sessionID) === active) goals.delete(input.sessionID)
-          }),
-        ),
-        Effect.forkIn(active.scope),
-      )
-    if (!started) yield* Fiber.interrupt(subscription)
     if (goals.get(input.sessionID) !== active) return snapshot({ ...active.state, active: false })
     return snapshot(active.state)
   })
@@ -478,6 +529,7 @@ export const make = Effect.gen(function* () {
         active: true,
         iteration: row.iteration,
         cap: row.cap,
+        phase: "stalled",
       }
       const recovered: ActiveGoal = {
         state,
@@ -485,6 +537,7 @@ export const make = Effect.gen(function* () {
         revision: 0,
         scope: yield* Scope.fork(scope),
         supervisorPrompts: new Map(),
+        attached: false,
       }
       goals.set(row.session_id as SessionSchema.ID, recovered)
     }
@@ -497,7 +550,7 @@ export const make = Effect.gen(function* () {
     }
   }
 
-  return Service.of({ start, stop, status })
+  return Service.of({ start, resume, stop, status })
 })
 
 export const layer = Layer.effect(Service, make)

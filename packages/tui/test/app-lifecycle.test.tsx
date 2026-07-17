@@ -390,7 +390,10 @@ test("goal palette stop command does not create a session on the home route", as
   }
 })
 
-test("Goal mode entry shows one Stop action when active", async () => {
+test.each([
+  { phase: "running" as const, title: "Stop goal mode", path: "/api/session/dummy/goal/stop" },
+  { phase: "stalled" as const, title: "Resume goal mode", path: "/api/session/dummy/goal/resume" },
+])("Goal mode entry shows one $title action for a $phase Goal", async ({ phase, title, path }) => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -405,7 +408,7 @@ test("Goal mode entry shows one Stop action when active", async () => {
     version: "0.0.0-test",
     time: { created: 0, updated: 0 },
   }
-  let stopped = false
+  let acted = false
   const calls = createFetch((url) => {
     if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
     if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
@@ -414,10 +417,13 @@ test("Goal mode entry shows one Stop action when active", async () => {
     if (url.pathname === "/session/dummy/message") return json([])
     if (url.pathname === "/session/dummy/todo" || url.pathname === "/session/dummy/diff") return json([])
     if (url.pathname === "/api/session/dummy/goal/status") {
-      return json({ data: stopped ? null : { goal: "ship task 6", active: true, iteration: 2, cap: 7 } })
+      return json({ data: acted ? null : { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase } })
     }
-    if (url.pathname === "/api/session/dummy/goal/stop") {
-      stopped = true
+    if (url.pathname === path) {
+      acted = true
+      if (phase === "stalled") {
+        return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase: "starting" } })
+      }
       return new Response(null, { status: 204 })
     }
   }, events)
@@ -454,15 +460,15 @@ test("Goal mode entry shows one Stop action when active", async () => {
     await ready
     await captureFrame(setup, (frame) => frame.includes("Current target"))
     api?.keymap.dispatchCommand("command.palette.show")
-    const frame = await captureFrame(setup, (value) => value.includes("Stop goal mode"))
-    expect(frame.match(/Stop goal mode/g)).toHaveLength(1)
-    expect(frame).not.toContain("Start goal mode")
+    const frame = await captureFrame(setup, (value) => value.includes(title))
+    expect(frame.match(new RegExp(title, "g"))).toHaveLength(1)
+    expect(frame.match(/(?:Start|Stop|Resume) goal mode/g)).toHaveLength(1)
     api?.keymap.dispatchCommand("goal.start")
-    await waitFor(() => stopped)
+    await waitFor(() => acted)
     api?.keymap.dispatchCommand("app.exit")
     await task
 
-    expect(stopped).toBe(true)
+    expect(acted).toBe(true)
   } finally {
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
     mock.restore()

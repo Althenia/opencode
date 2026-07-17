@@ -525,7 +525,25 @@ export type SessionsGoalStartInput = {
 }
 
 export type SessionsGoalStartOutput = {
-  readonly data: { readonly goal: string; readonly active: boolean; readonly iteration: number; readonly cap: number }
+  readonly data: {
+    readonly goal: string
+    readonly active: boolean
+    readonly iteration: number
+    readonly cap: number
+    readonly phase: "starting" | "running" | "stalled"
+  }
+}["data"]
+
+export type SessionsGoalResumeInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsGoalResumeOutput = {
+  readonly data: {
+    readonly goal: string
+    readonly active: boolean
+    readonly iteration: number
+    readonly cap: number
+    readonly phase: "starting" | "running" | "stalled"
+  } | null
 }["data"]
 
 export type SessionsGoalStopInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
@@ -540,6 +558,7 @@ export type SessionsGoalStatusOutput = {
     readonly active: boolean
     readonly iteration: number
     readonly cap: number
+    readonly phase: "starting" | "running" | "stalled"
   } | null
 }["data"]
 

@@ -13,6 +13,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionTodo } from "@opencode-ai/core/session/todo"
 import { Prompt } from "@opencode-ai/core/session/prompt"
 import { it } from "./lib/effect"
 
@@ -504,11 +505,42 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts[0]?.id).toBeDefined()
       expect(fake.prompts[0]?.prompt.text).toContain("Original goal: ship task 4")
       expect(fake.prompts[0]?.prompt.text).toContain("Use todowrite to maintain a goal-oriented task list")
+      expect(fake.prompts[0]?.prompt.text).toContain("must include the concise effective goal")
       expect(fake.prompts[0]?.prompt.text).toContain(
         "keep its parent todo in_progress until the subagent result is reviewed and accepted",
       )
       expect(fake.prompts[0]?.prompt.text).toContain("do not advance the current target to later work early")
       expect(fake.prompts[0]?.prompt.text).toContain("When instructions conflict, follow the latest user instruction.")
+    }),
+  )
+
+  it.effect("accepts evaluated Goal updates only from the active assistant message", () =>
+    Effect.gen(function* () {
+      const fake = makeSession()
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* fake.promoteNext(events)
+      const assistantMessageID = yield* stepStarted(events)
+      yield* Effect.yieldNow
+      yield* events.publish(SessionTodo.Event.Updated, {
+        sessionID,
+        todos: [],
+        goal: "Ship the reconciled implementation",
+        assistantMessageID,
+      })
+      expect(yield* goals.status(sessionID)).toMatchObject({ goal: "Ship the reconciled implementation" })
+      yield* events.publish(SessionTodo.Event.Updated, {
+        sessionID,
+        todos: [],
+        goal: "Ignore stale Goal",
+        assistantMessageID: SessionMessage.ID.create(),
+      })
+      expect(yield* goals.status(sessionID)).toMatchObject({ goal: "Ship the reconciled implementation" })
     }),
   )
 
@@ -1104,8 +1136,28 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(1)
-      expect(yield* goals.status(sessionID)).toBeUndefined()
-      expect(yield* Deferred.isDone(tracked.finalized)).toBe(true)
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, phase: "stalled", goal: "finish" })
+      expect(yield* Deferred.isDone(tracked.finalized)).toBe(false)
+    }),
+  )
+
+  it.effect("resumes a stalled Goal and returns to running on the next step", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["not done"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* Effect.yieldNow
+      yield* turnFailed(events, fake)
+      yield* Effect.yieldNow
+      expect(yield* goals.resume(sessionID)).toMatchObject({ phase: "starting", iteration: 2 })
+      yield* fake.promoteNext(events)
+      yield* stepStarted(events)
+      yield* Effect.yieldNow
+      expect(yield* goals.status(sessionID)).toMatchObject({ phase: "running", iteration: 2 })
     }),
   )
 
@@ -1128,8 +1180,8 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(1)
-      expect(yield* goals.status(sessionID)).toBeUndefined()
-      expect(yield* Deferred.isDone(tracked.finalized)).toBe(true)
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, phase: "stalled", iteration: 1 })
+      expect(yield* Deferred.isDone(tracked.finalized)).toBe(false)
     }),
   )
 
@@ -1148,8 +1200,13 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(1)
-      expect(yield* goals.status(sessionID)).toBeUndefined()
-      expect(yield* Deferred.isDone(tracked.finalized)).toBe(true)
+      expect(yield* goals.status(sessionID)).toMatchObject({
+        active: true,
+        phase: "stalled",
+        iteration: 1,
+        cap: 1,
+      })
+      expect(yield* Deferred.isDone(tracked.finalized)).toBe(false)
     }),
   )
 
@@ -1198,7 +1255,7 @@ describe("GoalSupervisor", () => {
 
       expect(yield* questions.service.list()).toHaveLength(1)
       yield* goals.start({ sessionID, goal: "restart" })
-      expect(events.listenerCount()).toBe(1)
+      expect(events.listenerCount()).toBe(2)
       expect(
         yield* questions.service.ask({
           sessionID,
@@ -1215,7 +1272,7 @@ describe("GoalSupervisor", () => {
     }),
   )
 
-  it.effect("retires the question listener after a failed step", () =>
+  it.effect("keeps the question listener while stalled", () =>
     Effect.gen(function* () {
       const events = yield* makeEvents
       const questions = makeQuestions(events)
@@ -1230,14 +1287,13 @@ describe("GoalSupervisor", () => {
       yield* goals.start({ sessionID, goal: "failed" })
       yield* turnFailed(events, fake)
       yield* Effect.yieldNow
-      expect(events.listenerCount()).toBe(0)
+      expect(events.listenerCount()).toBe(2)
       const pending = yield* questions.service
         .ask({ sessionID, questions: [{ question: "Manual?", header: "State", options: [] }] })
         .pipe(Effect.forkScoped)
       yield* Effect.yieldNow
 
-      expect(yield* questions.service.list()).toHaveLength(1)
-      yield* Fiber.interrupt(pending)
+      expect(yield* Fiber.join(pending)).toEqual([["Use your best judgment from the goal and current context, then continue."]])
     }),
   )
 

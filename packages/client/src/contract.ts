@@ -40,6 +40,7 @@ export const groupNames = {
 export const endpointNames = {
   "session.messages": "list",
   "session.goal.start": "goalStart",
+  "session.goal.resume": "goalResume",
   "session.goal.stop": "goalStop",
   "session.goal.status": "goalStatus",
   "integration.connect.key": "connectKey",

@@ -3,24 +3,25 @@ import type { BoxRenderable } from "@opentui/core"
 import { Show, createMemo, createSignal, onCleanup } from "solid-js"
 import { useTheme } from "../context/theme"
 
-export function summarizeGoal(objective: string, todos: readonly Todo[]) {
+export function summarizeGoal(todos: readonly Todo[]) {
   const resolved = todos.filter((todo) => todo.status === "completed" || todo.status === "cancelled").length
   const total = todos.length
   const percentage = total === 0 ? 0 : Math.max(0, Math.min(100, Math.round((resolved / total) * 100)))
   const target =
     todos.find((todo) => todo.status === "in_progress")?.content ??
     todos.find((todo) => todo.status === "pending")?.content ??
-    objective
+    "Preparing task list"
   return { resolved, total, percentage, target }
 }
 
 export function GoalStatusBand(props: {
   objective?: string
   starting: boolean
+  phase?: "starting" | "running" | "stalled"
   todos: readonly Todo[]
 }) {
   const { theme } = useTheme()
-  const summary = createMemo(() => summarizeGoal(props.objective ?? "", props.todos))
+  const summary = createMemo(() => summarizeGoal(props.todos))
   const [barWidth, setBarWidth] = createSignal(1)
   const summaryText = createMemo(() => {
     const value = summary()
@@ -60,11 +61,16 @@ export function GoalStatusBand(props: {
         </box>
         <box height={2} overflow="hidden">
           <text fg={theme.textMuted} wrapMode="word">
-            {props.starting ? "Starting" : "Current target"} ·{" "}
-            <span style={{ fg: theme.text }}>{summary().target}</span>
+            Current goal · <span style={{ fg: theme.text }}>{props.objective}</span>
+          </text>
+        </box>
+        <box height={2} overflow="hidden">
+          <text fg={theme.textMuted} wrapMode="word">
+            Current target · <span style={{ fg: theme.text }}>{summary().target}</span>
           </text>
         </box>
         <text fg={theme.textMuted} wrapMode="none" truncate>
+          {props.starting || props.phase === "starting" ? "Starting · " : props.phase === "stalled" ? "Stalled · " : ""}
           {summaryText()}
         </text>
       </box>

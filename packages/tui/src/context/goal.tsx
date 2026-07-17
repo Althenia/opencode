@@ -10,6 +10,7 @@ export type GoalStatus = {
   active: boolean
   iteration: number
   cap: number
+  phase: "starting" | "running" | "stalled"
 }
 
 export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
@@ -47,9 +48,12 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       return route.data.type === "session" ? route.data.sessionID : undefined
     }
 
-    function current() {
-      const id = sessionID()
+    function statusFor(id = sessionID()) {
       return id ? statuses[id] : undefined
+    }
+
+    function current() {
+      return statusFor()
     }
 
     function active(sessionID: string) {
@@ -135,6 +139,14 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       setStatuses(id, undefined)
     }
 
+    async function requestResume(id: string, version: number) {
+      if (generation(id) !== version) return
+      const result = await sdk.client.sessions.goalResume({ sessionID: id })
+      if (generation(id) !== version) return
+      setStatuses(id, result ?? undefined)
+      return result ?? undefined
+    }
+
     async function requestStatus(id: string, version: number) {
       if (generation(id) !== version) return
       const result = await sdk.client.sessions.goalStatus({ sessionID: id })
@@ -184,6 +196,12 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       presentation.delete(id)
       const version = generation(id)
       return serialize(id, () => requestStop(id, version))
+    }
+
+    async function resume(id = sessionID()) {
+      if (!id) return
+      const version = generation(id)
+      return serialize(id, () => requestResume(id, version))
     }
 
     function refresh(id: string) {
@@ -261,10 +279,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       if (!id) return
       const poll = () => {
         if (presentation.has(id)) return
-        const version = generation(id)
-        return refresh(id).catch(() => {
-          if (generation(id) === version) setStatuses(id, undefined)
-        })
+        return refresh(id).catch(() => undefined)
       }
       void poll()
       const timer = setInterval(poll, 5000)
@@ -283,6 +298,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
 
     return {
       current,
+      statusFor,
       active,
       adoptHome,
       answering,
@@ -295,6 +311,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       clear,
       deselect,
       start,
+      resume,
       stop,
       status,
       takePrompted,

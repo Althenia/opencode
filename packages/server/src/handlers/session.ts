@@ -250,6 +250,32 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.goal.resume",
+        Effect.fn(function* (ctx) {
+          return {
+            data:
+              (yield* goals.resume(ctx.params.sessionID).pipe(
+                Effect.catchTag("Session.NotFoundError", (error) =>
+                  Effect.fail(
+                    new SessionNotFoundError({
+                      sessionID: error.sessionID,
+                      message: `Session not found: ${error.sessionID}`,
+                    }),
+                  ),
+                ),
+                Effect.catchTag("Session.PromptConflictError", (error) =>
+                  Effect.fail(
+                    new ConflictError({
+                      message: `Prompt message ID conflicts with an existing durable record: ${error.messageID}`,
+                      resource: error.messageID,
+                    }),
+                  ),
+                ),
+              )) ?? null,
+          }
+        }),
+      )
+      .handle(
         "session.goal.stop",
         Effect.fn(function* (ctx) {
           yield* goals.stop(ctx.params.sessionID)

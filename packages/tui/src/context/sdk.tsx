@@ -14,10 +14,12 @@ type GoalStatus = {
   readonly active: boolean
   readonly iteration: number
   readonly cap: number
+  readonly phase: "starting" | "running" | "stalled"
 }
 type ClientWithSessions = Client & {
   sessions: {
     goalStart(input: GoalStartInput): Promise<GoalStatus>
+    goalResume(input: GoalSessionInput): Promise<GoalStatus | null>
     goalStop(input: GoalSessionInput): Promise<void>
     goalStatus(input: GoalSessionInput): Promise<GoalStatus | null>
   }
@@ -72,6 +74,11 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           goalStatus: (input: GoalSessionInput) =>
             request<{ readonly data: GoalStatus | null }>(
               `/api/session/${encodeURIComponent(input.sessionID)}/goal/status`,
+            ).then((response) => response.data),
+          goalResume: (input: GoalSessionInput) =>
+            request<{ readonly data: GoalStatus | null }>(
+              `/api/session/${encodeURIComponent(input.sessionID)}/goal/resume`,
+              { method: "POST" },
             ).then((response) => response.data),
         },
       })

@@ -1,5 +1,5 @@
-import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { describe, expect, test } from "bun:test"
+import { Effect, Layer, Schema } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -75,13 +75,30 @@ const setup = Effect.gen(function* () {
     .pipe(Effect.orDie)
 })
 
-const call = (todos: ReadonlyArray<SessionTodo.Info>, id = "call-todowrite") => ({
+const call = (
+  todos: ReadonlyArray<SessionTodo.Info>,
+  input: { readonly id?: string; readonly goal?: string } = {},
+) => ({
   sessionID,
   ...toolIdentity,
-  call: { type: "tool-call" as const, id, name: TodoWriteTool.name, input: { todos } },
+  call: {
+    type: "tool-call" as const,
+    id: input.id ?? "call-todowrite",
+    name: TodoWriteTool.name,
+    input: { todos, ...(input.goal ? { goal: input.goal } : {}) },
+  },
 })
 
 describe("TodoWriteTool", () => {
+  test("trims evaluated Goal input and rejects whitespace-only values", () => {
+    const decode = Schema.decodeUnknownSync(TodoWriteTool.Input)
+    expect(decode({ todos: [], goal: "  Ship the reconciled implementation  " })).toEqual({
+      todos: [],
+      goal: "Ship the reconciled implementation",
+    })
+    expect(() => decode({ todos: [], goal: " \n " })).toThrow()
+  })
+
   it.effect("registers, approves the wildcard resource, persists todos, and returns typed output", () =>
     Effect.gen(function* () {
       yield* setup
@@ -101,6 +118,36 @@ describe("TodoWriteTool", () => {
       })
       expect(assertions).toMatchObject([{ sessionID, action: "todowrite", resources: ["*"], save: ["*"] }])
       expect(yield* service.get(sessionID)).toEqual(todoList)
+    }),
+  )
+
+  it.effect("returns and publishes an evaluated Goal with the assistant message identity", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const registry = yield* ToolRegistry.Service
+      const events = yield* EventV2.Service
+      const published = new Array<EventV2.Payload>()
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === SessionTodo.Event.Updated.type) published.push(event)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const todoList: ReadonlyArray<SessionTodo.Info> = [
+        { content: "Implement", status: "in_progress", priority: "high" },
+      ]
+      const goal = "Ship the reconciled implementation"
+
+      expect(yield* settleTool(registry, call(todoList, { goal }))).toEqual({
+        result: { type: "text", value: JSON.stringify({ todos: todoList, goal }, null, 2) },
+        output: {
+          structured: { todos: todoList, goal },
+          content: [{ type: "text", text: JSON.stringify({ todos: todoList, goal }, null, 2) }],
+        },
+      })
+      expect(published.map((event) => event.data)).toEqual([
+        { sessionID, todos: todoList, goal, assistantMessageID: toolIdentity.assistantMessageID },
+      ])
     }),
   )
 

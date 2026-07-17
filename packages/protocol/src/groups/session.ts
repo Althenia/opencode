@@ -91,6 +91,7 @@ const GoalState = Schema.Struct({
   active: Schema.Boolean,
   iteration: NonNegativeInt,
   cap: PositiveInt,
+  phase: Schema.Literals(["starting", "running", "stalled"]),
 }).annotate({ identifier: "SessionGoalState" })
 
 export const SessionHistoryQuery = Schema.Struct({
@@ -276,6 +277,21 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             identifier: "v2.session.goal.start",
             summary: "Start session goal",
             description: "Start supervised goal execution for a session.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.goal.resume", "/api/session/:sessionID/goal/resume", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Schema.NullOr(GoalState) }),
+        error: [ConflictError, SessionNotFoundError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.goal.resume",
+            summary: "Resume session goal",
+            description: "Resume stalled supervised goal execution for a session.",
           }),
         ),
     )

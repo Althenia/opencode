@@ -7,17 +7,23 @@ import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
+import { SessionMessage } from "./message"
 import { TodoTable } from "./sql"
 
 export const Info = SessionTodo.Info
 export type Info = typeof Info.Type
+export const Goal = SessionTodo.Goal
 export const Event = SessionTodo.Event
 
+export interface UpdateInput {
+  readonly sessionID: SessionSchema.ID
+  readonly todos: ReadonlyArray<Info>
+  readonly goal?: string
+  readonly assistantMessageID?: SessionMessage.ID
+}
+
 export interface Interface {
-  readonly update: (input: {
-    readonly sessionID: SessionSchema.ID
-    readonly todos: ReadonlyArray<Info>
-  }) => Effect.Effect<void>
+  readonly update: (input: UpdateInput) => Effect.Effect<void>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<Info>>
 }
 
@@ -29,10 +35,7 @@ const layer = Layer.effect(
     const { db } = yield* Database.Service
     const events = yield* EventV2.Service
 
-    const update = Effect.fn("SessionTodo.update")(function* (input: {
-      readonly sessionID: SessionSchema.ID
-      readonly todos: ReadonlyArray<Info>
-    }) {
+    const update = Effect.fn("SessionTodo.update")(function* (input: UpdateInput) {
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {

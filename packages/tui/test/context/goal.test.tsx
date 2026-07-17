@@ -105,6 +105,55 @@ test("the first accepted home Goal prompt creates one session and starts Goal wi
   }
 })
 
+test("Home Goal waits for session hydration before starting", async () => {
+  let resolveHydration!: (response: Response) => void
+  let starts = 0
+  const session = {
+    id: "session-hydration",
+    title: "Home Goal",
+    slug: "session-hydration",
+    projectID: "project-test",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
+  const app = await mountGoalPrompt(
+    (url, request) => {
+      if (url.pathname === "/session" && request?.method === "POST") return json(session)
+      if (url.pathname === "/session/session-hydration") {
+        return new Promise<Response>((resolve) => {
+          resolveHydration = resolve
+        })
+      }
+      if (url.pathname === "/api/session/session-hydration/goal/start") {
+        starts++
+        return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7, phase: "starting" } })
+      }
+    },
+    { home: true },
+  )
+
+  try {
+    await waitFor(() => !!app.promptRef)
+    await waitFor(() => !!app.local.model.current())
+    app.promptRef?.set({ input: "/goal ship task 6", parts: [] })
+    app.promptRef?.submit()
+    await waitFor(
+      () =>
+        resolveHydration !== undefined &&
+        app.route.data.type === "session" &&
+        app.route.data.sessionID === "session-hydration",
+    )
+
+    expect(starts).toBe(0)
+    resolveHydration(json(session))
+    await waitFor(() => starts === 1)
+  } finally {
+    resolveHydration?.(json(session))
+    app.renderer.destroy()
+  }
+})
+
 test("Home Goal shows Starting and clears input before goalStart resolves", async () => {
   let resolveStart!: (response: Response) => void
   const app = await mountGoalPrompt(
@@ -140,11 +189,17 @@ test("Home Goal shows Starting and clears input before goalStart resolves", asyn
     expect(app.route.data).toMatchObject({ type: "session", sessionID: "session-home" })
     const frame = await captureFrame(
       app,
-      (value) => value.includes("Starting · ship task 6") && value.includes("0 of 0 resolved · 0%"),
+      (value) =>
+        value.includes("Current goal · ship task 6") &&
+        value.includes("Current target · Preparing task list") &&
+        value.includes("Starting · 0 of 0 resolved · 0%"),
     )
-    expect(frame).not.toContain("Goal ·")
-    expect(frame).toContain("Starting · ship task 6")
-    expect(frame).toContain("0 of 0 resolved · 0%")
+    expect(frame.indexOf("Current goal · ship task 6")).toBeLessThan(
+      frame.indexOf("Current target · Preparing task list"),
+    )
+    expect(frame.indexOf("Current target · Preparing task list")).toBeLessThan(
+      frame.indexOf("Starting · 0 of 0 resolved · 0%"),
+    )
 
     resolveStart(json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } }))
     await waitFor(() => app.goal.active("session-home"))
@@ -1463,6 +1518,55 @@ test("status polling records active goal status", async () => {
   }
 })
 
+test("transient polling failure retains the last Goal status", async () => {
+  let statusCalls = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname !== "/api/session/session-test/goal/status") return
+    statusCalls++
+    if (statusCalls === 1) {
+      return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase: "running" } })
+    }
+    throw new Error("temporary status failure")
+  })
+
+  try {
+    await waitFor(() => app.goal.current()?.phase === "running")
+    app.route.navigate({ type: "home" })
+    await app.renderOnce()
+    app.route.navigate({ type: "session", sessionID: "session-test" })
+    await app.renderOnce()
+    await waitFor(() => statusCalls === 2)
+    await Bun.sleep(0)
+
+    expect(app.goal.current()).toMatchObject({ goal: "ship task 6", phase: "running" })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("resume requests a stalled Goal and stores the returned phase", async () => {
+  let resumes = 0
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/status") {
+      return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase: "stalled" } })
+    }
+    if (url.pathname === "/api/session/session-test/goal/resume") {
+      resumes++
+      return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase: "starting" } })
+    }
+  })
+
+  try {
+    await app.goal.status()
+    await app.goal.resume()
+
+    expect(resumes).toBe(1)
+    expect(app.goal.current()).toMatchObject({ goal: "ship task 6", active: true, phase: "starting" })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("inactive exhausted Goal status stays persisted without rendering the band", async () => {
   const app = await mountGoalPrompt((url) => {
     if (url.pathname === "/api/session/session-test/goal/status") {
@@ -1574,12 +1678,18 @@ test("replacement Goal starts at zero without old todos", async () => {
     await waitFor(() => resolveReplacement !== undefined)
     const frame = await captureFrame(
       app,
-      (value) => value.includes("Starting · new objective") && value.includes("0 of 0 resolved · 0%"),
+      (value) =>
+        value.includes("Current goal · new objective") &&
+        value.includes("Current target · Preparing task list") &&
+        value.includes("Starting · 0 of 0 resolved · 0%"),
     )
 
-    expect(frame).not.toContain("Goal ·")
-    expect(frame).toContain("Starting · new objective")
-    expect(frame).toContain("0 of 0 resolved · 0%")
+    expect(frame.indexOf("Current goal · new objective")).toBeLessThan(
+      frame.indexOf("Current target · Preparing task list"),
+    )
+    expect(frame.indexOf("Current target · Preparing task list")).toBeLessThan(
+      frame.indexOf("Starting · 0 of 0 resolved · 0%"),
+    )
     expect(frame).not.toContain("Old pending")
 
     resolveReplacement(json({ data: { goal: "new objective", active: true, iteration: 1, cap: 7 } }))
@@ -1643,8 +1753,8 @@ test("long Goal keeps prompt controls visible at narrow width", async () => {
 
     expect(frame).toContain("model")
     expect(frame).toContain("controls")
-    expect(frame).not.toContain("Goal ·")
-    expect(frame).toContain("Current target · ship a deliberately long goal")
+    expect(frame).toContain("Current goal · ship a deliberately long goal")
+    expect(frame).toContain("Current target · Preparing task list")
   } finally {
     app.renderer.destroy()
   }
@@ -1669,6 +1779,7 @@ test("Goal band stays compact with long content at narrow width", async () => {
     const rows = frame.split("\n")
     const barRows = rows.filter((row) => row.includes("━"))
     const barRow = rows.findIndex((row) => row.includes("━"))
+    const goalRow = rows.findIndex((row) => row.includes("Current goal"))
     const targetRow = rows.findIndex((row) => row.includes("Current target"))
     const summaryRows = rows.filter((row) => row.includes("0/1 · 0%"))
     const resolvedRow = rows.findIndex((row) => row.includes("0/1 · 0%"))
@@ -1677,10 +1788,10 @@ test("Goal band stays compact with long content at narrow width", async () => {
     expect(barRows[0]?.match(/━/g)).toHaveLength(19)
     expect(summaryRows).toHaveLength(1)
     expect(barRow).toBeGreaterThanOrEqual(0)
-    expect(targetRow).toBeGreaterThan(barRow)
+    expect(goalRow).toBeGreaterThan(barRow)
+    expect(targetRow).toBeGreaterThan(goalRow)
     expect(resolvedRow).toBeGreaterThan(targetRow)
-    expect(resolvedRow - barRow).toBeLessThanOrEqual(3)
-    expect(frame).not.toContain("Goal ·")
+    expect(resolvedRow - barRow).toBeLessThanOrEqual(5)
     expect(frame).toContain("model")
 
     const digitTodos = [
@@ -1705,6 +1816,34 @@ test("Goal band stays compact with long content at narrow width", async () => {
     expect(nineRows.filter((row) => row.includes("1/11 · 9%"))).toHaveLength(1)
     expect(tenRows.filter((row) => row.includes("1/10 · 10%"))).toHaveLength(1)
     expect(tenSummaryRow).toBe(nineSummaryRow)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("stalled Goal renders goal, target, and phase summary in order", async () => {
+  const app = await mountGoalPrompt((url) => {
+    if (url.pathname === "/api/session/session-test/goal/status") {
+      return json({ data: { goal: "recover the stalled task", active: true, iteration: 2, cap: 7, phase: "stalled" } })
+    }
+  })
+
+  try {
+    await app.goal.status()
+    const frame = await captureFrame(
+      app,
+      (value) =>
+        value.includes("Current goal · recover the stalled task") &&
+        value.includes("Current target · Preparing task list") &&
+        value.includes("Stalled · 0 of 0 resolved · 0%"),
+    )
+
+    expect(frame.indexOf("Current goal · recover the stalled task")).toBeLessThan(
+      frame.indexOf("Current target · Preparing task list"),
+    )
+    expect(frame.indexOf("Current target · Preparing task list")).toBeLessThan(
+      frame.indexOf("Stalled · 0 of 0 resolved · 0%"),
+    )
   } finally {
     app.renderer.destroy()
   }
@@ -1819,8 +1958,26 @@ async function mountGoalPrompt(
   const fetch = (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input)
     const url = new URL(request.url)
+    if (
+      options.home &&
+      request.method === "GET" &&
+      /^\/session\/[^/]+\/(message|todo|diff)$/.test(url.pathname)
+    )
+      return json([])
     const overridden = await handler(url, request.clone())
     if (overridden) return overridden
+    const sessionID = url.pathname.match(/^\/session\/([^/]+)$/)?.[1]
+    if (options.home && sessionID && request.method === "GET") {
+      return json({
+        id: sessionID,
+        title: "Goal session",
+        slug: sessionID,
+        projectID: "project-test",
+        directory,
+        version: "0.0.0-test",
+        time: { created: 0, updated: 0 },
+      })
+    }
     if (url.pathname === "/api/session/session-test/goal/status") return json({ data: null })
     return base.fetch(request)
   }) as typeof globalThis.fetch

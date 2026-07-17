@@ -13,14 +13,18 @@ export const name = "todowrite"
 
 export const Input = Schema.Struct({
   todos: Schema.Array(SessionTodo.Info).annotate({ description: "The updated todo list" }),
+  goal: SessionTodo.Goal.annotate({
+    description: "The concise effective Goal after reconciling current session context",
+  }).pipe(Schema.optional),
 })
 
 export const Output = Schema.Struct({
   todos: Schema.Array(SessionTodo.Info),
+  goal: SessionTodo.Goal.pipe(Schema.optional),
 })
 export type Output = typeof Output.Type
 
-export const toModelOutput = (output: Output) => JSON.stringify(output.todos, null, 2)
+export const toModelOutput = (output: Output) => JSON.stringify(output.goal ? output : output.todos, null, 2)
 
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -46,8 +50,12 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
-              yield* todos.update({ sessionID: context.sessionID, todos: input.todos })
-              return { todos: input.todos }
+              yield* todos.update({
+                sessionID: context.sessionID,
+                todos: input.todos,
+                ...(input.goal ? { goal: input.goal, assistantMessageID: context.assistantMessageID } : {}),
+              })
+              return { todos: input.todos, ...(input.goal ? { goal: input.goal } : {}) }
             }).pipe(Effect.mapError(() => new ToolFailure({ message: "Unable to update todos" }))),
         }),
       })

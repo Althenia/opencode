@@ -23,6 +23,8 @@ import type {
   SessionsWaitOutput,
   SessionsGoalStartInput,
   SessionsGoalStartOutput,
+  SessionsGoalResumeInput,
+  SessionsGoalResumeOutput,
   SessionsGoalStopInput,
   SessionsGoalStopOutput,
   SessionsGoalStatusInput,
@@ -413,6 +415,17 @@ export function make(options: ClientOptions) {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/start`,
             body: { goal: input["goal"], messageID: input["messageID"], files: input["files"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      goalResume: (input: SessionsGoalResumeInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsGoalResumeOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/goal/resume`,
             successStatus: 200,
             declaredStatuses: [409, 404, 400, 401],
             empty: false,

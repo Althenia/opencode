@@ -360,7 +360,14 @@ export function Prompt(props: PromptProps) {
     return true
   }
 
-  const goalAnswering = () => Boolean(props.sessionID && goal.answering(props.sessionID))
+  const goalAction = () => {
+    if (!props.sessionID) return "start"
+    if (goal.starting(props.sessionID)) return "stop"
+    const status = goal.statusFor(props.sessionID)
+    if (!status?.active) return "start"
+    if (status.phase === "stalled") return "resume"
+    return "stop"
+  }
 
   const promptCommands = createMemo(() =>
     [
@@ -389,11 +396,16 @@ export function Prompt(props: PromptProps) {
       },
       {
         name: "goal.start",
-        title: goalAnswering() ? "Stop goal mode" : "Start goal mode",
+        title: goalAction() === "resume" ? "Resume goal mode" : goalAction() === "stop" ? "Stop goal mode" : "Start goal mode",
         category: "Session",
         slashName: "goal",
         run: async () => {
-          if (props.sessionID && goal.answering(props.sessionID)) {
+          if (props.sessionID && goalAction() === "resume") {
+            await goal.resume(props.sessionID)
+            dialog.clear()
+            return
+          }
+          if (props.sessionID && goalAction() === "stop") {
             await goal.stop(props.sessionID)
             goal.deselect(props.sessionID)
             dialog.clear()
@@ -1186,9 +1198,32 @@ export function Prompt(props: PromptProps) {
             : {}),
         }))
       const ownsHome = !createdSession || (homeOwnership !== undefined && goal.adoptHome(sessionID, homeOwnership))
+      if (createdSession && !ownsHome) return false
+      if (createdSession && ownsHome) {
+        const goalRevision = goal.revision(sessionID)
+        const goalStatus = goal.statusFor(sessionID)
+        route.navigate({ type: "session", sessionID })
+        try {
+          await sync.session.sync(sessionID)
+        } catch (error) {
+          if (goal.revision(sessionID) === goalRevision && goal.statusFor(sessionID) === goalStatus) {
+            goal.clear(sessionID)
+            restoreGoalPrompt(sessionID)
+          }
+          toast.show({ title: "Failed to prepare Goal", message: errorMessage(error), variant: "error" })
+          return false
+        }
+        if (
+          route.data.type !== "session" ||
+          route.data.sessionID !== sessionID ||
+          promptRef.submissionRevision !== submissionRevision ||
+          goal.revision(sessionID) !== goalRevision ||
+          goal.statusFor(sessionID) !== goalStatus
+        )
+          return false
+      }
       const start = goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
       const startRevision = goal.revision(sessionID)
-      if (createdSession && ownsHome) route.navigate({ type: "session", sessionID })
 
       try {
         await start
@@ -1487,7 +1522,12 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
-        <GoalStatusBand objective={goalObjective()} starting={Boolean(goalPending())} todos={goalTodos()} />
+        <GoalStatusBand
+          objective={goalObjective()}
+          starting={Boolean(goalPending())}
+          phase={goal.statusFor(props.sessionID)?.phase}
+          todos={goalTodos()}
+        />
         <box
           width="100%"
           border={["left"]}
