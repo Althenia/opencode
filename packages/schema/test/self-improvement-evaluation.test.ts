@@ -331,6 +331,45 @@ test("evaluation runs enforce ordered windows and state-specific decision fields
   }
 })
 
+test("evaluation records remain constructable checked classes", () => {
+  const run = {
+    id: SelfImprovementLifecycle.EvaluationRunID.create(),
+    locationID,
+    versionID: SelfImprovementLifecycle.ArtifactVersionID.create(),
+    stage: "shadow",
+    workload: "typescript",
+    workloadRevision: 1,
+    suiteID: SelfImprovementLifecycle.SuiteID.create(),
+    suiteRevision: 1,
+    baselineID: SelfImprovementLifecycle.BaselineID.create(),
+    state: "open" as const,
+    trustedProducerIDs: ["evaluator"],
+    acceptanceStart: 1,
+    acceptanceEnd: 2,
+    cutoffAt: 3,
+    requestDigest: digest,
+    createdAt: 1,
+  }
+  const sample = {
+    id: SelfImprovementLifecycle.MetricSampleID.create(),
+    runID: run.id,
+    sampleIDDigest: digest,
+    taskIDDigest: digest,
+    producerID: "evaluator",
+    requestDigest: digest,
+    metrics: zeroMetrics,
+    outcome: "success" as const,
+    startedAt: 1,
+    terminalAt: 2,
+  }
+  const decodedRun = Schema.decodeUnknownSync(SelfImprovementEvaluation.EvaluationRun)(run)
+  const decodedSample = Schema.decodeUnknownSync(SelfImprovementEvaluation.MetricSample)(sample)
+  expect(new SelfImprovementEvaluation.EvaluationRun(decodedRun)).toBeInstanceOf(SelfImprovementEvaluation.EvaluationRun)
+  expect(new SelfImprovementEvaluation.MetricSample(decodedSample)).toBeInstanceOf(SelfImprovementEvaluation.MetricSample)
+  expect(decodedRun).toBeInstanceOf(SelfImprovementEvaluation.EvaluationRun)
+  expect(decodedSample).toBeInstanceOf(SelfImprovementEvaluation.MetricSample)
+})
+
 test("samples and findings bind exact outcomes, IDs, and gate order", () => {
   const runID = SelfImprovementLifecycle.EvaluationRunID.create()
   const sample = {

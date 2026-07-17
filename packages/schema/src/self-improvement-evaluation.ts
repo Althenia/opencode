@@ -276,7 +276,7 @@ export class Baseline extends Schema.Class<Baseline>("SelfImprovementEvaluation.
   evaluatorSignatureDigest: SelfImprovement.Digest,
   bootstrapAuthorityID: SelfImprovementLifecycle.PrincipalID,
 }) {}
-class EvaluationRunClass extends Schema.Class<EvaluationRunClass>("SelfImprovementEvaluation.EvaluationRun")({
+const EvaluationRunFields = Schema.Struct({
   id: SelfImprovementLifecycle.EvaluationRunID,
   locationID: SelfImprovementLifecycle.LocationID,
   versionID: SelfImprovementLifecycle.ArtifactVersionID,
@@ -295,9 +295,7 @@ class EvaluationRunClass extends Schema.Class<EvaluationRunClass>("SelfImproveme
   createdAt: SelfImprovementLifecycle.TimestampMillis,
   cutoffSampleSetDigest: SelfImprovement.Digest.pipe(optional),
   decidedAt: SelfImprovementLifecycle.TimestampMillis.pipe(optional),
-}) {}
-
-export const EvaluationRun = EvaluationRunClass.check(
+}).check(
   Schema.makeFilter(
     (value) =>
       value.acceptanceStart <= value.acceptanceEnd &&
@@ -310,9 +308,9 @@ export const EvaluationRun = EvaluationRunClass.check(
         (value.state === "cancelled" && value.cutoffSampleSetDigest === undefined && value.decidedAt === undefined)),
   ),
 )
-export type EvaluationRun = typeof EvaluationRun.Type
+export class EvaluationRun extends Schema.Class<EvaluationRun>("SelfImprovementEvaluation.EvaluationRun")(EvaluationRunFields) {}
 
-class MetricSampleClass extends Schema.Class<MetricSampleClass>("SelfImprovementEvaluation.MetricSample")({
+const MetricSampleFields = Schema.Struct({
   id: SelfImprovementLifecycle.MetricSampleID,
   runID: SelfImprovementLifecycle.EvaluationRunID,
   sampleIDDigest: SelfImprovement.Digest,
@@ -323,12 +321,8 @@ class MetricSampleClass extends Schema.Class<MetricSampleClass>("SelfImprovement
   outcome: TaskOutcome,
   startedAt: SelfImprovementLifecycle.TimestampMillis,
   terminalAt: SelfImprovementLifecycle.TimestampMillis,
-}) {}
-
-export const MetricSample = MetricSampleClass.check(
-  Schema.makeFilter((value) => value.startedAt <= value.terminalAt),
-)
-export type MetricSample = typeof MetricSample.Type
+}).check(Schema.makeFilter((value) => value.startedAt <= value.terminalAt))
+export class MetricSample extends Schema.Class<MetricSample>("SelfImprovementEvaluation.MetricSample")(MetricSampleFields) {}
 export interface GateFinding extends Schema.Schema.Type<typeof GateFinding> {}
 export const GateFinding = Schema.Struct({
   id: SelfImprovementLifecycle.GateFindingID,
