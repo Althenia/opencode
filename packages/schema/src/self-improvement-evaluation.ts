@@ -323,9 +323,7 @@ export const GateFinding = Schema.Struct({
 })
   .annotate({ identifier: "SelfImprovementEvaluation.GateFinding" })
   .check(Schema.makeFilter((value) => value.order === GateOrder[value.gateID]))
-export class EvaluationDecision extends Schema.Class<EvaluationDecision>(
-  "SelfImprovementEvaluation.EvaluationDecision",
-)({
+const EvaluationDecisionFields = Schema.Struct({
   runID: SelfImprovementLifecycle.EvaluationRunID,
   cutoffSampleSetDigest: SelfImprovement.Digest,
   findings: Schema.Array(GateFinding).check(
@@ -342,4 +340,8 @@ export class EvaluationDecision extends Schema.Class<EvaluationDecision>(
   decision: Schema.Literals(["passed", "failed"]),
   approvalBinding: SelfImprovementLifecycle.ApprovalBinding.pipe(optional),
   decidedAt: SelfImprovementLifecycle.TimestampMillis,
-}) {}
+}).check(Schema.makeFilter((value) => value.findings.every((finding) => finding.evaluationRunID === value.runID)))
+
+export class EvaluationDecision extends Schema.Class<EvaluationDecision>(
+  "SelfImprovementEvaluation.EvaluationDecision",
+)(EvaluationDecisionFields) {}

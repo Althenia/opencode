@@ -438,7 +438,7 @@ const operationContracts = [
     name: "listBaselines",
     request: {
       schema: SelfImprovementApi.ListBaselinesRequest,
-      input: { workload: "typescript", suiteRevision: 1, limit: "10", cursor: "a" },
+      input: { workload: "typescript", suiteRevision: "1", limit: "10", cursor: "a" },
     },
     response: { schema: SelfImprovementApi.ListBaselinesResponse, input: page(baseline) },
   },
@@ -507,7 +507,7 @@ const operationContracts = [
     name: "listAudit",
     request: {
       schema: SelfImprovementApi.ListAuditRequest,
-      input: { eventType: "observation-accepted", artifactID, from: 1, to: 2, limit: "10", cursor: "a" },
+      input: { eventType: "observation-accepted", artifactID, from: "1", to: "2", limit: "10", cursor: "a" },
     },
     response: { schema: SelfImprovementApi.ListAuditResponse, input: page(auditEntry) },
   },
@@ -630,6 +630,66 @@ test("decodes and re-encodes includeSamples HTTP query strings", () => {
     includeSamples: "false",
     limit: "50",
   })
+})
+
+test("decodes branded numeric HTTP query values only from decimal strings", () => {
+  const baselineQuery = decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: "7" })
+  expect(Number(baselineQuery.suiteRevision)).toBe(7)
+  expect(baselineQuery.limit).toBe(50)
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListBaselinesRequest)(baselineQuery)).toEqual({
+    suiteRevision: "7",
+    limit: "50",
+  })
+  const baselineQueryWithoutRevision = decode(SelfImprovementApi.ListBaselinesRequest, {})
+  expect(baselineQueryWithoutRevision).toEqual({ limit: 50 })
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListBaselinesRequest)(baselineQueryWithoutRevision)).toEqual({
+    limit: "50",
+  })
+  expect(() => decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: 7 })).toThrow()
+
+  const auditQuery = decode(SelfImprovementApi.ListAuditRequest, { from: "100", to: "200" })
+  expect(Number(auditQuery.from)).toBe(100)
+  expect(Number(auditQuery.to)).toBe(200)
+  expect(auditQuery.limit).toBe(50)
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListAuditRequest)(auditQuery)).toEqual({
+    from: "100",
+    to: "200",
+    limit: "50",
+  })
+  const auditQueryWithoutRange = decode(SelfImprovementApi.ListAuditRequest, {})
+  expect(auditQueryWithoutRange).toEqual({ limit: 50 })
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListAuditRequest)(auditQueryWithoutRange)).toEqual({ limit: "50" })
+  expect(() => decode(SelfImprovementApi.ListAuditRequest, { from: 100 })).toThrow()
+  expect(() => decode(SelfImprovementApi.ListAuditRequest, { to: 200 })).toThrow()
+})
+
+test("rejects public evaluation envelopes with divergent finding identity or run identity", () => {
+  const divergent = findings.with(0, {
+    ...findings[0],
+    id: SelfImprovementLifecycle.GateFindingID.create(),
+  })
+  const crossRun = findings.with(0, {
+    ...findings[0],
+    evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.create(),
+  })
+  for (const invalidFindings of [divergent, crossRun, findings.slice(1), findings.toReversed()]) {
+    expect(() =>
+      decode(SelfImprovementApi.DecideMetricRunResponse, {
+        decision,
+        findings: invalidFindings,
+        replayed: false,
+      }),
+    ).toThrow()
+    expect(() => decode(SelfImprovementApi.EvaluationView, { run, decision, orderedFindings: invalidFindings })).toThrow()
+  }
+
+  expect(() =>
+    decode(SelfImprovementApi.EvaluationView, {
+      run: { ...run, id: SelfImprovementLifecycle.EvaluationRunID.create() },
+      decision,
+      orderedFindings: findings,
+    }),
+  ).toThrow()
 })
 
 test("private API wire contracts are closed and preserve HTTP encodings", () => {

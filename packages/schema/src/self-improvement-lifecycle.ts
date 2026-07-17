@@ -262,32 +262,36 @@ export class GeneratedContentMetadata extends Schema.Class<GeneratedContentMetad
   modelOutputDigest: SelfImprovement.Digest,
   retentionDeadline: TimestampMillis,
 }) {}
-export class Artifact extends Schema.Class<Artifact>("SelfImprovementLifecycle.Artifact")({
-  id: ArtifactID,
-  key: ArtifactKey,
-  status: ArtifactStatus,
-  createdBy: PrincipalID,
-  createdAt: TimestampMillis,
-  revision: Revision,
-  tombstone: Schema.suspend(() => Tombstone).pipe(optional),
-}) {}
-export class ArtifactVersion extends Schema.Class<ArtifactVersion>("SelfImprovementLifecycle.ArtifactVersion")({
-  id: ArtifactVersionID,
-  artifactID: ArtifactID,
-  versionNumber: Schema.Int.check(Schema.isGreaterThan(0)),
-  source: ArtifactSource,
-  behaviorClass: BehaviorClass,
-  proposal: SelfImprovement.CandidateProposal,
-  canonicalJson: SelfImprovement.CanonicalJson,
-  proposalDigest: SelfImprovement.Digest,
-  inputSnapshotDigest: SelfImprovement.Digest,
-  versionDigest: SelfImprovement.Digest,
-  capabilityManifest: CapabilityManifest,
-  capabilityManifestDigest: SelfImprovement.Digest,
-  creatorID: PrincipalID,
-  createdAt: TimestampMillis,
-  generated: GeneratedContentMetadata.pipe(optional),
-}) {}
+export class Artifact extends Schema.Class<Artifact>("SelfImprovementLifecycle.Artifact")(
+  Schema.Struct({
+    id: ArtifactID,
+    key: ArtifactKey,
+    status: ArtifactStatus,
+    createdBy: PrincipalID,
+    createdAt: TimestampMillis,
+    revision: Revision,
+    tombstone: Schema.suspend(() => Tombstone).pipe(optional),
+  }).check(Schema.makeFilter((artifact) => (artifact.status === "live") === (artifact.tombstone === undefined))),
+) {}
+export class ArtifactVersion extends Schema.Class<ArtifactVersion>("SelfImprovementLifecycle.ArtifactVersion")(
+  Schema.Struct({
+    id: ArtifactVersionID,
+    artifactID: ArtifactID,
+    versionNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+    source: ArtifactSource,
+    behaviorClass: BehaviorClass,
+    proposal: SelfImprovement.CandidateProposal,
+    canonicalJson: SelfImprovement.CanonicalJson,
+    proposalDigest: SelfImprovement.Digest,
+    inputSnapshotDigest: SelfImprovement.Digest,
+    versionDigest: SelfImprovement.Digest,
+    capabilityManifest: CapabilityManifest,
+    capabilityManifestDigest: SelfImprovement.Digest,
+    creatorID: PrincipalID,
+    createdAt: TimestampMillis,
+    generated: GeneratedContentMetadata.pipe(optional),
+  }).check(Schema.makeFilter((version) => (version.source === "generated") === (version.generated !== undefined))),
+) {}
 export class StageTransition extends Schema.Class<StageTransition>("SelfImprovementLifecycle.StageTransition")({
   id: StageTransitionID,
   versionID: ArtifactVersionID,

@@ -26,6 +26,8 @@ const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
     encode: SchemaGetter.transform((value) => (value ? "true" : "false")),
   }),
 )
+const RevisionFromString = Schema.NumberFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.Revision))
+const TimestampMillisFromString = Schema.NumberFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.TimestampMillis))
 export class PageRequest extends Schema.Class<PageRequest>("SelfImprovementApi.PageRequest")({
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
@@ -346,17 +348,30 @@ export class DecideMetricRunRequest extends Schema.Class<DecideMetricRunRequest>
   runID: SelfImprovementLifecycle.EvaluationRunID,
   cutoffSampleSetDigest: SelfImprovement.Digest,
 }) {}
-export class DecideMetricRunResponse extends Schema.Class<DecideMetricRunResponse>(
-  "SelfImprovementApi.DecideMetricRunResponse",
-)({
+const sameFindingIDs = (
+  left: ReadonlyArray<SelfImprovementEvaluation.GateFinding>,
+  right: ReadonlyArray<SelfImprovementEvaluation.GateFinding>,
+) => left.length === right.length && left.every((finding, index) => finding.id === right[index].id)
+
+const DecideMetricRunResponseFields = Schema.Struct({
   decision: SelfImprovementEvaluation.EvaluationDecision,
   findings: Schema.Array(SelfImprovementEvaluation.GateFinding),
   replayed: Schema.Boolean,
-}) {}
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      sameFindingIDs(value.findings, value.decision.findings) &&
+      value.findings.every((finding) => finding.evaluationRunID === value.decision.runID),
+  ),
+)
+
+export class DecideMetricRunResponse extends Schema.Class<DecideMetricRunResponse>(
+  "SelfImprovementApi.DecideMetricRunResponse",
+)(DecideMetricRunResponseFields) {}
 
 export class ListBaselinesRequest extends Schema.Class<ListBaselinesRequest>("SelfImprovementApi.ListBaselinesRequest")({
   workload: SelfImprovementEvaluation.Workload.pipe(optional),
-  suiteRevision: SelfImprovementLifecycle.Revision.pipe(optional),
+  suiteRevision: RevisionFromString.pipe(optional),
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}
@@ -393,11 +408,22 @@ export class ListEvaluationsRequest extends Schema.Class<ListEvaluationsRequest>
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}
-export class EvaluationView extends Schema.Class<EvaluationView>("SelfImprovementApi.EvaluationView")({
+const EvaluationViewFields = Schema.Struct({
   run: SelfImprovementEvaluation.EvaluationRun,
   decision: SelfImprovementEvaluation.EvaluationDecision,
   orderedFindings: Schema.Array(SelfImprovementEvaluation.GateFinding),
-}) {}
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      value.run.id === value.decision.runID &&
+      sameFindingIDs(value.orderedFindings, value.decision.findings) &&
+      value.orderedFindings.every((finding) => finding.evaluationRunID === value.decision.runID),
+  ),
+)
+
+export class EvaluationView extends Schema.Class<EvaluationView>("SelfImprovementApi.EvaluationView")(
+  EvaluationViewFields,
+) {}
 export interface ListEvaluationsResponse extends Schema.Schema.Type<typeof ListEvaluationsResponse> {}
 export const ListEvaluationsResponse = page(EvaluationView).annotate({
   identifier: "SelfImprovementApi.ListEvaluationsResponse",
@@ -468,8 +494,8 @@ export const ListRoutingDecisionsResponse = page(SelfImprovementLearning.Routing
 export class ListAuditRequest extends Schema.Class<ListAuditRequest>("SelfImprovementApi.ListAuditRequest")({
   eventType: Schema.NonEmptyString.pipe(optional),
   artifactID: SelfImprovementLifecycle.ArtifactID.pipe(optional),
-  from: SelfImprovementLifecycle.TimestampMillis.pipe(optional),
-  to: SelfImprovementLifecycle.TimestampMillis.pipe(optional),
+  from: TimestampMillisFromString.pipe(optional),
+  to: TimestampMillisFromString.pipe(optional),
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}

@@ -334,6 +334,10 @@ test("evaluation decisions constrain reward and retain an optional exact approva
     findings.with(0, findings[1]).with(1, findings[0]),
     findings.with(1, findings[0]),
     findings.with(1, { ...findings[1], id: findings[0].id }),
+    findings.with(0, {
+      ...findings[0],
+      evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.create(),
+    }),
   ]) {
     expect(() =>
       decode(SelfImprovementEvaluation.EvaluationDecision, { ...decision, findings: invalidFindings }),

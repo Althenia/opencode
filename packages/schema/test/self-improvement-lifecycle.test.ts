@@ -468,6 +468,53 @@ test("approval decisions keep approved and rejected fields disjoint", () => {
   expect(() => decode(SelfImprovementLifecycle.ApprovalDecision, { ...approved, reason: "approval-rejected" })).toThrow()
 })
 
+test("artifact and version source metadata states remain consistent", () => {
+  const artifact = {
+    id: SelfImprovementLifecycle.ArtifactID.create(),
+    key: { locationID: "a".repeat(64), kind: "skill" as const, name: "reviewer" },
+    createdBy: "principal",
+    createdAt: 1,
+    revision: 0,
+  }
+  const tombstone = { actorID: "principal", reason: "retired", timestamp: 1 }
+  const generated = {
+    generationLeaseID: SelfImprovementLifecycle.GenerationLeaseID.create(),
+    strategyPullID: SelfImprovementLifecycle.PullEventID.create(),
+    originatingTaskIDDigest: "a".repeat(64),
+    modelRequestDigest: "b".repeat(64),
+    modelOutputDigest: "c".repeat(64),
+    retentionDeadline: 1,
+  }
+  const version = {
+    id: SelfImprovementLifecycle.ArtifactVersionID.create(),
+    artifactID: artifact.id,
+    versionNumber: 1,
+    behaviorClass: "instruction-only" as const,
+    proposal: { kind: "skill" as const, name: "reviewer", definition: { description: "review", content: "Review changes" }, references: [] },
+    canonicalJson: "{}",
+    proposalDigest: "a".repeat(64),
+    inputSnapshotDigest: "a".repeat(64),
+    versionDigest: "a".repeat(64),
+    capabilityManifest: {
+      toolIDs: [],
+      filesystemScopeIDs: [],
+      networkOriginIDs: [],
+      modelRoutes: [],
+      childAgentTargets: [],
+      artifactReferences: [],
+      denies: [],
+    },
+    capabilityManifestDigest: "a".repeat(64),
+    creatorID: "principal",
+    createdAt: 1,
+  }
+
+  expect(() => decode(SelfImprovementLifecycle.Artifact, { ...artifact, status: "live", tombstone })).toThrow()
+  expect(() => decode(SelfImprovementLifecycle.Artifact, { ...artifact, status: "tombstoned" })).toThrow()
+  expect(() => decode(SelfImprovementLifecycle.ArtifactVersion, { ...version, source: "human", generated })).toThrow()
+  expect(() => decode(SelfImprovementLifecycle.ArtifactVersion, { ...version, source: "generated" })).toThrow()
+})
+
 test("every exported lifecycle schema has a stable unique identifier", () => {
   const schemas = [
     SelfImprovementLifecycle.LocationID,
