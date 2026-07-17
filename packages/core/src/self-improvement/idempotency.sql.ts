@@ -4,7 +4,7 @@ import { SelfImprovement, SelfImprovementLearning, SelfImprovementLifecycle } fr
 export const SelfImprovementIdempotencyTable = sqliteTable(
   "self_improvement_idempotency",
   {
-    id: text().$type<SelfImprovementLifecycle.IdempotencyRecordID>().primaryKey(),
+    id: text().$type<SelfImprovementLifecycle.IdempotencyRecordID>().notNull().primaryKey(),
     principal_id: text().$type<SelfImprovementLifecycle.PrincipalID>().notNull(),
     location_id: text().$type<SelfImprovementLifecycle.LocationID>().notNull(),
     operation: text().$type<SelfImprovementLifecycle.Operation>().notNull(),

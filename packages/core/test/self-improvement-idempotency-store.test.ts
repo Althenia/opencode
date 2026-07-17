@@ -64,8 +64,21 @@ const setup = Effect.gen(function* () {
       const current = record("si_idm_current", "current", retention + 11)
       yield* store.put({ locationID, record: expired })
       yield* store.put({ locationID, record: current })
+      const duplicate = yield* store.put({ locationID, record: expired }).pipe(Effect.flip)
+      expect(duplicate._tag).toBe("SelfImprovementIdempotencyStore.Conflict")
 
       expect(yield* store.get({ locationID: otherLocationID, identity: expired.identity })).toBeUndefined()
+      expect(
+        yield* store.get({
+          locationID,
+          identity: new SelfImprovementLearning.IdempotencyIdentity({
+            principalID: expired.identity.principalID,
+            locationID: otherLocationID,
+            operation: expired.identity.operation,
+            key: expired.identity.key,
+          }),
+        }),
+      ).toBeUndefined()
       expect(yield* store.get({ locationID, identity: expired.identity })).toEqual(expired)
       expect(
         yield* store.listExpired({ locationID, now: SelfImprovementLifecycle.TimestampMillis.make(retention + 10) }),

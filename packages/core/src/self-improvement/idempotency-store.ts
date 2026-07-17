@@ -21,6 +21,10 @@ export class InvalidInput extends Schema.TaggedErrorClass<InvalidInput>()(
   },
 ) {}
 
+export class Conflict extends Schema.TaggedErrorClass<Conflict>()("SelfImprovementIdempotencyStore.Conflict", {
+  message: Schema.String,
+}) {}
+
 export interface Interface {
   readonly put: (
     input: {
@@ -28,7 +32,7 @@ export interface Interface {
       readonly record: SelfImprovementApi.IdempotencyRecord
     },
     tx?: Transaction,
-  ) => Effect.Effect<void, InvalidInput>
+  ) => Effect.Effect<void, InvalidInput | Conflict>
   readonly get: (input: {
     readonly locationID: SelfImprovementLifecycle.LocationID
     readonly identity: SelfImprovementLearning.IdempotencyIdentity
@@ -84,14 +88,22 @@ export const layer = Layer.effect(
         created_at: input.record.createdAt,
         expires_at: input.record.expiresAt,
       }
-      if (tx) return yield* tx.insert(SelfImprovementIdempotencyTable).values(values).run().pipe(Effect.orDie)
-      return yield* db.insert(SelfImprovementIdempotencyTable).values(values).run().pipe(Effect.orDie)
+      const stored = yield* (tx ?? db)
+        .insert(SelfImprovementIdempotencyTable)
+        .values(values)
+        .onConflictDoNothing()
+        .returning({ id: SelfImprovementIdempotencyTable.id })
+        .get()
+        .pipe(Effect.orDie)
+      if (stored === undefined) return yield* new Conflict({ message: "Idempotency record already exists" })
+      return undefined
     })
 
     const get = Effect.fn("SelfImprovementIdempotencyStore.get")(function* (input: {
       readonly locationID: SelfImprovementLifecycle.LocationID
       readonly identity: SelfImprovementLearning.IdempotencyIdentity
     }) {
+      if (input.locationID !== input.identity.locationID) return undefined
       const row = yield* db
         .select()
         .from(SelfImprovementIdempotencyTable)

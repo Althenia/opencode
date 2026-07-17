@@ -20,6 +20,10 @@ export class InvalidInput extends Schema.TaggedErrorClass<InvalidInput>()("SelfI
   message: Schema.String,
 }) {}
 
+export class Conflict extends Schema.TaggedErrorClass<Conflict>()("SelfImprovementAuditStore.Conflict", {
+  message: Schema.String,
+}) {}
+
 export interface Interface {
   readonly append: (
     input: {
@@ -27,7 +31,7 @@ export interface Interface {
       readonly entry: SelfImprovementLearning.AuditEntry
     },
     tx?: Transaction,
-  ) => Effect.Effect<void, InvalidInput>
+  ) => Effect.Effect<void, InvalidInput | Conflict>
   readonly list: (input: {
     readonly locationID: SelfImprovementLifecycle.LocationID
     readonly eventType?: string
@@ -68,9 +72,10 @@ export const layer = Layer.effect(
 
       const retention = encodeRetention(input.entry.retention)
       const insert = (client: Transaction) =>
-        client
-          .run(
-            sql`
+        Effect.gen(function* () {
+          const entry = yield* client
+            .get<{ id: SelfImprovementLifecycle.AuditEntryID }>(
+              sql`
             INSERT INTO self_improvement_audit_entry (
               id,
               location_id,
@@ -92,9 +97,14 @@ export const layer = Layer.effect(
               ${retention.createdAt},
               ${retention._tag === "governed-metadata" ? null : retention.expiresAt}
             )
+            ON CONFLICT DO NOTHING
+            RETURNING id
           `,
-          )
-          .pipe(Effect.orDie)
+            )
+            .pipe(Effect.orDie)
+          if (entry === undefined) return yield* new Conflict({ message: "Audit entry already exists" })
+          return undefined
+        })
 
       if (tx) return yield* insert(tx)
       return yield* db.transaction(insert).pipe(Effect.catchTag("SqlError", Effect.die))

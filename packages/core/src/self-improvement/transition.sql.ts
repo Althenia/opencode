@@ -5,7 +5,7 @@ import { SelfImprovementArtifactVersionTable } from "./artifact.sql"
 export const SelfImprovementStageTransitionTable = sqliteTable(
   "self_improvement_stage_transition",
   {
-    id: text().$type<SelfImprovementLifecycle.StageTransitionID>().primaryKey(),
+    id: text().$type<SelfImprovementLifecycle.StageTransitionID>().notNull().primaryKey(),
     version_id: text()
       .$type<SelfImprovementLifecycle.ArtifactVersionID>()
       .notNull()

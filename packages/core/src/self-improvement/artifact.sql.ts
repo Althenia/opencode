@@ -5,7 +5,7 @@ import { SelfImprovement, SelfImprovementLifecycle } from "@opencode-ai/schema"
 export const SelfImprovementArtifactTable = sqliteTable(
   "self_improvement_artifact",
   {
-    id: text().$type<SelfImprovementLifecycle.ArtifactID>().primaryKey(),
+    id: text().$type<SelfImprovementLifecycle.ArtifactID>().notNull().primaryKey(),
     location_id: text().$type<SelfImprovementLifecycle.LocationID>().notNull(),
     kind: text().$type<SelfImprovement.ArtifactKind>().notNull(),
     name: text().$type<SelfImprovement.CandidateName>().notNull(),
@@ -36,7 +36,7 @@ export const SelfImprovementArtifactTable = sqliteTable(
 export const SelfImprovementArtifactVersionTable = sqliteTable(
   "self_improvement_artifact_version",
   {
-    id: text().$type<SelfImprovementLifecycle.ArtifactVersionID>().primaryKey(),
+    id: text().$type<SelfImprovementLifecycle.ArtifactVersionID>().notNull().primaryKey(),
     artifact_id: text()
       .$type<SelfImprovementLifecycle.ArtifactID>()
       .notNull()

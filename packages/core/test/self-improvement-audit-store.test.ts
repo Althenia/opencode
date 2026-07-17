@@ -56,6 +56,8 @@ const setup = Effect.gen(function* () {
       yield* store.append({ locationID, entry: entry("si_aud_2", 2) })
       yield* store.append({ locationID, entry: entry("si_aud_1", 1, "artifact.updated") })
       yield* store.append({ locationID, entry: entry("si_aud_3", 2) })
+      const duplicate = yield* store.append({ locationID, entry: entry("si_aud_2", 2) }).pipe(Effect.flip)
+      expect(duplicate._tag).toBe("SelfImprovementAuditStore.Conflict")
 
       expect(yield* store.list({ locationID: otherLocationID })).toEqual([])
       expect((yield* store.list({ locationID })).map((item) => item.id)).toEqual([
