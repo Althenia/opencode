@@ -111,6 +111,7 @@ export const layer = Layer.effect(
             .get()
             .pipe(Effect.orDie)
           if (transition === undefined) return yield* new Conflict({ message: "Stage transition already exists" })
+          return undefined
         })
 
       if (tx) return yield* insert(tx)

@@ -196,6 +196,7 @@ export const layer = Layer.effect(
             .get()
             .pipe(Effect.orDie)
           if (version === undefined) return yield* new Conflict({ message: "Artifact version already exists" })
+          return undefined
         })
 
       if (tx) return yield* insert(tx)

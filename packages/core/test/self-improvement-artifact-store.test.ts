@@ -25,11 +25,11 @@ const artifact = new SelfImprovementLifecycle.Artifact({
   revision: SelfImprovementLifecycle.Revision.make(0),
 })
 
-const version = (id = "si_ver_1", number = 1) => {
+const version = (id = "si_ver_1", number = 1, artifactID = artifact.id) => {
   const generated = number === 2
   return new SelfImprovementLifecycle.ArtifactVersion({
     id: SelfImprovementLifecycle.ArtifactVersionID.make(id),
-    artifactID: artifact.id,
+    artifactID,
     versionNumber: number,
     source: generated ? "generated" : "human",
     behaviorClass: "instruction-only",
@@ -128,10 +128,7 @@ const setup = Effect.gen(function* () {
         .create({
           locationID,
           artifact,
-          version: new SelfImprovementLifecycle.ArtifactVersion({
-            ...version(),
-            artifactID: SelfImprovementLifecycle.ArtifactID.make("si_art_2"),
-          }),
+          version: version("si_ver_1", 1, SelfImprovementLifecycle.ArtifactID.make("si_art_2")),
         })
         .pipe(Effect.flip)
       expect(conflictingArtifact._tag).toBe("SelfImprovementArtifactStore.InvalidInput")
@@ -158,7 +155,6 @@ const setup = Effect.gen(function* () {
       ).toEqual(version("si_ver_2", 2))
 
       const tombstoned = new SelfImprovementLifecycle.Artifact({
-        ...artifact,
         id: SelfImprovementLifecycle.ArtifactID.make("si_art_tombstoned"),
         key: new SelfImprovementLifecycle.ArtifactKey({
           locationID,
@@ -166,29 +162,29 @@ const setup = Effect.gen(function* () {
           name: SelfImprovement.CandidateName.make("tombstone"),
         }),
         status: "tombstoned",
+        createdBy: artifact.createdBy,
+        createdAt: artifact.createdAt,
+        revision: artifact.revision,
         tombstone: new SelfImprovementLifecycle.Tombstone({
           actorID: SelfImprovementLifecycle.PrincipalID.make("owner"),
           reason: "removed",
           timestamp: SelfImprovementLifecycle.TimestampMillis.make(4),
         }),
       })
-      const tombstonedVersion = new SelfImprovementLifecycle.ArtifactVersion({
-        ...version("si_ver_tombstoned"),
-        artifactID: tombstoned.id,
-      })
+      const tombstonedVersion = version("si_ver_tombstoned", 1, tombstoned.id)
       yield* store.create({ locationID, artifact: tombstoned, version: tombstonedVersion })
       const reserved = yield* store
         .create({
           locationID,
           artifact: new SelfImprovementLifecycle.Artifact({
-            ...artifact,
             id: SelfImprovementLifecycle.ArtifactID.make("si_art_reserved"),
             key: tombstoned.key,
+            status: artifact.status,
+            createdBy: artifact.createdBy,
+            createdAt: artifact.createdAt,
+            revision: artifact.revision,
           }),
-          version: new SelfImprovementLifecycle.ArtifactVersion({
-            ...version("si_ver_reserved"),
-            artifactID: SelfImprovementLifecycle.ArtifactID.make("si_art_reserved"),
-          }),
+          version: version("si_ver_reserved", 1, SelfImprovementLifecycle.ArtifactID.make("si_art_reserved")),
         })
         .pipe(Effect.flip)
       expect(reserved._tag).toBe("SelfImprovementArtifactStore.Conflict")
