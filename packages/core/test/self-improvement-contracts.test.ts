@@ -283,6 +283,7 @@ const schemaInventory = {
     SelfImprovementApi.PageLimit,
     SelfImprovementApi.Cursor,
     SelfImprovementApi.PageRequest,
+    SelfImprovementApi.IfMatchRevision,
     SelfImprovementApi.LocationHeaders,
     SelfImprovementApi.MutationHeaders,
     SelfImprovementApi.ArtifactMutationHeaders,
@@ -468,7 +469,6 @@ test("keeps every public S01 schema identifier stable and unique", () => {
   const identifiers = Object.entries(schemaInventory).flatMap(([namespace, schemas]) =>
     schemas.map((schema) => ({ namespace, identifier: schema.ast.annotations?.identifier })),
   )
-  expect(identifiers.every(({ identifier }) => typeof identifier === "string")).toBe(true)
   expect(
     identifiers.filter(
       ({ namespace, identifier }) => typeof identifier !== "string" || !identifier.startsWith(`${namespace}.`),

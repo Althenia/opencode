@@ -603,6 +603,12 @@ test("exposes stable identifiers on public filtered schemas", () => {
   ])
 })
 
+test("exposes the If-Match revision transport identifier", () => {
+  expect(SelfImprovementApi.IfMatchRevision.ast.annotations?.identifier).toBe(
+    "SelfImprovementApi.IfMatchRevision",
+  )
+})
+
 test("decodes and re-encodes includeSamples HTTP query strings", () => {
   const included = decode(SelfImprovementApi.ListMetricRunsRequest, { includeSamples: "true" })
   const excluded = decode(SelfImprovementApi.ListMetricRunsRequest, { includeSamples: "false" })

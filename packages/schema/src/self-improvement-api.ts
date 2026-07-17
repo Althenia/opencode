@@ -30,9 +30,9 @@ export class PageRequest extends Schema.Class<PageRequest>("SelfImprovementApi.P
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}
-export const IfMatchRevision = Schema.NumberFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.Revision)).annotate({
-  identifier: "SelfImprovementApi.IfMatchRevision",
-})
+export const IfMatchRevision = Schema.suspend(() =>
+  Schema.NumberFromString.pipe(Schema.decodeTo(SelfImprovementLifecycle.Revision)),
+).annotate({ identifier: "SelfImprovementApi.IfMatchRevision" })
 export type IfMatchRevision = typeof IfMatchRevision.Type
 export interface LocationHeaders extends Schema.Schema.Type<typeof LocationHeaders> {}
 export const LocationHeaders = Schema.Struct({
