@@ -67,11 +67,11 @@ export const IdempotencyRecordID = generatedID("si_idm_", "SelfImprovementLifecy
 export type IdempotencyRecordID = typeof IdempotencyRecordID.Type
 export const Revision = Schema.Number.pipe(Schema.brand("SelfImprovementLifecycle.Revision"))
   .annotate({ identifier: "SelfImprovementLifecycle.Revision" })
-  .check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+  .check(Schema.makeFilter(Number.isSafeInteger), Schema.isGreaterThanOrEqualTo(0))
 export type Revision = typeof Revision.Type
 export const TimestampMillis = Schema.Number.pipe(Schema.brand("SelfImprovementLifecycle.TimestampMillis"))
   .annotate({ identifier: "SelfImprovementLifecycle.TimestampMillis" })
-  .check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+  .check(Schema.makeFilter(Number.isSafeInteger), Schema.isGreaterThanOrEqualTo(0))
 export type TimestampMillis = typeof TimestampMillis.Type
 
 export const GlossaryTerms = [

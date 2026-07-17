@@ -160,6 +160,11 @@ test("LocationID is an opaque lowercase digest without a generated constructor",
   expect("create" in SelfImprovementLifecycle.LocationID).toBe(false)
 })
 
+test("numeric identities reject unsafe positive integers", () => {
+  expect(() => decode(SelfImprovementLifecycle.Revision, Number.MAX_SAFE_INTEGER + 1)).toThrow()
+  expect(() => decode(SelfImprovementLifecycle.TimestampMillis, Number.MAX_SAFE_INTEGER + 1)).toThrow()
+})
+
 test("ArtifactKey accepts every artifact kind and rejects stage setters", () => {
   for (const kind of ["agent", "skill", "workflow", "mode", "command", "routing-policy"] as const) {
     const key = { locationID: "a".repeat(64), kind, name: "repair-types" }

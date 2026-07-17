@@ -614,6 +614,26 @@ test("numeric HTTP values reject non-canonical unsigned decimal strings", () => 
   expect(Number(decode(SelfImprovementApi.ListAuditRequest, { from: "0", to: "0" }).from)).toBe(0)
 })
 
+test("numeric HTTP identities round-trip safe integers and reject unsafe decimals", () => {
+  const maximum = String(Number.MAX_SAFE_INTEGER)
+  const unsafe = String(Number.MAX_SAFE_INTEGER + 1)
+  const ifMatch = decode(SelfImprovementApi.IfMatchRevision, maximum)
+  const baselines = decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: maximum })
+  const audit = decode(SelfImprovementApi.ListAuditRequest, { from: maximum, to: maximum })
+
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.IfMatchRevision)(ifMatch)).toBe(maximum)
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListBaselinesRequest)(baselines).suiteRevision).toBe(maximum)
+  expect(Schema.encodeUnknownSync(SelfImprovementApi.ListAuditRequest)(audit)).toMatchObject({
+    from: maximum,
+    to: maximum,
+  })
+
+  expect(() => decode(SelfImprovementApi.IfMatchRevision, unsafe)).toThrow()
+  expect(() => decode(SelfImprovementApi.ListBaselinesRequest, { suiteRevision: unsafe })).toThrow()
+  expect(() => decode(SelfImprovementApi.ListAuditRequest, { from: unsafe })).toThrow()
+  expect(() => decode(SelfImprovementApi.ListAuditRequest, { to: unsafe })).toThrow()
+})
+
 test("exposes stable identifiers on public filtered schemas", () => {
   expect([
     SelfImprovementApi.PageLimit.ast.annotations?.identifier,
