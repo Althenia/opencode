@@ -4,6 +4,7 @@ import { Context, Effect, Exit, Fiber, Layer, Option, Queue, Scope, Stream } fro
 import { eq } from "drizzle-orm"
 import { EventV2 } from "../event"
 import { makeGlobalNode } from "../effect/app-node"
+import { KeyedMutex } from "../effect/keyed-mutex"
 import { LocationServiceMap } from "../location-service-map"
 import { QuestionV2 } from "../question"
 import { SessionV2 } from "../session"
@@ -84,6 +85,7 @@ export const make = Effect.gen(function* () {
   const locations = Option.getOrUndefined(yield* Effect.serviceOption(LocationServiceMap.Service))
   const scope = yield* Scope.Scope
   const goals = new Map<SessionSchema.ID, ActiveGoal>()
+  const lifecycle = KeyedMutex.makeUnsafe<SessionSchema.ID>()
 
   const snapshot = (state: GoalState): GoalState => ({ ...state })
 
@@ -111,9 +113,6 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.orDie, Effect.asVoid)
       : Effect.void
 
-  const persistActive = (sessionID: SessionSchema.ID, owner: ActiveGoal): Effect.Effect<void> =>
-    persistGoal(sessionID, owner.state)
-
   const deleteGoal = (sessionID: SessionSchema.ID): Effect.Effect<void> =>
     db
       ? db.delete(GoalTable).where(eq(GoalTable.session_id, sessionID)).run().pipe(Effect.orDie, Effect.asVoid)
@@ -126,14 +125,22 @@ export const make = Effect.gen(function* () {
     }),
   )
 
-  const setState = (sessionID: SessionSchema.ID, owner: ActiveGoal, update: (state: GoalState) => GoalState) =>
-    Effect.sync(() => {
-      const active = goals.get(sessionID)
-      if (active !== owner) return undefined
-      const next = update(active.state)
-      active.state = next
-      return next
-    })
+  const setState = (
+    sessionID: SessionSchema.ID,
+    owner: ActiveGoal,
+    update: (state: GoalState) => GoalState,
+    persist = false,
+  ) =>
+    lifecycle.withLock(sessionID)(
+      Effect.gen(function* () {
+        const active = goals.get(sessionID)
+        if (active !== owner) return
+        const next = update(active.state)
+        active.state = next
+        if (persist) yield* persistGoal(sessionID, next)
+        return next
+      }),
+    )
 
   const latestAssistantResult = (sessionID: SessionSchema.ID) =>
     sessions.messages({ sessionID, limit: 1, order: "desc" }).pipe(
@@ -227,8 +234,7 @@ export const make = Effect.gen(function* () {
   ) {
     if (goals.get(sessionID) !== owner) return
     owner.failed = failed
-    yield* setState(sessionID, owner, (state) => ({ ...state, active: false }))
-    yield* persistActive(sessionID, owner)
+    yield* setState(sessionID, owner, (state) => ({ ...state, active: false }), true)
     yield* Scope.close(owner.scope, Exit.void).pipe(Effect.forkIn(scope, { startImmediately: true }))
   })
 
@@ -244,9 +250,13 @@ export const make = Effect.gen(function* () {
       yield* retire(sessionID, owner)
       return false
     }
-    const state = yield* setState(sessionID, owner, (state) => ({ ...state, iteration: state.iteration + 1 }))
+    const state = yield* setState(
+      sessionID,
+      owner,
+      (state) => ({ ...state, iteration: state.iteration + 1 }),
+      true,
+    )
     if (!state) return false
-    yield* persistActive(sessionID, owner)
     return yield* prompt(
       sessionID,
       owner,
@@ -305,6 +315,7 @@ export const make = Effect.gen(function* () {
           ...state,
           active: true,
           iteration: 0,
+          phase: "starting",
         }))
         continue
       }
@@ -380,16 +391,52 @@ export const make = Effect.gen(function* () {
 
   const stop: Interface["stop"] = Effect.fn("GoalSupervisor.stop")((sessionID) =>
     Effect.gen(function* () {
-      const active = goals.get(sessionID)
-      goals.delete(sessionID)
+      const active = yield* lifecycle.withLock(sessionID)(
+        Effect.gen(function* () {
+          const active = goals.get(sessionID)
+          goals.delete(sessionID)
+          yield* deleteGoal(sessionID)
+          return active
+        }),
+      )
       if (active) yield* Scope.close(active.scope, Exit.void)
-      yield* deleteGoal(sessionID)
     }),
   )
 
   const attach = Effect.fn("GoalSupervisor.attach")(function* (sessionID: SessionSchema.ID, active: ActiveGoal) {
     if (active.attached || goals.get(sessionID) !== active) return
-    active.attached = true
+    const questions = yield* events.listen((event) => {
+      if (!isQuestionAsked(event)) return Effect.void
+      if (event.data.sessionID !== sessionID || goals.get(sessionID) !== active || !active.state.active)
+        return Effect.void
+      if (!event.location || !locations) return Effect.void
+      return Effect.gen(function* () {
+        const questions = yield* QuestionV2.Service
+        if (goals.get(sessionID) !== active || !active.state.active) return
+        const answers = event.data.questions.map((question) => {
+          const selected = question.options.filter((option) => option.recommended)
+          const options = selected.length > 0 ? selected : question.options
+          if (options.length === 0) return ["Use your best judgment from the goal and current context, then continue."]
+          return options.slice(0, question.multiple ? undefined : 1).map((option) => option.label)
+        })
+        if (goals.get(sessionID) !== active || !active.state.active) return
+        yield* questions.reply({
+          requestID: event.data.id,
+          answers,
+        })
+      }).pipe(
+        Effect.provide(locations.get(event.location)),
+        Effect.catchTag("QuestionV2.NotFoundError", () => Effect.void),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to provision Goal question location", {
+            sessionID,
+            requestID: event.data.id,
+            cause,
+          }),
+        ),
+      )
+    })
+    yield* Scope.addFinalizer(active.scope, questions)
     const todos = yield* events.listen((event) => {
       if (
         !isTodoUpdated(event) ||
@@ -399,9 +446,7 @@ export const make = Effect.gen(function* () {
         goals.get(sessionID) !== active
       )
         return Effect.void
-      return setState(sessionID, active, (state) => ({ ...state, goal: event.data.goal! })).pipe(
-        Effect.andThen(persistActive(sessionID, active)),
-      )
+      return setState(sessionID, active, (state) => ({ ...state, goal: event.data.goal! }), true).pipe(Effect.asVoid)
     })
     yield* Scope.addFinalizer(active.scope, todos)
     const queue = yield* Queue.unbounded<GoalEvent>()
@@ -417,23 +462,35 @@ export const make = Effect.gen(function* () {
       Effect.catch(() => Effect.void),
       Effect.forkIn(active.scope),
     )
+    active.attached = true
   })
 
   const resume: Interface["resume"] = Effect.fn("GoalSupervisor.resume")(function* (sessionID) {
-    const active = goals.get(sessionID)
-    if (!active || !active.state.active) return
-    if (active.state.phase !== "stalled") return snapshot(active.state)
-    active.state = { ...active.state, phase: "starting" }
-    yield* attach(sessionID, active)
-    const started = yield* continueGoal(sessionID, active).pipe(
-      Effect.catch((error: PromptError) =>
-        Effect.sync(() => {
-          if (goals.get(sessionID) === active) active.state = { ...active.state, phase: "stalled" }
-        }).pipe(Effect.andThen(Effect.fail(error))),
-      ),
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const active = yield* restore(
+          lifecycle.withLock(sessionID)(
+            Effect.sync(() => {
+              const active = goals.get(sessionID)
+              if (!active || !active.state.active || active.state.phase !== "stalled") return
+              active.state = { ...active.state, phase: "starting" }
+              return active
+            }),
+          ),
+        )
+        if (!active) return yield* status(sessionID)
+        yield* attach(sessionID, active)
+        const stall = setState(sessionID, active, (state) =>
+          state.phase === "starting" ? { ...state, phase: "stalled" } : state,
+        ).pipe(Effect.asVoid)
+        const started = yield* restore(continueGoal(sessionID, active)).pipe(
+          Effect.onInterrupt(() => stall),
+          Effect.catch((error: PromptError) => stall.pipe(Effect.andThen(Effect.fail(error)))),
+        )
+        if (!started) return snapshot(active.state)
+        return snapshot(active.state)
+      }),
     )
-    if (!started) return snapshot(active.state)
-    return snapshot(active.state)
   })
 
   const start: Interface["start"] = Effect.fn("GoalSupervisor.start")(function* (input) {
@@ -453,41 +510,13 @@ export const make = Effect.gen(function* () {
       supervisorPrompts: new Map(),
       attached: false,
     }
-    goals.set(input.sessionID, active)
-    yield* persistGoal(input.sessionID, state)
-    const questions = yield* events.listen((event) => {
-      if (!isQuestionAsked(event)) return Effect.void
-      if (event.data.sessionID !== input.sessionID || goals.get(input.sessionID) !== active || !active.state.active)
-        return Effect.void
-      if (!event.location || !locations) return Effect.void
-      return Effect.gen(function* () {
-        const questions = yield* QuestionV2.Service
-        if (goals.get(input.sessionID) !== active || !active.state.active) return
-        const answers = event.data.questions.map((question) => {
-          const selected = question.options.filter((option) => option.recommended)
-          const options = selected.length > 0 ? selected : question.options
-          if (options.length === 0) return ["Use your best judgment from the goal and current context, then continue."]
-          return options.slice(0, question.multiple ? undefined : 1).map((option) => option.label)
-        })
-        if (goals.get(input.sessionID) !== active || !active.state.active) return
-        yield* questions.reply({
-          requestID: event.data.id,
-          answers,
-        })
-      }).pipe(
-        Effect.provide(locations.get(event.location)),
-        Effect.catchTag("QuestionV2.NotFoundError", () => Effect.void),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("failed to provision Goal question location", {
-            sessionID: input.sessionID,
-            requestID: event.data.id,
-            cause,
-          }),
-        ),
-      )
-    })
-    yield* Scope.addFinalizer(active.scope, questions)
-    yield* attach(input.sessionID, active)
+    yield* lifecycle.withLock(input.sessionID)(
+      Effect.gen(function* () {
+        goals.set(input.sessionID, active)
+        yield* persistGoal(input.sessionID, state)
+      }),
+    )
+    yield* attach(input.sessionID, active).pipe(Effect.uninterruptible)
     if (goals.get(input.sessionID) !== active) return snapshot({ ...active.state, active: false })
     const started = yield* continueGoal(input.sessionID, active, {
       text: input.goal,
@@ -501,7 +530,6 @@ export const make = Effect.gen(function* () {
         }),
       ),
     )
-    if (goals.get(input.sessionID) !== active) return snapshot({ ...active.state, active: false })
     if (goals.get(input.sessionID) !== active) return snapshot({ ...active.state, active: false })
     return snapshot(active.state)
   })

@@ -1,11 +1,14 @@
 import { describe, expect } from "bun:test"
 import { DateTime, Deferred, Effect, Fiber, Layer, LayerMap, PubSub, Stream } from "effect"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Database } from "@opencode-ai/core/database/database"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Location } from "@opencode-ai/core/location"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
 import type { LocationError, LocationServices } from "@opencode-ai/core/location-services"
 import { QuestionV2 } from "@opencode-ai/core/question"
+import { Project } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { GoalSupervisor } from "@opencode-ai/core/session/goal"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -14,13 +17,76 @@ import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
+import { GoalTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { Prompt } from "@opencode-ai/core/session/prompt"
-import { it } from "./lib/effect"
+import { it, testEffect } from "./lib/effect"
 
 const sessionID = SessionV2.ID.make("ses_goal_test")
 const otherSessionID = SessionV2.ID.make("ses_other_goal_test")
 const location = Location.Ref.make({ directory: AbsolutePath.make("/tmp/opencode-goal-test") })
 const unused = () => Effect.die("unused")
+const itDatabase = testEffect(Database.layerFromPath(":memory:"))
+
+const setupDatabaseSession = Effect.gen(function* () {
+  const { db } = yield* Database.Service
+  yield* db
+    .insert(ProjectTable)
+    .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+    .run()
+    .pipe(Effect.orDie)
+  yield* db
+    .insert(SessionTable)
+    .values({
+      id: sessionID,
+      project_id: Project.ID.global,
+      slug: "goal",
+      directory: "/project",
+      title: "goal",
+      version: "test",
+    })
+    .run()
+    .pipe(Effect.orDie)
+})
+
+function delayGoalWrite(
+  db: Database.Interface["db"],
+  started: Deferred.Deferred<void>,
+  release: Deferred.Deferred<void>,
+) {
+  let armed = false
+  const wrap = (value: object): object =>
+    new Proxy(value, {
+      get(target, property, receiver) {
+        const member = Reflect.get(target, property, receiver)
+        if (typeof member !== "function") return member
+        if (property === "run")
+          return (...args: unknown[]) => {
+            const result = Reflect.apply(member, target, args) as Effect.Effect<unknown, unknown, unknown>
+            if (!armed) return result
+            armed = false
+            return Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.andThen(result),
+            )
+          }
+        return (...args: unknown[]) => {
+          const result = Reflect.apply(member, target, args)
+          return typeof result === "object" && result !== null ? wrap(result) : result
+        }
+      },
+    })
+  return {
+    db: new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== "insert") return Reflect.get(target, property, receiver)
+        return (...args: unknown[]) => wrap(Reflect.apply(target.insert, target, args))
+      },
+    }) as Database.Interface["db"],
+    arm: () => {
+      armed = true
+    },
+  }
+}
 
 function assistant(text: string, reasoning?: string): SessionMessage.Assistant {
   return {
@@ -541,6 +607,48 @@ describe("GoalSupervisor", () => {
         assistantMessageID: SessionMessage.ID.create(),
       })
       expect(yield* goals.status(sessionID)).toMatchObject({ goal: "Ship the reconciled implementation" })
+    }),
+  )
+
+  itDatabase.effect("does not let delayed evaluated Goal persistence overwrite a restarted owner", () =>
+    Effect.gen(function* () {
+      yield* setupDatabaseSession
+      const { db } = yield* Database.Service
+      const persistenceStarted = yield* Deferred.make<void>()
+      const releasePersistence = yield* Deferred.make<void>()
+      const fake = makeSession()
+      const events = yield* makeEvents
+      const delayed = delayGoalWrite(db, persistenceStarted, releasePersistence)
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(Database.Service, {
+          db: delayed.db,
+        }),
+      )
+      yield* goals.start({ sessionID, goal: "first" })
+      yield* fake.promoteNext(events)
+      const assistantMessageID = yield* stepStarted(events)
+      yield* Effect.yieldNow
+      delayed.arm()
+
+      const stale = yield* events
+        .publish(SessionTodo.Event.Updated, {
+          sessionID,
+          todos: [],
+          goal: "stale evaluated Goal",
+          assistantMessageID,
+        })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(persistenceStarted)).toBe(true)
+      const replacement = yield* goals.start({ sessionID, goal: "replacement" }).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releasePersistence, undefined)
+      yield* Fiber.join(stale)
+      yield* Fiber.join(replacement)
+
+      expect(yield* db.select().from(GoalTable).get()).toMatchObject({ goal: "replacement", active: true })
     }),
   )
 
@@ -1161,6 +1269,117 @@ describe("GoalSupervisor", () => {
     }),
   )
 
+  itDatabase.effect("allows only one concurrent stalled Goal resume to retry", () =>
+    Effect.gen(function* () {
+      yield* setupDatabaseSession
+      const { db } = yield* Database.Service
+      const persistenceStarted = yield* Deferred.make<void>()
+      const releasePersistence = yield* Deferred.make<void>()
+      const fake = makeSession(["not done"])
+      const events = yield* makeEvents
+      const delayed = delayGoalWrite(db, persistenceStarted, releasePersistence)
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(Database.Service, { db: delayed.db }),
+      )
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* fake.promoteNext(events)
+      const assistantMessageID = yield* stepStarted(events)
+      yield* Effect.yieldNow
+      delayed.arm()
+      const updating = yield* events
+        .publish(SessionTodo.Event.Updated, {
+          sessionID,
+          todos: [],
+          goal: "finish",
+          assistantMessageID,
+        })
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(persistenceStarted)
+      yield* stepFailed(events, assistantMessageID)
+      yield* Effect.yieldNow
+
+      const first = yield* goals.resume(sessionID).pipe(Effect.forkChild)
+      const second = yield* goals.resume(sessionID).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releasePersistence, undefined)
+      yield* Fiber.join(updating)
+      yield* Fiber.join(first)
+      yield* Fiber.join(second)
+
+      expect(fake.prompts).toHaveLength(2)
+      expect(yield* goals.status(sessionID)).toMatchObject({ phase: "starting", iteration: 2 })
+    }),
+  )
+
+  itDatabase.effect("allows retry after cancellation during recovered Goal attachment", () =>
+    Effect.gen(function* () {
+      yield* setupDatabaseSession
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(GoalTable)
+        .values({ session_id: sessionID, goal: "recover", active: true, iteration: 1, cap: 25 })
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* makeEvents
+      const listenerStarted = yield* Deferred.make<void>()
+      const releaseListener = yield* Deferred.make<void>()
+      let blockListener = true
+      const eventService = EventV2.Service.of({
+        ...events,
+        listen: (listener) => {
+          if (!blockListener) return events.listen(listener)
+          blockListener = false
+          return Deferred.succeed(listenerStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseListener)),
+            Effect.andThen(events.listen(listener)),
+          )
+        },
+      })
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, eventService),
+      )
+
+      const resuming = yield* goals.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(listenerStarted)
+      const interrupting = yield* Fiber.interrupt(resuming).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseListener, undefined)
+      yield* Fiber.join(interrupting)
+
+      expect(yield* goals.status(sessionID)).toMatchObject({ phase: "stalled", iteration: 1 })
+      expect(yield* goals.resume(sessionID)).toMatchObject({ phase: "starting", iteration: 2 })
+      expect(fake.prompts).toHaveLength(1)
+      expect(events.listenerCount()).toBe(2)
+    }),
+  )
+
+  it.effect("marks a stalled Goal starting when an external steer is promoted", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["not done"])
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+      )
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* turnFailed(events, fake)
+      yield* Effect.yieldNow
+
+      const externalID = SessionMessage.ID.create()
+      yield* promptEvent(events, SessionEvent.PromptAdmitted, externalID, "continue externally")
+      yield* promptEvent(events, SessionEvent.Prompted, externalID, "continue externally")
+      yield* Effect.yieldNow
+
+      expect(yield* goals.status(sessionID)).toMatchObject({ phase: "starting", iteration: 0 })
+      expect(yield* goals.resume(sessionID)).toMatchObject({ phase: "starting", iteration: 0 })
+      expect(fake.prompts).toHaveLength(1)
+    }),
+  )
+
   it.effect("fails the active step when an external steer is admitted but not promoted", () =>
     Effect.gen(function* () {
       const fake = makeSession(["not done"])
@@ -1294,6 +1513,46 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(yield* Fiber.join(pending)).toEqual([["Use your best judgment from the goal and current context, then continue."]])
+    }),
+  )
+
+  itDatabase.effect("reattaches the question listener when a persisted Goal resumes", () =>
+    Effect.gen(function* () {
+      yield* setupDatabaseSession
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(GoalTable)
+        .values({ session_id: sessionID, goal: "recover", active: true, iteration: 1, cap: 25 })
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+
+      expect(yield* goals.status(sessionID)).toMatchObject({ goal: "recover", phase: "stalled" })
+      yield* goals.resume(sessionID)
+      const asking = yield* questions.service
+        .ask({
+          sessionID,
+          questions: [
+            {
+              question: "Continue recovery?",
+              header: "Recovery",
+              options: [{ label: "Continue", description: "Resume", recommended: true }],
+            },
+          ],
+        })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+
+      expect(questions.replies[0]?.answers).toEqual([["Continue"]])
+      yield* Fiber.interrupt(asking)
     }),
   )
 
