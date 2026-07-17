@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 import { Schema } from "effect"
 import { SelfImprovementApi } from "../src/self-improvement-api"
+import { SelfImprovementEvaluation } from "../src/self-improvement-evaluation"
+import { SelfImprovementLearning } from "../src/self-improvement-learning"
 import { SelfImprovementLifecycle } from "../src/self-improvement-lifecycle"
 
 const decode = <S extends Schema.Decoder<unknown>>(schema: S, input: unknown) =>
@@ -9,6 +11,534 @@ const decode = <S extends Schema.Decoder<unknown>>(schema: S, input: unknown) =>
 const digest = "a".repeat(64)
 const locationID = "b".repeat(64)
 const artifactID = SelfImprovementLifecycle.ArtifactID.create()
+const versionID = SelfImprovementLifecycle.ArtifactVersionID.create()
+const runID = SelfImprovementLifecycle.EvaluationRunID.create()
+const suiteID = SelfImprovementLifecycle.SuiteID.create()
+const baselineID = SelfImprovementLifecycle.BaselineID.create()
+const manifest = {
+  toolIDs: [],
+  filesystemScopeIDs: [],
+  networkOriginIDs: [],
+  modelRoutes: [],
+  childAgentTargets: [],
+  artifactReferences: [],
+  denies: [],
+}
+const proposal = {
+  kind: "skill",
+  name: "reviewer",
+  definition: { description: "review", content: "Review changes" },
+  references: [],
+}
+const artifact = {
+  id: artifactID,
+  key: { locationID, kind: "skill", name: "reviewer" },
+  status: "live",
+  createdBy: "principal",
+  createdAt: 1,
+  revision: 1,
+}
+const version = {
+  id: versionID,
+  artifactID,
+  versionNumber: 1,
+  source: "human",
+  behaviorClass: "instruction-only",
+  proposal,
+  canonicalJson: "{}",
+  proposalDigest: digest,
+  inputSnapshotDigest: digest,
+  versionDigest: digest,
+  capabilityManifest: manifest,
+  capabilityManifestDigest: digest,
+  creatorID: "principal",
+  createdAt: 1,
+}
+const transition = {
+  id: SelfImprovementLifecycle.StageTransitionID.create(),
+  versionID,
+  previousStage: null,
+  nextStage: "draft",
+  event: "version-admitted",
+  reason: "admission-accepted",
+  actorID: "principal",
+  timestamp: 1,
+  idempotencyRecordID: SelfImprovementLifecycle.IdempotencyRecordID.create(),
+  idempotencyDigest: digest,
+}
+const binding = {
+  versionID,
+  versionDigest: digest,
+  suiteID,
+  suiteRevision: 1,
+  evaluationRunID: runID,
+  shadowEvidenceDigest: digest,
+}
+const approval = {
+  id: SelfImprovementLifecycle.ApprovalID.create(),
+  requestID: SelfImprovementLifecycle.ApprovalRequestID.create(),
+  locationID,
+  binding,
+  decision: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 2 },
+}
+const observation = {
+  id: SelfImprovementLifecycle.ObservationID.create(),
+  locationID,
+  patternDigest: digest,
+  identityDigest: digest,
+  workload: "typescript",
+  workloadRevision: 1,
+  errorClass: "type-error",
+  orderedToolSymbolDigest: digest,
+  outcomeClass: "failure",
+  taskIDDigest: digest,
+  producerID: "runtime-evidence",
+  occurredAt: 1,
+  expiresAt: 2,
+}
+const metrics = {
+  taskQuality: { earnedAllowlistedPoints: 0, possibleAllowlistedPoints: 0 },
+  correctness: { passedRequiredChecks: 0, requiredChecks: 0 },
+  repeatFixRate: { repeatedTasks: 0, completedTasks: 0 },
+  precision: { acceptedRelevantItems: 0, assessedItems: 0 },
+  latencyMs: 0,
+  tokensPerSuccess: { inputTokens: 0, outputTokens: 0, successfulTasks: 0 },
+  cacheHitRatio: { cacheReadTokens: 0, cacheEligibleTokens: 0 },
+}
+const totals = {
+  taskQualityEarnedAllowlistedPoints: 0,
+  taskQualityPossibleAllowlistedPoints: 0,
+  correctnessPassedRequiredChecks: 0,
+  correctnessRequiredChecks: 0,
+  repeatFixRepeatedTasks: 0,
+  repeatFixCompletedTasks: 0,
+  precisionAcceptedRelevantItems: 0,
+  precisionAssessedItems: 0,
+  acceptedLatencySampleCount: 0,
+  latencySampleSetDigest: digest,
+  inputTokens: 0,
+  outputTokens: 0,
+  successfulTasks: 0,
+  cacheReadTokens: 0,
+  cacheEligibleTokens: 0,
+}
+const aggregates = {
+  taskQuality: 0,
+  correctness: 0,
+  repeatFixRate: 0,
+  precision: 0,
+  latencyP95Ms: 0,
+  tokensPerSuccess: 0,
+  cacheHitRatio: 0,
+}
+const run = {
+  id: runID,
+  locationID,
+  versionID,
+  stage: "shadow",
+  workload: "typescript",
+  workloadRevision: 1,
+  suiteID,
+  suiteRevision: 1,
+  baselineID,
+  state: "open",
+  trustedProducerIDs: ["runtime-evidence"],
+  acceptanceStart: 1,
+  acceptanceEnd: 2,
+  cutoffAt: 3,
+  requestDigest: digest,
+  createdAt: 1,
+}
+const sample = {
+  id: SelfImprovementLifecycle.MetricSampleID.create(),
+  runID,
+  sampleIDDigest: digest,
+  taskIDDigest: digest,
+  producerID: "runtime-evidence",
+  requestDigest: digest,
+  metrics,
+  outcome: "success",
+  startedAt: 1,
+  terminalAt: 2,
+}
+const findings = SelfImprovementEvaluation.GateIDs.map((gateID, index) => ({
+  id: SelfImprovementLifecycle.GateFindingID.create(),
+  evaluationRunID: runID,
+  order: index + 1,
+  gateID,
+  result: "pass" as const,
+  code: "ok",
+}))
+const decision = {
+  runID,
+  cutoffSampleSetDigest: digest,
+  findings,
+  metricTotals: totals,
+  aggregates,
+  aggregateReward: 0,
+  decision: "failed",
+  decidedAt: 4,
+}
+const baseline = {
+  id: baselineID,
+  locationID,
+  workload: "typescript",
+  workloadRevision: 1,
+  suiteID,
+  suiteRevision: 1,
+  producerAllowlistRevision: 1,
+  controlSource: "active-version",
+  acceptanceStart: 1,
+  acceptanceEnd: 2,
+  cutoffAt: 3,
+  uniqueSampleCount: 20,
+  orderedSampleIDDigest: digest,
+  metricTotals: totals,
+  aggregates,
+  createdAt: 4,
+  evaluatorSignatureDigest: digest,
+  bootstrapAuthorityID: "approver",
+}
+const intent = {
+  versionID,
+  previousStage: "shadow",
+  nextStage: "canary",
+  event: "approval-consumed",
+  reason: "gates-passed",
+  actorID: "coordinator",
+  evaluationRunID: runID,
+  approvalID: approval.id,
+  idempotencyRecordID: transition.idempotencyRecordID,
+  idempotencyDigest: digest,
+}
+const outbox = {
+  id: SelfImprovementLifecycle.ContextOutboxID.create(),
+  locationID,
+  artifactID,
+  expectedArtifactRevision: 1,
+  expectedStage: "shadow",
+  desiredStateRevision: 2,
+  intent,
+  status: "pending",
+  attempts: 0,
+  nextRetryAt: 1,
+  createdAt: 1,
+}
+const desiredState = {
+  locationID,
+  artifactID,
+  rolloutSlot: "canary",
+  desired: { state: "present", versionID, versionDigest: digest, stage: "canary" },
+  desiredRevision: 2,
+}
+const selection = {
+  id: SelfImprovementLifecycle.ContextSelectionEvidenceID.create(),
+  artifactID,
+  versionID,
+  versionDigest: digest,
+  locationID,
+  stage: "canary",
+  contextEpoch: 2,
+  sessionDigest: digest,
+  cohortResult: "canary-in",
+  outboxID: outbox.id,
+}
+const route = { providerID: "opencode", id: "gpt-5", variant: "default" }
+const routeArm = {
+  id: SelfImprovementLifecycle.ModelRouteArmID.create(),
+  locationID,
+  route,
+  allowlistRevision: 1,
+  active: true,
+}
+const routingDecision = {
+  id: SelfImprovementLifecycle.RoutingDecisionID.create(),
+  locationID,
+  sessionDigest: digest,
+  workload: "typescript",
+  workloadRevision: 1,
+  roleDigest: digest,
+  precedenceSource: "active-recommendation",
+  policySnapshotDigest: digest,
+  catalogSnapshotDigest: digest,
+  variantSnapshotDigest: digest,
+  orderedEligibleArms: [routeArm],
+  selectedRoute: route,
+  reasonCode: "eligible-active-recommendation",
+  pullEventID: SelfImprovementLifecycle.PullEventID.create(),
+  timestamp: 1,
+}
+const auditEntry = {
+  id: SelfImprovementLifecycle.AuditEntryID.create(),
+  locationID,
+  eventType: "observation-accepted",
+  actorID: "runtime-evidence",
+  payload: { artifactID, linkedDigests: [digest], rejectedFieldNames: [] },
+  timestamp: 1,
+  retention: { _tag: "evidence-180d", createdAt: 1, expiresAt: 1 + 180 * 86_400_000 },
+}
+
+const completed = { status: "completed", artifactRevision: 2, transition }
+const page = <T>(...items: ReadonlyArray<T>) => ({ items })
+const operationContracts = [
+  {
+    name: "listArtifacts",
+    request: { schema: SelfImprovementApi.ListArtifactsRequest, input: { kind: "skill", limit: "10", cursor: "a" } },
+    response: { schema: SelfImprovementApi.ListArtifactsResponse, input: page(artifact) },
+  },
+  {
+    name: "createArtifact",
+    request: {
+      schema: SelfImprovementApi.CreateArtifactRequest,
+      input: { proposalBytes: "AQID", behaviorClass: "instruction-only", capabilityManifest: manifest },
+    },
+    response: { schema: SelfImprovementApi.CreateArtifactResponse, input: { artifact, version, revision: 1 } },
+  },
+  {
+    name: "getArtifact",
+    request: { schema: SelfImprovementApi.GetArtifactRequest, input: { artifactID } },
+    response: {
+      schema: SelfImprovementApi.GetArtifactResponse,
+      input: {
+        artifact,
+        activeProjection: { versionID, versionDigest: digest, transitionID: transition.id },
+        shadowProjection: { versionID, versionDigest: digest, transitionID: transition.id },
+        canaryProjection: { versionID, versionDigest: digest, transitionID: transition.id },
+      },
+    },
+  },
+  {
+    name: "listVersions",
+    request: { schema: SelfImprovementApi.ListVersionsRequest, input: { artifactID, limit: "10", cursor: "a" } },
+    response: { schema: SelfImprovementApi.ListVersionsResponse, input: page(version) },
+  },
+  {
+    name: "createVersion",
+    request: {
+      schema: SelfImprovementApi.CreateVersionRequest,
+      input: {
+        artifactID,
+        proposalBytes: "AQID",
+        behaviorClass: "instruction-only",
+        capabilityManifest: manifest,
+        expectedRevision: 1,
+      },
+    },
+    response: { schema: SelfImprovementApi.CreateVersionResponse, input: { version, revision: 1 } },
+  },
+  {
+    name: "getVersion",
+    request: { schema: SelfImprovementApi.GetVersionRequest, input: { artifactID, versionID } },
+    response: {
+      schema: SelfImprovementApi.GetVersionResponse,
+      input: { version, stage: "draft", capabilityManifest: manifest },
+    },
+  },
+  {
+    name: "archiveVersion",
+    request: {
+      schema: SelfImprovementApi.ArchiveVersionRequest,
+      input: { artifactID, versionID, reason: "superseded", expectedRevision: 1 },
+    },
+    response: { schema: SelfImprovementApi.ArchiveVersionResponse, input: completed },
+  },
+  {
+    name: "tombstoneArtifact",
+    request: {
+      schema: SelfImprovementApi.TombstoneArtifactRequest,
+      input: { artifactID, reason: "retired", expectedRevision: 1 },
+    },
+    response: { schema: SelfImprovementApi.TombstoneArtifactResponse, input: completed },
+  },
+  {
+    name: "approve",
+    request: { schema: SelfImprovementApi.ApproveRequest, input: { approvalRequestID: approval.requestID, binding } },
+    response: { schema: SelfImprovementApi.ApproveResponse, input: { approval } },
+  },
+  {
+    name: "reject",
+    request: {
+      schema: SelfImprovementApi.RejectRequest,
+      input: { approvalRequestID: approval.requestID, binding, reason: "approval-rejected" },
+    },
+    response: { schema: SelfImprovementApi.RejectResponse, input: { approval } },
+  },
+  {
+    name: "createObservation",
+    request: {
+      schema: SelfImprovementApi.CreateObservationRequest,
+      input: {
+        workload: "typescript",
+        workloadRevision: 1,
+        errorClass: "type-error",
+        orderedToolSymbolDigest: digest,
+        outcomeClass: "failure",
+        taskIDDigest: digest,
+      },
+    },
+    response: {
+      schema: SelfImprovementApi.CreateObservationResponse,
+      input: { observation, matchingCount: 1, generationEligible: true },
+    },
+  },
+  {
+    name: "createMetricRun",
+    request: {
+      schema: SelfImprovementApi.CreateMetricRunRequest,
+      input: {
+        versionID,
+        stage: "shadow",
+        suiteID,
+        suiteRevision: 1,
+        workload: "typescript",
+        workloadRevision: 1,
+        baselineID,
+        acceptanceStart: 1,
+        acceptanceEnd: 2,
+        cutoffAt: 3,
+        requestDigest: digest,
+      },
+    },
+    response: { schema: SelfImprovementApi.CreateMetricRunResponse, input: { run } },
+  },
+  {
+    name: "addMetricSample",
+    request: {
+      schema: SelfImprovementApi.AddMetricSampleRequest,
+      input: {
+        runID,
+        sampleIDDigest: digest,
+        taskIDDigest: digest,
+        metrics,
+        outcome: "success",
+        startedAt: 1,
+        terminalAt: 2,
+        requestDigest: digest,
+      },
+    },
+    response: { schema: SelfImprovementApi.AddMetricSampleResponse, input: { sample, replayed: false } },
+  },
+  {
+    name: "decideMetricRun",
+    request: {
+      schema: SelfImprovementApi.DecideMetricRunRequest,
+      input: { runID, cutoffSampleSetDigest: digest },
+    },
+    response: {
+      schema: SelfImprovementApi.DecideMetricRunResponse,
+      input: { decision, findings, replayed: false },
+    },
+  },
+  {
+    name: "listBaselines",
+    request: {
+      schema: SelfImprovementApi.ListBaselinesRequest,
+      input: { workload: "typescript", suiteRevision: 1, limit: "10", cursor: "a" },
+    },
+    response: { schema: SelfImprovementApi.ListBaselinesResponse, input: page(baseline) },
+  },
+  {
+    name: "listMetricRuns",
+    request: {
+      schema: SelfImprovementApi.ListMetricRunsRequest,
+      input: { versionID, stage: "shadow", state: "open", includeSamples: false, limit: "10", cursor: "a" },
+    },
+    response: {
+      schema: SelfImprovementApi.ListMetricRunsResponse,
+      input: page({ run, aggregates, sampleCount: 1, samples: [sample] }),
+    },
+  },
+  {
+    name: "listEvaluations",
+    request: {
+      schema: SelfImprovementApi.ListEvaluationsRequest,
+      input: { artifactID, versionID, stage: "shadow", limit: "10", cursor: "a" },
+    },
+    response: {
+      schema: SelfImprovementApi.ListEvaluationsResponse,
+      input: page({ run, decision, orderedFindings: findings }),
+    },
+  },
+  {
+    name: "listTransitions",
+    request: {
+      schema: SelfImprovementApi.ListTransitionsRequest,
+      input: { artifactID, versionID, event: "version-admitted", limit: "10", cursor: "a" },
+    },
+    response: { schema: SelfImprovementApi.ListTransitionsResponse, input: page(transition) },
+  },
+  {
+    name: "listApprovals",
+    request: {
+      schema: SelfImprovementApi.ListApprovalsRequest,
+      input: { artifactID, versionID, approverID: "approver", limit: "10", cursor: "a" },
+    },
+    response: { schema: SelfImprovementApi.ListApprovalsResponse, input: page(approval) },
+  },
+  {
+    name: "listContextEvidence",
+    request: {
+      schema: SelfImprovementApi.ListContextEvidenceRequest,
+      input: { artifactID, versionID, status: "pending", limit: "10", cursor: "a" },
+    },
+    response: {
+      schema: SelfImprovementApi.ListContextEvidenceResponse,
+      input: page(
+        { cursorID: "a", createdAt: 1, evidence: { type: "desired-state", value: desiredState } },
+        { cursorID: "b", createdAt: 2, evidence: { type: "outbox", value: outbox } },
+        { cursorID: "c", createdAt: 3, evidence: { type: "selection", value: selection } },
+      ),
+    },
+  },
+  {
+    name: "listRoutingDecisions",
+    request: {
+      schema: SelfImprovementApi.ListRoutingDecisionsRequest,
+      input: { sessionDigest: digest, workload: "typescript", limit: "10", cursor: "a" },
+    },
+    response: { schema: SelfImprovementApi.ListRoutingDecisionsResponse, input: page(routingDecision) },
+  },
+  {
+    name: "listAudit",
+    request: {
+      schema: SelfImprovementApi.ListAuditRequest,
+      input: { eventType: "observation-accepted", artifactID, from: 1, to: 2, limit: "10", cursor: "a" },
+    },
+    response: { schema: SelfImprovementApi.ListAuditResponse, input: page(auditEntry) },
+  },
+] as const
+
+test("strictly decodes and encodes every operation request and response", () => {
+  expect(operationContracts.map(({ name }) => name)).toEqual(Object.keys(SelfImprovementApi.PrivateApiOperations))
+  for (const contract of operationContracts) {
+    const request = decode(contract.request.schema, contract.request.input)
+    expect(Schema.encodeUnknownSync(contract.request.schema)(request)).toEqual(contract.request.input)
+    const response = decode(contract.response.schema, contract.response.input)
+    expect(Schema.encodeUnknownSync(contract.response.schema)(response)).toEqual(contract.response.input)
+    expect(() => decode(contract.request.schema, { ...contract.request.input, unexpected: true })).toThrow()
+    expect(() => decode(contract.response.schema, { ...contract.response.input, unexpected: true })).toThrow()
+  }
+})
+
+test("strictly decodes and encodes all three header schemas", () => {
+  const contracts = [
+    [SelfImprovementApi.LocationHeaders, { "X-OpenCode-Location-ID": locationID }],
+    [
+      SelfImprovementApi.MutationHeaders,
+      { "X-OpenCode-Location-ID": locationID, "Idempotency-Key": "retry-1" },
+    ],
+    [
+      SelfImprovementApi.ArtifactMutationHeaders,
+      { "X-OpenCode-Location-ID": locationID, "Idempotency-Key": "retry-1", "If-Match": "7" },
+    ],
+  ] as const
+
+  for (const [schema, input] of contracts) {
+    const decoded = decode(schema, input)
+    expect(Schema.encodeUnknownSync(schema)(decoded)).toEqual(input)
+    expect(() => decode(schema, { ...input, unexpected: true })).toThrow()
+  }
+})
 
 test("defines exactly the 22 app-private operations", () => {
   expect(Object.values(SelfImprovementApi.PrivateApiOperations).map(({ method, path }) => `${method} ${path}`)).toEqual([
@@ -62,7 +592,8 @@ test("private API wire contracts are closed and preserve HTTP encodings", () => 
     "Idempotency-Key": "retry-1",
     "If-Match": "7",
   }
-  expect(Number(decode(SelfImprovementApi.ArtifactMutationHeaders, headers)["If-Match"])).toBe(7)
+  const decodedHeaders: { readonly "If-Match": number } = decode(SelfImprovementApi.ArtifactMutationHeaders, headers)
+  expect(decodedHeaders["If-Match"]).toBe(7)
   expect(() => decode(SelfImprovementApi.ArtifactMutationHeaders, { ...headers, "If-Match": "-1" })).toThrow()
 
   const error = { code: "artifact-not-found", message: "not found", requestID: "req-1", details: {} } as const
@@ -120,6 +651,490 @@ test("pins every error code to its exact HTTP status", () => {
     cutoffMismatch: { code: "cutoff-mismatch", status: 409 },
     contextUnavailable: { code: "context-unavailable", status: 503 },
   })
+})
+
+test("pins the complete metadata contract for all 22 operations", () => {
+  expect(
+    Object.entries(SelfImprovementApi.PrivateApiOperations).map(([name, operation]) => [
+      name,
+      operation.method,
+      operation.path,
+      operation.operation,
+      operation.locationSource,
+      operation.principals,
+      operation.authorizationRules,
+      operation.errors,
+      operation.successStatuses,
+      "ordering" in operation ? operation.ordering : null,
+      operation.sideEffects,
+      operation.mutation,
+      operation.request.ast.annotations?.identifier,
+      operation.response.ast.annotations?.identifier,
+    ]),
+  ).toEqual([
+    [
+      "listArtifacts",
+      "GET",
+      "/private/self-improvement/artifacts",
+      "artifact.read",
+      "header-grant",
+      ["first-party-user", "coordinator", "audit-reader"],
+      [],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "kind-name-id-asc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListArtifactsRequest",
+      "SelfImprovementApi.ListArtifactsResponse",
+    ],
+    [
+      "createArtifact",
+      "POST",
+      "/private/self-improvement/artifacts",
+      "artifact.create",
+      "header-grant",
+      ["first-party-user", "coordinator"],
+      [{ type: "coordinator-generated-only", principal: "coordinator", condition: "generated-output" }],
+      [
+        { code: "admission-rejected", status: 400 },
+        { code: "forbidden", status: 403 },
+        { code: "name-reserved", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+      ],
+      [201],
+      null,
+      ["artifact-created", "draft-version-created", "transition-appended", "audit-appended"],
+      true,
+      "SelfImprovementApi.CreateArtifactRequest",
+      "SelfImprovementApi.CreateArtifactResponse",
+    ],
+    [
+      "getArtifact",
+      "GET",
+      "/private/self-improvement/artifacts/{artifactID}",
+      "artifact.read",
+      "artifact-header-grant",
+      ["first-party-user", "coordinator", "audit-reader"],
+      [],
+      [
+        { code: "forbidden", status: 403 },
+        { code: "artifact-not-found", status: 404 },
+      ],
+      [200],
+      null,
+      ["none"],
+      false,
+      "SelfImprovementApi.GetArtifactRequest",
+      "SelfImprovementApi.GetArtifactResponse",
+    ],
+    [
+      "listVersions",
+      "GET",
+      "/private/self-improvement/artifacts/{artifactID}/versions",
+      "artifact.read",
+      "artifact-header-grant",
+      ["first-party-user", "coordinator", "audit-reader"],
+      [],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+        { code: "artifact-not-found", status: 404 },
+      ],
+      [200],
+      "version-number-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListVersionsRequest",
+      "SelfImprovementApi.ListVersionsResponse",
+    ],
+    [
+      "createVersion",
+      "POST",
+      "/private/self-improvement/artifacts/{artifactID}/versions",
+      "artifact.create",
+      "artifact-header-grant",
+      ["first-party-user", "coordinator"],
+      [{ type: "coordinator-generated-only", principal: "coordinator", condition: "generated-output" }],
+      [
+        { code: "admission-rejected", status: 400 },
+        { code: "forbidden", status: 403 },
+        { code: "artifact-not-found", status: 404 },
+        { code: "revision-conflict", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+        { code: "tombstoned", status: 409 },
+      ],
+      [201],
+      null,
+      ["draft-version-created", "audit-appended"],
+      true,
+      "SelfImprovementApi.CreateVersionRequest",
+      "SelfImprovementApi.CreateVersionResponse",
+    ],
+    [
+      "getVersion",
+      "GET",
+      "/private/self-improvement/artifacts/{artifactID}/versions/{versionID}",
+      "artifact.read",
+      "artifact-header-grant",
+      ["first-party-user", "coordinator", "audit-reader"],
+      [],
+      [
+        { code: "forbidden", status: 403 },
+        { code: "artifact-or-version-not-found", status: 404 },
+      ],
+      [200],
+      null,
+      ["none"],
+      false,
+      "SelfImprovementApi.GetVersionRequest",
+      "SelfImprovementApi.GetVersionResponse",
+    ],
+    [
+      "archiveVersion",
+      "POST",
+      "/private/self-improvement/artifacts/{artifactID}/versions/{versionID}/archive",
+      "artifact.archive",
+      "artifact-header-grant",
+      ["first-party-user", "coordinator"],
+      [{ type: "coordinator-policy-terminal-only", principal: "coordinator", condition: "policy-terminal-action" }],
+      [
+        { code: "forbidden", status: 403 },
+        { code: "artifact-or-version-not-found", status: 404 },
+        { code: "revision-conflict", status: 409 },
+        { code: "stage-illegal", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+        { code: "context-unavailable", status: 503 },
+      ],
+      [200, 202],
+      null,
+      ["terminal-intent-recorded", "context-removal-requested", "transition-appended", "audit-appended"],
+      true,
+      "SelfImprovementApi.ArchiveVersionRequest",
+      "SelfImprovementApi.ArchiveVersionResponse",
+    ],
+    [
+      "tombstoneArtifact",
+      "POST",
+      "/private/self-improvement/artifacts/{artifactID}/tombstone",
+      "artifact.tombstone",
+      "artifact-header-grant",
+      ["first-party-user", "coordinator"],
+      [{ type: "coordinator-policy-terminal-only", principal: "coordinator", condition: "policy-terminal-action" }],
+      [
+        { code: "forbidden", status: 403 },
+        { code: "artifact-not-found", status: 404 },
+        { code: "revision-conflict", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+        { code: "context-unavailable", status: 503 },
+      ],
+      [200, 202],
+      null,
+      [
+        "pending-work-cancelled",
+        "terminal-intent-recorded",
+        "context-removal-requested",
+        "versions-archived",
+        "recommendations-removed",
+        "transition-appended",
+        "audit-appended",
+      ],
+      true,
+      "SelfImprovementApi.TombstoneArtifactRequest",
+      "SelfImprovementApi.TombstoneArtifactResponse",
+    ],
+    [
+      "approve",
+      "POST",
+      "/private/self-improvement/approvals/{approvalRequestID}/approve",
+      "approval.decide",
+      "approval-binding-header-grant",
+      ["location-approver"],
+      [{ type: "dedicated-approver-not-creator", principal: "location-approver" }],
+      [
+        { code: "forbidden", status: 403 },
+        { code: "creator-self-approval", status: 403 },
+        { code: "approval-request-not-found", status: 404 },
+        { code: "binding-mismatch", status: 409 },
+        { code: "expired", status: 409 },
+        { code: "already-decided", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+      ],
+      [200],
+      null,
+      ["approval-recorded"],
+      true,
+      "SelfImprovementApi.ApproveRequest",
+      "SelfImprovementApi.ApproveResponse",
+    ],
+    [
+      "reject",
+      "POST",
+      "/private/self-improvement/approvals/{approvalRequestID}/reject",
+      "approval.decide",
+      "approval-binding-header-grant",
+      ["location-approver"],
+      [{ type: "dedicated-approver-not-creator", principal: "location-approver" }],
+      [
+        { code: "forbidden", status: 403 },
+        { code: "creator-self-approval", status: 403 },
+        { code: "approval-request-not-found", status: 404 },
+        { code: "binding-mismatch", status: 409 },
+        { code: "expired", status: 409 },
+        { code: "already-decided", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+      ],
+      [200],
+      null,
+      ["rejection-recorded", "terminal-intent-recorded"],
+      true,
+      "SelfImprovementApi.RejectRequest",
+      "SelfImprovementApi.RejectResponse",
+    ],
+    [
+      "createObservation",
+      "POST",
+      "/private/self-improvement/observations",
+      "evidence.ingest",
+      "header-grant",
+      ["runtime-evidence-service"],
+      [],
+      [
+        { code: "redaction-rejected", status: 400 },
+        { code: "forbidden", status: 403 },
+        { code: "idempotency-mismatch", status: 409 },
+      ],
+      [200, 201],
+      null,
+      ["observation-recorded", "generation-eligibility-updated", "audit-appended"],
+      true,
+      "SelfImprovementApi.CreateObservationRequest",
+      "SelfImprovementApi.CreateObservationResponse",
+    ],
+    [
+      "createMetricRun",
+      "POST",
+      "/private/self-improvement/metric-runs",
+      "evidence.ingest",
+      "header-grant",
+      ["runtime-evidence-service"],
+      [],
+      [
+        { code: "binding-invalid", status: 400 },
+        { code: "forbidden", status: 403 },
+        { code: "version-or-baseline-not-found", status: 404 },
+        { code: "idempotency-mismatch", status: 409 },
+        { code: "run-conflict", status: 409 },
+      ],
+      [201],
+      null,
+      ["run-opened"],
+      true,
+      "SelfImprovementApi.CreateMetricRunRequest",
+      "SelfImprovementApi.CreateMetricRunResponse",
+    ],
+    [
+      "addMetricSample",
+      "POST",
+      "/private/self-improvement/metric-runs/{runID}/samples",
+      "evidence.ingest",
+      "run-header-grant",
+      ["runtime-evidence-service"],
+      [],
+      [
+        { code: "sample-invalid", status: 400 },
+        { code: "forbidden", status: 403 },
+        { code: "run-not-found", status: 404 },
+        { code: "duplicate-different", status: 409 },
+        { code: "late", status: 409 },
+        { code: "out-of-stage", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+      ],
+      [201],
+      null,
+      ["sample-appended"],
+      true,
+      "SelfImprovementApi.AddMetricSampleRequest",
+      "SelfImprovementApi.AddMetricSampleResponse",
+    ],
+    [
+      "decideMetricRun",
+      "POST",
+      "/private/self-improvement/metric-runs/{runID}/decisions",
+      "evaluation.decide",
+      "run-header-grant",
+      ["evaluator"],
+      [],
+      [
+        { code: "forbidden", status: 403 },
+        { code: "run-not-found", status: 404 },
+        { code: "already-decided", status: 409 },
+        { code: "cutoff-mismatch", status: 409 },
+        { code: "idempotency-mismatch", status: 409 },
+      ],
+      [201],
+      null,
+      ["decision-recorded", "coordinator-event-emitted"],
+      true,
+      "SelfImprovementApi.DecideMetricRunRequest",
+      "SelfImprovementApi.DecideMetricRunResponse",
+    ],
+    [
+      "listBaselines",
+      "GET",
+      "/private/self-improvement/baselines",
+      "audit.read",
+      "header-grant",
+      ["audit-reader", "evaluator", "coordinator"],
+      [],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "created-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListBaselinesRequest",
+      "SelfImprovementApi.ListBaselinesResponse",
+    ],
+    [
+      "listMetricRuns",
+      "GET",
+      "/private/self-improvement/metric-runs",
+      "audit.read",
+      "header-grant",
+      ["audit-reader", "evaluator", "coordinator"],
+      [{ type: "include-samples-audit-reader-only", principal: "audit-reader", queryField: "includeSamples" }],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "created-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListMetricRunsRequest",
+      "SelfImprovementApi.ListMetricRunsResponse",
+    ],
+    [
+      "listEvaluations",
+      "GET",
+      "/private/self-improvement/evaluations",
+      "audit.read",
+      "header-grant",
+      ["audit-reader", "evaluator", "coordinator"],
+      [],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "decided-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListEvaluationsRequest",
+      "SelfImprovementApi.ListEvaluationsResponse",
+    ],
+    [
+      "listTransitions",
+      "GET",
+      "/private/self-improvement/transitions",
+      "audit.read",
+      "header-grant",
+      ["audit-reader", "coordinator"],
+      [],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "timestamp-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListTransitionsRequest",
+      "SelfImprovementApi.ListTransitionsResponse",
+    ],
+    [
+      "listApprovals",
+      "GET",
+      "/private/self-improvement/approvals",
+      "audit.read",
+      "header-grant",
+      ["audit-reader", "location-approver"],
+      [{ type: "approver-own-decisions-only", principal: "location-approver" }],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "decided-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListApprovalsRequest",
+      "SelfImprovementApi.ListApprovalsResponse",
+    ],
+    [
+      "listContextEvidence",
+      "GET",
+      "/private/self-improvement/context-evidence",
+      "audit.read",
+      "header-grant",
+      ["audit-reader", "coordinator"],
+      [],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "created-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListContextEvidenceRequest",
+      "SelfImprovementApi.ListContextEvidenceResponse",
+    ],
+    [
+      "listRoutingDecisions",
+      "GET",
+      "/private/self-improvement/routing-decisions",
+      "audit.read",
+      "header-grant",
+      ["audit-reader", "coordinator"],
+      [],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "timestamp-id-desc",
+      ["none"],
+      false,
+      "SelfImprovementApi.ListRoutingDecisionsRequest",
+      "SelfImprovementApi.ListRoutingDecisionsResponse",
+    ],
+    [
+      "listAudit",
+      "GET",
+      "/private/self-improvement/audit",
+      "audit.read",
+      "header-grant",
+      ["audit-reader"],
+      [{ type: "audit-reader-only-audit", principal: "audit-reader" }],
+      [
+        { code: "invalid-page", status: 400 },
+        { code: "forbidden", status: 403 },
+      ],
+      [200],
+      "timestamp-id-desc",
+      ["access-audited"],
+      false,
+      "SelfImprovementApi.ListAuditRequest",
+      "SelfImprovementApi.ListAuditResponse",
+    ],
+  ])
 })
 
 test("binds all operations to named request and response schemas", () => {
