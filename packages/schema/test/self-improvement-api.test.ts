@@ -81,6 +81,11 @@ const approval = {
   binding,
   decision: { _tag: "approved", approverID: "approver", decidedAt: 1, expiresAt: 2 },
 }
+const rejectedApproval = {
+  ...approval,
+  id: SelfImprovementLifecycle.ApprovalID.create(),
+  decision: { _tag: "rejected", approverID: "approver", decidedAt: 1, reason: "approval-rejected" },
+}
 const observation = {
   id: SelfImprovementLifecycle.ObservationID.create(),
   locationID,
@@ -509,7 +514,7 @@ const operationContracts = [
 ] as const
 
 test("strictly decodes and encodes every operation request and response", () => {
-  expect(operationContracts.map(({ name }) => name)).toEqual(Object.keys(SelfImprovementApi.PrivateApiOperations))
+  expect(Object.keys(SelfImprovementApi.PrivateApiOperations)).toEqual(operationContracts.map(({ name }) => name))
   for (const contract of operationContracts) {
     const request = decode(contract.request.schema, contract.request.input)
     expect(Schema.encodeUnknownSync(contract.request.schema)(request)).toEqual(contract.request.input)
@@ -653,6 +658,61 @@ test("pins every error code to its exact HTTP status", () => {
   })
 })
 
+test("stored errors decode only at their required status", () => {
+  const statuses = [200, 201, 202, 400, 403, 404, 409, 503] as const
+  for (const error of Object.values(SelfImprovementApi.ApiErrors)) {
+    const body = { code: error.code, message: error.code, requestID: "req-1", details: {} }
+    const input = { status: error.status, body }
+    const decoded = decode(SelfImprovementApi.StoredResponse, input)
+    expect(decoded as unknown).toEqual(input)
+    expect(Schema.encodeUnknownSync(SelfImprovementApi.StoredResponse)(decoded) as unknown).toEqual(input)
+    for (const status of statuses) {
+      if (status === error.status) continue
+      expect(() => decode(SelfImprovementApi.StoredResponse, { status, body })).toThrow()
+    }
+  }
+})
+
+test("stored successes preserve exact replay status and body pairings", () => {
+  const statuses = [200, 201, 202, 400, 403, 404, 409, 503] as const
+  const successes = [
+    { allowed: [200], body: completed },
+    { allowed: [200], body: { approval } },
+    { allowed: [200], body: { approval: rejectedApproval } },
+    { allowed: [200, 201], body: { observation, matchingCount: 1, generationEligible: true } },
+    { allowed: [201], body: { artifact, version, revision: 1 } },
+    { allowed: [201], body: { version, revision: 1 } },
+    { allowed: [201], body: { run } },
+    { allowed: [201], body: { sample, replayed: false } },
+    { allowed: [201], body: { decision, findings, replayed: false } },
+    { allowed: [202], body: { status: "reconciliation-pending", artifactRevision: 2, outbox } },
+  ] as const
+
+  for (const success of successes) {
+    for (const status of success.allowed) {
+      const input = { status, body: success.body }
+      const decoded = decode(SelfImprovementApi.StoredResponse, input)
+      expect(decoded as unknown).toEqual(input)
+      expect(Schema.encodeUnknownSync(SelfImprovementApi.StoredResponse)(decoded) as unknown).toEqual(input)
+    }
+    for (const status of statuses) {
+      if (success.allowed.some((allowed) => allowed === status)) continue
+      expect(() => decode(SelfImprovementApi.StoredResponse, { status, body: success.body })).toThrow()
+    }
+  }
+
+  expect(decode(SelfImprovementApi.StoredResponse, { status: 200, body: completed }) as unknown).toEqual({
+    status: 200,
+    body: completed,
+  })
+  expect(
+    decode(SelfImprovementApi.StoredResponse, {
+      status: 202,
+      body: { status: "reconciliation-pending", artifactRevision: 2, outbox },
+    }) as unknown,
+  ).toEqual({ status: 202, body: { status: "reconciliation-pending", artifactRevision: 2, outbox } })
+})
+
 test("pins the complete metadata contract for all 22 operations", () => {
   expect(
     Object.entries(SelfImprovementApi.PrivateApiOperations).map(([name, operation]) => [
@@ -668,6 +728,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "ordering" in operation ? operation.ordering : null,
       operation.sideEffects,
       operation.mutation,
+      operation.headers.ast.annotations?.identifier,
       operation.request.ast.annotations?.identifier,
       operation.response.ast.annotations?.identifier,
     ]),
@@ -688,6 +749,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "kind-name-id-asc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListArtifactsRequest",
       "SelfImprovementApi.ListArtifactsResponse",
     ],
@@ -709,6 +771,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["artifact-created", "draft-version-created", "transition-appended", "audit-appended"],
       true,
+      "SelfImprovementApi.MutationHeaders",
       "SelfImprovementApi.CreateArtifactRequest",
       "SelfImprovementApi.CreateArtifactResponse",
     ],
@@ -728,6 +791,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.GetArtifactRequest",
       "SelfImprovementApi.GetArtifactResponse",
     ],
@@ -748,6 +812,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "version-number-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListVersionsRequest",
       "SelfImprovementApi.ListVersionsResponse",
     ],
@@ -771,6 +836,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["draft-version-created", "audit-appended"],
       true,
+      "SelfImprovementApi.ArtifactMutationHeaders",
       "SelfImprovementApi.CreateVersionRequest",
       "SelfImprovementApi.CreateVersionResponse",
     ],
@@ -790,6 +856,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.GetVersionRequest",
       "SelfImprovementApi.GetVersionResponse",
     ],
@@ -813,6 +880,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["terminal-intent-recorded", "context-removal-requested", "transition-appended", "audit-appended"],
       true,
+      "SelfImprovementApi.ArtifactMutationHeaders",
       "SelfImprovementApi.ArchiveVersionRequest",
       "SelfImprovementApi.ArchiveVersionResponse",
     ],
@@ -843,6 +911,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
         "audit-appended",
       ],
       true,
+      "SelfImprovementApi.ArtifactMutationHeaders",
       "SelfImprovementApi.TombstoneArtifactRequest",
       "SelfImprovementApi.TombstoneArtifactResponse",
     ],
@@ -867,6 +936,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["approval-recorded"],
       true,
+      "SelfImprovementApi.MutationHeaders",
       "SelfImprovementApi.ApproveRequest",
       "SelfImprovementApi.ApproveResponse",
     ],
@@ -891,6 +961,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["rejection-recorded", "terminal-intent-recorded"],
       true,
+      "SelfImprovementApi.MutationHeaders",
       "SelfImprovementApi.RejectRequest",
       "SelfImprovementApi.RejectResponse",
     ],
@@ -911,6 +982,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["observation-recorded", "generation-eligibility-updated", "audit-appended"],
       true,
+      "SelfImprovementApi.MutationHeaders",
       "SelfImprovementApi.CreateObservationRequest",
       "SelfImprovementApi.CreateObservationResponse",
     ],
@@ -933,6 +1005,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["run-opened"],
       true,
+      "SelfImprovementApi.MutationHeaders",
       "SelfImprovementApi.CreateMetricRunRequest",
       "SelfImprovementApi.CreateMetricRunResponse",
     ],
@@ -957,6 +1030,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["sample-appended"],
       true,
+      "SelfImprovementApi.MutationHeaders",
       "SelfImprovementApi.AddMetricSampleRequest",
       "SelfImprovementApi.AddMetricSampleResponse",
     ],
@@ -979,6 +1053,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       null,
       ["decision-recorded", "coordinator-event-emitted"],
       true,
+      "SelfImprovementApi.MutationHeaders",
       "SelfImprovementApi.DecideMetricRunRequest",
       "SelfImprovementApi.DecideMetricRunResponse",
     ],
@@ -998,6 +1073,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "created-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListBaselinesRequest",
       "SelfImprovementApi.ListBaselinesResponse",
     ],
@@ -1017,6 +1093,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "created-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListMetricRunsRequest",
       "SelfImprovementApi.ListMetricRunsResponse",
     ],
@@ -1036,6 +1113,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "decided-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListEvaluationsRequest",
       "SelfImprovementApi.ListEvaluationsResponse",
     ],
@@ -1055,6 +1133,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "timestamp-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListTransitionsRequest",
       "SelfImprovementApi.ListTransitionsResponse",
     ],
@@ -1074,6 +1153,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "decided-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListApprovalsRequest",
       "SelfImprovementApi.ListApprovalsResponse",
     ],
@@ -1093,6 +1173,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "created-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListContextEvidenceRequest",
       "SelfImprovementApi.ListContextEvidenceResponse",
     ],
@@ -1112,6 +1193,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "timestamp-id-desc",
       ["none"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListRoutingDecisionsRequest",
       "SelfImprovementApi.ListRoutingDecisionsResponse",
     ],
@@ -1131,6 +1213,7 @@ test("pins the complete metadata contract for all 22 operations", () => {
       "timestamp-id-desc",
       ["access-audited"],
       false,
+      "SelfImprovementApi.LocationHeaders",
       "SelfImprovementApi.ListAuditRequest",
       "SelfImprovementApi.ListAuditResponse",
     ],
