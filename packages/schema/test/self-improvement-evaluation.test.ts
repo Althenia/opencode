@@ -308,10 +308,18 @@ test("samples and findings bind exact outcomes, IDs, and gate order", () => {
 
 test("evaluation decisions constrain reward and retain an optional exact approval binding", () => {
   const runID = SelfImprovementLifecycle.EvaluationRunID.create()
+  const findings = SelfImprovementEvaluation.GateIDs.map((gateID, index) => ({
+    id: SelfImprovementLifecycle.GateFindingID.create(),
+    evaluationRunID: runID,
+    order: index + 1,
+    gateID,
+    result: "pass" as const,
+    code: "ok",
+  }))
   const decision = {
     runID,
     cutoffSampleSetDigest: digest,
-    findings: [],
+    findings,
     metricTotals: zeroTotals,
     aggregates: zeroAggregates,
     aggregateReward: 0,
@@ -321,6 +329,16 @@ test("evaluation decisions constrain reward and retain an optional exact approva
   const decoded = decode(SelfImprovementEvaluation.EvaluationDecision, decision)
   expect(decoded).toEqual(decision)
   expect(Schema.encodeUnknownSync(SelfImprovementEvaluation.EvaluationDecision)(decoded)).toEqual(decision)
+  for (const invalidFindings of [
+    findings.slice(1),
+    findings.with(0, findings[1]).with(1, findings[0]),
+    findings.with(1, findings[0]),
+    findings.with(1, { ...findings[1], id: findings[0].id }),
+  ]) {
+    expect(() =>
+      decode(SelfImprovementEvaluation.EvaluationDecision, { ...decision, findings: invalidFindings }),
+    ).toThrow()
+  }
   for (const aggregateReward of [-1, 1]) {
     expect(decode(SelfImprovementEvaluation.EvaluationDecision, { ...decision, aggregateReward })).toEqual({
       ...decision,

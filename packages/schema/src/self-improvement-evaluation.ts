@@ -328,7 +328,14 @@ export class EvaluationDecision extends Schema.Class<EvaluationDecision>(
 )({
   runID: SelfImprovementLifecycle.EvaluationRunID,
   cutoffSampleSetDigest: SelfImprovement.Digest,
-  findings: Schema.Array(GateFinding),
+  findings: Schema.Array(GateFinding).check(
+    Schema.makeFilter(
+      (value) =>
+        value.length === GateIDs.length &&
+        value.every((finding, index) => finding.gateID === GateIDs[index]) &&
+        new Set(value.map((finding) => finding.id)).size === value.length,
+    ),
+  ),
   metricTotals: MetricTotals,
   aggregates: MetricAggregates,
   aggregateReward: Schema.Finite.check(Schema.isBetween({ minimum: -1, maximum: 1 })),
