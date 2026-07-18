@@ -25,6 +25,8 @@ a.out
 target
 .scripts
 .direnv/
+superpowers
+
 
 # Local dev files
 opencode-dev
