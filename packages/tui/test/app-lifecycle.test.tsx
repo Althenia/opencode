@@ -255,7 +255,7 @@ test("disabling yolo mode does not stop active goal supervision", async () => {
   }
 })
 
-test("Goal mode entry shows one Start action when inactive", async () => {
+test("Goal mode entry is absent when inactive", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -270,8 +270,6 @@ test("Goal mode entry shows one Start action when inactive", async () => {
     version: "0.0.0-test",
     time: { created: 0, updated: 0 },
   }
-  let startedGoal = false
-  let prompted = false
   const calls = createFetch((url) => {
     if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
     if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
@@ -280,17 +278,10 @@ test("Goal mode entry shows one Start action when inactive", async () => {
     if (url.pathname === "/api/session/dummy/goal/status") {
       return json({ data: null })
     }
-    if (url.pathname === "/api/session/dummy/goal/start") {
-      startedGoal = true
-      return json({ data: { goal: "ship task 6", active: true, iteration: 1, cap: 7 } })
-    }
     if (url.pathname === "/session/dummy/message" && url.searchParams.has("limit")) {
       return json([])
     }
-    if (url.pathname === "/session/dummy/message") {
-      prompted = true
-      return json({ data: {} })
-    }
+    if (url.pathname === "/session/dummy/message") return json({ data: {} })
   }, events)
   let api: TuiPluginApi | undefined
   let disposeSlots = () => {}
@@ -324,16 +315,11 @@ test("Goal mode entry shows one Start action when inactive", async () => {
 
     await ready
     api?.keymap.dispatchCommand("command.palette.show")
-    const frame = await captureFrame(setup, (value) => value.includes("Start goal mode"))
-    expect(frame.match(/Start goal mode/g)).toHaveLength(1)
-    expect(frame).not.toContain("Stop goal mode")
-    api?.keymap.dispatchCommand("goal.stop")
-    await Bun.sleep(50)
-    expect(prompted).toBe(false)
+    await Bun.sleep(0)
+    const frame = await captureFrame(setup, (value) => value.includes("Commands"))
+    expect(frame).not.toMatch(/(?:Start|Stop|Resume) goal mode/)
     api?.keymap.dispatchCommand("app.exit")
     await task
-
-    expect(startedGoal).toBe(false)
   } finally {
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
     mock.restore()
@@ -390,90 +376,93 @@ test("goal palette stop command does not create a session on the home route", as
   }
 })
 
-test.each([
-  { phase: "running" as const, title: "Stop goal mode", path: "/api/session/dummy/goal/stop" },
-  { phase: "stalled" as const, title: "Resume goal mode", path: "/api/session/dummy/goal/resume" },
-])("Goal mode entry shows one $title action for a $phase Goal", async ({ phase, title, path }) => {
-  const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
-  const core = await import("@opentui/core")
-  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
-  const events = createEventSource()
-  const provider = { id: "test", name: "test", source: "custom", env: [], options: {}, models: {} }
-  const session = {
-    id: "dummy",
-    title: "Demo session",
-    slug: "dummy",
-    projectID: "proj_test",
-    directory,
-    version: "0.0.0-test",
-    time: { created: 0, updated: 0 },
-  }
-  let acted = false
-  const calls = createFetch((url) => {
-    if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
-    if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
-    if (url.pathname === "/session") return json([session])
-    if (url.pathname === "/session/dummy") return json(session)
-    if (url.pathname === "/session/dummy/message") return json([])
-    if (url.pathname === "/session/dummy/todo" || url.pathname === "/session/dummy/diff") return json([])
-    if (url.pathname === "/api/session/dummy/goal/status") {
-      return json({ data: acted ? null : { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase } })
+test.each(["starting", "running", "stalled"] as const)(
+  "Goal mode entry shows only Stop for an active %s Goal",
+  async (phase) => {
+    const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })
+    const core = await import("@opentui/core")
+    mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+    const events = createEventSource()
+    const provider = { id: "test", name: "test", source: "custom", env: [], options: {}, models: {} }
+    const session = {
+      id: "dummy",
+      title: "Demo session",
+      slug: "dummy",
+      projectID: "proj_test",
+      directory,
+      version: "0.0.0-test",
+      time: { created: 0, updated: 0 },
     }
-    if (url.pathname === path) {
-      acted = true
-      if (phase === "stalled") {
-        return json({ data: { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase: "starting" } })
+    const goalMutations: string[] = []
+    let stopped = false
+    const calls = createFetch((url) => {
+      if (["start", "resume", "stop"].some((mutation) => url.pathname.endsWith(`/goal/${mutation}`))) {
+        goalMutations.push(url.pathname)
       }
-      return new Response(null, { status: 204 })
+      if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
+      if (url.pathname === "/provider") return json({ all: [provider], default: {}, connected: ["test"] })
+      if (url.pathname === "/session") return json([session])
+      if (url.pathname === "/session/dummy") return json(session)
+      if (url.pathname === "/session/dummy/message") return json([])
+      if (url.pathname === "/session/dummy/todo" || url.pathname === "/session/dummy/diff") return json([])
+      if (url.pathname === "/api/session/dummy/goal/status") {
+        return json({ data: stopped ? null : { goal: "ship task 6", active: true, iteration: 2, cap: 7, phase } })
+      }
+      if (url.pathname === "/api/session/dummy/goal/stop") {
+        stopped = true
+        return new Response(null, { status: 204 })
+      }
+    }, events)
+    let api: TuiPluginApi | undefined
+    let disposeSlots = () => {}
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+
+    try {
+      const { run } = await import("../src/app")
+      const task = Effect.runPromise(
+        run({
+          url: "http://test",
+          directory,
+          config: createTuiResolvedConfig({ plugin_enabled: {} }),
+          fetch: calls.fetch,
+          events: events.source,
+          args: { auto: true, continue: true },
+          pluginHost: {
+            async start(input) {
+              api = input.api
+              disposeSlots = input.runtime.setupSlots(input.api).dispose
+              started()
+            },
+            async dispose() {
+              disposeSlots()
+            },
+          },
+        }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+      )
+
+      await ready
+      await captureFrame(setup, (frame) => frame.includes("Current target"))
+      api?.keymap.dispatchCommand("command.palette.show")
+      const frame = await captureFrame(setup, (value) => value.includes("Stop goal mode"))
+      expect(frame.match(/Stop goal mode/g)).toHaveLength(1)
+      expect(frame).not.toMatch(/(?:Start|Resume) goal mode/)
+      goalMutations.length = 0
+      api?.keymap.dispatchCommand("goal.start")
+      await waitFor(() => stopped)
+      api?.keymap.dispatchCommand("app.exit")
+      await task
+
+      expect(stopped).toBe(true)
+      expect(goalMutations).toEqual(["/api/session/dummy/goal/stop"])
+    } finally {
+      if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+      mock.restore()
     }
-  }, events)
-  let api: TuiPluginApi | undefined
-  let disposeSlots = () => {}
-  let started!: () => void
-  const ready = new Promise<void>((resolve) => {
-    started = resolve
-  })
-
-  try {
-    const { run } = await import("../src/app")
-    const task = Effect.runPromise(
-      run({
-        url: "http://test",
-        directory,
-        config: createTuiResolvedConfig({ plugin_enabled: {} }),
-        fetch: calls.fetch,
-        events: events.source,
-        args: { auto: true, continue: true },
-        pluginHost: {
-          async start(input) {
-            api = input.api
-            disposeSlots = input.runtime.setupSlots(input.api).dispose
-            started()
-          },
-          async dispose() {
-            disposeSlots()
-          },
-        },
-      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
-    )
-
-    await ready
-    await captureFrame(setup, (frame) => frame.includes("Current target"))
-    api?.keymap.dispatchCommand("command.palette.show")
-    const frame = await captureFrame(setup, (value) => value.includes(title))
-    expect(frame.match(new RegExp(title, "g"))).toHaveLength(1)
-    expect(frame.match(/(?:Start|Stop|Resume) goal mode/g)).toHaveLength(1)
-    api?.keymap.dispatchCommand("goal.start")
-    await waitFor(() => acted)
-    api?.keymap.dispatchCommand("app.exit")
-    await task
-
-    expect(acted).toBe(true)
-  } finally {
-    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
-    mock.restore()
-  }
-})
+  },
+)
 
 test("exhausted goal shows Continue, Revise, and Stop even in yolo mode", async () => {
   const setup = await createTestRenderer({ width: 100, height: 100, useThread: false })

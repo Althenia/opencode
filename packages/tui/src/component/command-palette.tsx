@@ -13,7 +13,9 @@ import { useTuiConfig } from "../config"
 type PaletteCommandEntry = ReturnType<OpenTuiKeymap["getCommandEntries"]>[number]
 
 function isVisiblePaletteCommand(command: PaletteCommandEntry["command"]) {
-  return command.hidden !== true && command.name !== COMMAND_PALETTE_COMMAND
+  if (command.hidden === true || command.name === COMMAND_PALETTE_COMMAND) return false
+  if (command.name === "goal.start") return command.title === "Stop goal mode"
+  return true
 }
 
 function isSuggestedPaletteCommand(entry: PaletteCommandEntry) {

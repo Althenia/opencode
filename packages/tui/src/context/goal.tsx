@@ -83,6 +83,10 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       return true
     }
 
+    function ownsHome(ownership: number) {
+      return ownership === homeRevision && homeSelected()
+    }
+
     function pending(id = sessionID()) {
       if (!id) return route.data.type === "home" ? homeGoal() : undefined
       if (!starting(id)) return
@@ -277,13 +281,23 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
     createEffect(() => {
       const id = sessionID()
       if (!id) return
-      const poll = () => {
-        if (presentation.has(id)) return
-        return refresh(id).catch(() => undefined)
+      let inFlight = false
+      let cancelled = false
+      const poll = async () => {
+        if (cancelled || inFlight || presentation.has(id)) return
+        inFlight = true
+        try {
+          const status = await refresh(id)
+          if (cancelled || sessionID() !== id) return
+          if (status?.active && status.phase === "stalled") await resume(id)
+        } finally {
+          inFlight = false
+        }
       }
-      void poll()
-      const timer = setInterval(poll, 5000)
+      void poll().catch(() => undefined)
+      const timer = setInterval(() => void poll().catch(() => undefined), 5000)
       onCleanup(() => {
+        cancelled = true
         clearInterval(timer)
         presentation.delete(id)
       })
@@ -305,6 +319,7 @@ export const { use: useGoal, provider: GoalProvider } = createSimpleContext({
       starting,
       prepareHome,
       clearHome,
+      ownsHome,
       pending,
       revision,
       selected,

@@ -31,6 +31,7 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { GoalSupervisor } from "@opencode-ai/core/session/goal"
 import { SessionRunCoordinator } from "@opencode-ai/core/session/run-coordinator"
 import { SessionRunner } from "@opencode-ai/core/session/runner"
 import * as SessionRunnerLLM from "@opencode-ai/core/session/runner/llm"
@@ -1187,6 +1188,48 @@ describe("SessionRunnerLLM", () => {
         type: "compaction",
         summary: "## Objective\n- Preserve the updated task",
       })
+    }),
+  )
+
+  it.effect("continues Goal supervision after automatic compaction", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const goals = yield* GoalSupervisor.make
+      response = fragmentFixture("text", "goal-earlier", ["Earlier answer"]).completeEvents
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Earlier question ".repeat(180) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      currentModel = recoveryModel
+      requests.length = 0
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+      responses = [
+        fragmentFixture("text", "goal-work", ["Still working"]).completeEvents,
+        fragmentFixture("text", "goal-summary", ["## Objective\n- Ship the Goal"]).completeEvents,
+        fragmentFixture("text", "goal-after-compact", ["Continued after compaction"]).completeEvents,
+      ]
+
+      yield* goals.start({ sessionID, goal: "Ship the Goal" })
+      yield* Deferred.await(streamStarted)
+      currentModel = compactModel
+      let resolutions = 0
+      modelResolveHook = Effect.sync(() => {
+        resolutions++
+        if (resolutions === 2) currentModel = recoveryModel
+      })
+      yield* Deferred.succeed(streamGate, undefined)
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(4)
+      expect(requests.filter((request) => userTexts(request)[0]?.includes("Create a new anchored summary"))).toHaveLength(1)
+      expect(requests[2]?.system.map((part) => part.text).join("\n")).toContain("Ship the Goal")
+      expect(userTexts(requests[3]).at(-1)).toContain("Original goal: Ship the Goal")
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true })
     }),
   )
 

@@ -53,7 +53,7 @@ The band does not repeat the original Goal as a separate header and does not dup
 
 ### Command palette
 
-The command palette exposes one Goal mode action. It is titled `Start goal mode` when the current route has no active Goal and `Stop goal mode` when the current session has an active Goal. Starting opens the existing Goal text prompt; stopping uses the existing stop and deselect flow. The low-level `goal.stop` command remains hidden for lifecycle and keymap dispatches.
+Superseded by [Goal Requirements Alignment Design](./2026-07-18-goal-requirements-alignment-design.md): the palette exposes only `Stop goal mode` while Goal is active and no Goal action while inactive. `/goal <text>` is the sole start path.
 
 ### Progress calculation
 

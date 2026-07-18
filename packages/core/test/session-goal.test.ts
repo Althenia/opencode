@@ -476,6 +476,67 @@ describe("GoalSupervisor", () => {
     }),
   )
 
+  it.effect("uses the first option for a single-selection question without recommendations", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+      yield* goals.start({ sessionID, goal: "finish" })
+      expect(
+        yield* questions.service.ask({
+          sessionID,
+          questions: [
+            {
+              question: "Which path?",
+              header: "Path",
+              options: [
+                { label: "One", description: "First" },
+                { label: "Two", description: "Second" },
+              ],
+            },
+          ],
+        }),
+      ).toEqual([["One"]])
+    }),
+  )
+
+  it.effect("uses every option for a multiple-selection question without recommendations", () =>
+    Effect.gen(function* () {
+      const events = yield* makeEvents
+      const questions = makeQuestions(events)
+      const locations = yield* makeQuestionLocationMap(questions.service)
+      const fake = makeSession()
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, fake.service),
+        Effect.provideService(EventV2.Service, events),
+        Effect.provideService(LocationServiceMap.Service, locations),
+      )
+      yield* goals.start({ sessionID, goal: "finish" })
+      expect(
+        yield* questions.service.ask({
+          sessionID,
+          questions: [
+            {
+              question: "Which path?",
+              header: "Path",
+              multiple: true,
+              options: [
+                { label: "One", description: "First" },
+                { label: "Two", description: "Second" },
+              ],
+            },
+          ],
+        }),
+      ).toEqual([["One", "Two"]])
+    }),
+  )
+
   it.effect("settles a recommended V2 question during the first goal prompt", () =>
     Effect.gen(function* () {
       const events = yield* makeEvents
@@ -749,9 +810,9 @@ describe("GoalSupervisor", () => {
     }),
   )
 
-  it.effect("continues after an assistant requests approval", () =>
+  it.effect("continues after an assistant asks a free-text question at the idle boundary", () =>
     Effect.gen(function* () {
-      const fake = makeSession(["I need your approval to continue."])
+      const fake = makeSession(["Which implementation should I use?"])
       const events = yield* makeEvents
       const goals = yield* GoalSupervisor.make.pipe(
         Effect.provideService(SessionV2.Service, fake.service),
@@ -764,6 +825,8 @@ describe("GoalSupervisor", () => {
       yield* Effect.yieldNow
 
       expect(fake.prompts).toHaveLength(2)
+      expect(fake.prompts[1]).toMatchObject({ delivery: "queue", resume: true })
+      expect(fake.prompts[1]?.prompt.text).toContain("Which implementation should I use?")
       expect(fake.prompts[1]?.prompt.text).toContain("Handle ordinary approval and clarification autonomously")
       expect(yield* goals.status(sessionID)).toMatchObject({ active: true, iteration: 2 })
     }),
@@ -1246,6 +1309,33 @@ describe("GoalSupervisor", () => {
       expect(fake.prompts).toHaveLength(1)
       expect(yield* goals.status(sessionID)).toMatchObject({ active: true, phase: "stalled", goal: "finish" })
       expect(yield* Deferred.isDone(tracked.finalized)).toBe(false)
+    }),
+  )
+
+  it.effect("stalls and remains resumable when the supervisor loop fails", () =>
+    Effect.gen(function* () {
+      const fake = makeSession(["not done"])
+      const session = SessionV2.Service.of({
+        ...fake.service,
+        messages: () => Effect.die("message read failed"),
+      })
+      const events = yield* makeEvents
+      const goals = yield* GoalSupervisor.make.pipe(
+        Effect.provideService(SessionV2.Service, session),
+        Effect.provideService(EventV2.Service, events),
+      )
+
+      yield* goals.start({ sessionID, goal: "finish" })
+      yield* turnEnded(events, fake)
+      yield* Effect.yieldNow
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, phase: "stalled" })
+
+      expect(yield* goals.resume(sessionID)).toMatchObject({ active: true, phase: "starting" })
+      expect(fake.prompts).toHaveLength(2)
+      yield* fake.promoteNext(events)
+      yield* stepStarted(events)
+      yield* Effect.yieldNow
+      expect(yield* goals.status(sessionID)).toMatchObject({ active: true, phase: "running" })
     }),
   )
 

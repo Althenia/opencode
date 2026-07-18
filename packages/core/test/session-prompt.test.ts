@@ -109,11 +109,9 @@ describe("SessionV2.prompt", () => {
 
       yield* goals.start({ sessionID, goal: "ship task 6", messageID: id })
 
-      expect(yield* admitted(id)).toMatchObject({
-        sessionID,
-        prompt: { text: "ship task 6" },
-        delivery: "steer",
-      })
+      const input = yield* admitted(id)
+      expect(input).toMatchObject({ sessionID, delivery: "steer" })
+      expect(input?.prompt.text).toContain("Original goal: ship task 6")
       expect(wakeCalls).toEqual([sessionID])
     }),
   )

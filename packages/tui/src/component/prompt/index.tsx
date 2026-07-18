@@ -37,7 +37,7 @@ import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
-import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, FilePart, Session, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
@@ -363,10 +363,7 @@ export function Prompt(props: PromptProps) {
   const goalAction = () => {
     if (!props.sessionID) return "start"
     if (goal.starting(props.sessionID)) return "stop"
-    const status = goal.statusFor(props.sessionID)
-    if (!status?.active) return "start"
-    if (status.phase === "stalled") return "resume"
-    return "stop"
+    return goal.statusFor(props.sessionID)?.active ? "stop" : "start"
   }
 
   const promptCommands = createMemo(() =>
@@ -396,15 +393,10 @@ export function Prompt(props: PromptProps) {
       },
       {
         name: "goal.start",
-        title: goalAction() === "resume" ? "Resume goal mode" : goalAction() === "stop" ? "Stop goal mode" : "Start goal mode",
+        title: goalAction() === "stop" ? "Stop goal mode" : "Start goal mode",
         category: "Session",
         slashName: "goal",
         run: async () => {
-          if (props.sessionID && goalAction() === "resume") {
-            await goal.resume(props.sessionID)
-            dialog.clear()
-            return
-          }
           if (props.sessionID && goalAction() === "stop") {
             await goal.stop(props.sessionID)
             goal.deselect(props.sessionID)
@@ -1128,6 +1120,7 @@ export function Prompt(props: PromptProps) {
     }
 
     let sessionID = props.sessionID
+    let created: Session | undefined
     let finishMoveProgress = false
     if (sessionID == null) {
       const selectedWorkspace = workspace.selection()
@@ -1177,7 +1170,8 @@ export function Prompt(props: PromptProps) {
         return true
       }
 
-      sessionID = res.data.id
+      created = res.data
+      sessionID = created.id
     }
     if (goalText === "stop") {
       try {
@@ -1197,30 +1191,30 @@ export function Prompt(props: PromptProps) {
             ? { source: { start: part.source.text.start, end: part.source.text.end, text: part.source.text.value } }
             : {}),
         }))
-      const ownsHome = !createdSession || (homeOwnership !== undefined && goal.adoptHome(sessionID, homeOwnership))
-      if (createdSession && !ownsHome) return false
-      if (createdSession && ownsHome) {
-        const goalRevision = goal.revision(sessionID)
-        const goalStatus = goal.statusFor(sessionID)
-        route.navigate({ type: "session", sessionID })
+      if (createdSession) {
+        const ownsCreatedGoal = () =>
+          route.data.type === "home" &&
+          promptRef.submissionRevision === submissionRevision &&
+          homeOwnership !== undefined &&
+          goal.ownsHome(homeOwnership)
         try {
-          await sync.session.sync(sessionID)
-        } catch (error) {
-          if (goal.revision(sessionID) === goalRevision && goal.statusFor(sessionID) === goalStatus) {
-            goal.clear(sessionID)
-            restoreGoalPrompt(sessionID)
+          if (!ownsCreatedGoal()) return false
+          if (created && created.workspaceID !== project.workspace.current()) {
+            project.workspace.set(created.workspaceID)
+            await sync.bootstrap({ fatal: false })
+            if (!ownsCreatedGoal()) return false
           }
+          if (created) editor.reconnect(created.directory)
+          if (!ownsCreatedGoal()) return false
+          await sync.session.sync(sessionID)
+          if (!ownsCreatedGoal()) return false
+        } catch (error) {
+          restoreGoalPrompt()
           toast.show({ title: "Failed to prepare Goal", message: errorMessage(error), variant: "error" })
           return false
         }
-        if (
-          route.data.type !== "session" ||
-          route.data.sessionID !== sessionID ||
-          promptRef.submissionRevision !== submissionRevision ||
-          goal.revision(sessionID) !== goalRevision ||
-          goal.statusFor(sessionID) !== goalStatus
-        )
-          return false
+        if (homeOwnership === undefined || !goal.adoptHome(sessionID, homeOwnership)) return false
+        route.navigate({ type: "session", sessionID })
       }
       const start = goal.start(goalText, sessionID, files.length > 0 ? files : undefined)
       const startRevision = goal.revision(sessionID)

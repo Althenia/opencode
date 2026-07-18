@@ -7,6 +7,8 @@ Status: Approved design
 
 This design extends and partially supersedes [Goal Live Progress and Skill Reference Design](./2026-07-16-goal-progress-design.md).
 
+The session-readiness, manual-recovery, and command-palette rules below are superseded by [Goal Requirements Alignment Design](./2026-07-18-goal-requirements-alignment-design.md).
+
 The current Home flow creates a session, starts Goal admission, and navigates without waiting for the new session to finish hydration. Goal admission persists state before the detached runner reaches a provider step, so a failed or unready run can leave an inert Goal with no visible execution progress. A later `Step.Failed` retires the Goal and makes status return no value, causing the band to disappear instead of showing a recoverable failure.
 
 Compaction does not delete the durable `session_goal` row. However, the post-compaction runner reads history from the newest compaction checkpoint, and Goal is not a session-specific system-context source. If the summary and recent window omit the Goal, the immediate post-compaction provider turn can lose it.
@@ -74,19 +76,13 @@ When Goal is stalled, the band remains visible and uses the existing accent trea
 
 ### Palette action
 
-The command palette continues to expose one Goal action. Its label and action depend on state:
-
-- No selected Goal: `Start goal mode`.
-- Running Goal: `Stop goal mode`.
-- Stalled Goal: `Resume goal mode`.
-
-Resume submits a fresh supervised turn for the persisted effective Goal. It does not attempt to revive the previous fiber or automatically retry without user action.
+Superseded: the palette now exposes only `Stop goal mode` while a Goal is active. It shows no Goal action while inactive and never exposes Start or Resume. `/goal <text>` is the sole start path, and recovered stalled Goals resume automatically when their session is reopened.
 
 ## Architecture
 
 ### Session readiness boundary
 
-The Prompt Home path uses the existing `sync.sync(sessionID)` promise as the readiness boundary. Goal start is invoked only after that promise resolves. This removes the race between Goal admission and session-route hydration without adding timers, polling, or a new readiness abstraction.
+Superseded: the Prompt Home path completes workspace bootstrap, editor connection, and session synchronization before navigation and Goal admission. See the 2026-07-18 alignment design.
 
 The existing Home ownership revision still protects command restoration from stale asynchronous responses.
 
@@ -114,7 +110,7 @@ The durable row remains active while stalled. The phase is process state: recove
 
 ### Resume
 
-Resume resets the process phase to starting and admits a new supervised turn using the persisted effective Goal. The existing iteration cap remains authoritative. The old provider turn is not replayed, and completed todos remain available.
+Resume resets the process phase to starting and admits a new supervised turn using the persisted effective Goal. The existing iteration cap remains authoritative. The old provider turn is not replayed, and completed todos remain available. The TUI invokes this interface automatically when reopening a recovered stalled Goal; it is not a command-palette action.
 
 The public Goal contract exposes resume explicitly rather than overloading start or silently resetting Goal state. Maintained protocol sources are updated first; generated clients are regenerated through the repository command and are never edited manually.
 
@@ -155,7 +151,7 @@ This separates temporary transport failure from an authoritative Goal lifecycle 
 - No todos renders `Preparing task list` and `0%` without duplicating the Goal.
 - Stalled status remains visible.
 - A transient status request failure preserves the last known status.
-- The palette exposes exactly one Start, Stop, or Resume action for the current state.
+- The superseding alignment design covers active-only Stop palette behavior.
 
 ### Goal and todo integration
 

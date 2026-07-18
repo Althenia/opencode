@@ -457,9 +457,20 @@ export const make = Effect.gen(function* () {
         Stream.runForEach((event) => Queue.offer(queue, event)),
         Effect.forkIn(active.scope, { startImmediately: true }),
       )
-    yield* run(sessionID, active, queue).pipe(
+    const supervise: Effect.Effect<void> = Effect.suspend(() =>
+      run(sessionID, active, queue).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            if (goals.get(sessionID) !== active || !active.state.active) return
+            yield* setState(sessionID, active, (state) => ({ ...state, phase: "stalled" }))
+            yield* Effect.logWarning("Goal supervisor loop stalled", { sessionID, cause })
+            yield* supervise
+          }),
+        ),
+      ),
+    )
+    yield* supervise.pipe(
       Effect.ensuring(Fiber.interrupt(subscription)),
-      Effect.catch(() => Effect.void),
       Effect.forkIn(active.scope),
     )
     active.attached = true
