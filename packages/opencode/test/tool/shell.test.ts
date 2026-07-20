@@ -21,6 +21,8 @@ import { testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
+import { ShellSandbox } from "@opencode-ai/core/shell-sandbox"
+import { ChildProcess } from "effect/unstable/process"
 
 const shellLayer = Layer.mergeAll(
   LayerNode.compile(
@@ -32,6 +34,7 @@ const shellLayer = Layer.mergeAll(
       Config.node,
       Agent.node,
       RuntimeFlags.node,
+      ShellSandbox.node,
     ]),
   ),
   testInstanceStoreLayer,
@@ -181,6 +184,93 @@ const mustTruncate = (result: {
 }
 
 describe("tool.shell", () => {
+  it.live("fails closed before permission or spawn when sandboxing is required but unavailable", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped({ config: { shell_sandbox: "required" } })
+      const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+      const marker = path.join(tmp, "must-not-exist")
+      const error = yield* runIn(
+        tmp,
+        fail({ command: `${bin} -e ${evalarg(`Bun.write(${JSON.stringify(marker)}, "unsafe")`)}` }, capture(requests)),
+      )
+
+      expect(error.message).toContain("Shell sandboxing is required")
+      expect(requests).toEqual([])
+      expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
+    }),
+  )
+
+  it.live("warns when optional sandboxing falls back to host execution", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped({ config: { shell_sandbox: "optional" } })
+      const result = yield* runIn(tmp, run({ command: "echo optional-sandbox" }))
+
+      expect(result.metadata.exit).toBe(0)
+      expect(result.output).toContain("No enforceable shell sandbox backend was available")
+    }),
+  )
+
+  if (sh() === "zsh") {
+    it.live("sets startup-time PWD to the actual command workdir", () =>
+      Effect.gen(function* () {
+        const tmp = yield* tmpdirScoped()
+        yield* Effect.promise(() => Bun.write(path.join(tmp, ".zshenv"), 'printf "%s\\n" "$PWD"'))
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() => {
+            const previous = { PWD: process.env.PWD, ZDOTDIR: process.env.ZDOTDIR }
+            process.env.PWD = path.join(tmp, "stale")
+            process.env.ZDOTDIR = tmp
+            return previous
+          }),
+          () =>
+            runIn(
+              tmp,
+              Effect.gen(function* () {
+                const result = yield* run({ command: "printf ready && sleep 0.05" })
+                expect(result.output.split(/\r?\n/)[0]).toBe(tmp)
+                expect(result.output).toContain("ready")
+              }),
+            ),
+          (previous) =>
+            Effect.sync(() => {
+              if (previous.PWD === undefined) delete process.env.PWD
+              else process.env.PWD = previous.PWD
+              if (previous.ZDOTDIR === undefined) delete process.env.ZDOTDIR
+              else process.env.ZDOTDIR = previous.ZDOTDIR
+            }),
+        )
+      }),
+    )
+  }
+
+  it.live("spawns the command returned by an enforceable sandbox backend", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped({ config: { shell_sandbox: "required" } })
+      let prepared = 0
+      const sandbox = ShellSandbox.Service.of({
+        prepare: (command) =>
+          Effect.sync(() => {
+            prepared++
+            if (command._tag !== "StandardCommand") throw new Error("expected standard command")
+            return ChildProcess.make(process.execPath, ["-e", 'console.log("legacy-sandboxed")'], {
+              cwd: command.options.cwd,
+              env: command.options.env,
+              stdin: "ignore",
+              detached: false,
+            })
+          }),
+      })
+      const result = yield* runIn(
+        tmp,
+        run({ command: "echo unsafe" }).pipe(Effect.provideService(ShellSandbox.Service, sandbox)),
+      )
+
+      expect(prepared).toBe(1)
+      expect(result.output).toContain("legacy-sandboxed")
+      expect(result.output).not.toContain("unsafe")
+    }),
+  )
+
   each("basic", () =>
     runIn(
       projectRoot,
@@ -1189,10 +1279,12 @@ describe("tool.shell truncation", () => {
         expect(filepath).toBeTruthy()
 
         const saved = yield* (yield* FSUtil.Service).readFileString(filepath!)
-        const lines = saved.trim().split(/\r?\n/)
-        expect(lines.length).toBe(lineCount)
-        expect(lines[0]).toBe("1")
-        expect(lines[lineCount - 1]).toBe(String(lineCount))
+        const lines = saved
+          .trim()
+          .split(/\r?\n/)
+          .filter((line) => /^\d+$/.test(line))
+        expect(lines).toHaveLength(lineCount)
+        expect(lines.every((line, index) => line === String(index + 1))).toBe(true)
       }),
     ),
   )

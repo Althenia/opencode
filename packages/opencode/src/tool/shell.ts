@@ -21,6 +21,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { ShellSandbox } from "@opencode-ai/core/shell-sandbox"
 
 export { Parameters } from "./shell/prompt"
 
@@ -344,6 +345,7 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
+    const sandbox = yield* ShellSandbox.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -422,6 +424,7 @@ export const ShellTool = Tool.define(
       return {
         ...process.env,
         ...extra.env,
+        PWD: cwd,
       }
     })
 
@@ -432,6 +435,8 @@ export const ShellTool = Tool.define(
         cwd: string
         env: NodeJS.ProcessEnv
         timeout: number
+        process: ChildProcess.Command
+        sandboxWarning?: string
       },
       ctx: Tool.Context,
     ) {
@@ -481,7 +486,7 @@ export const ShellTool = Tool.define(
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
-          const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
+          const handle = yield* spawner.spawn(input.process)
 
           yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
@@ -565,6 +570,7 @@ export const ShellTool = Tool.define(
         )
       }
       if (aborted) meta.push("User aborted the command")
+      if (input.sandboxWarning) meta.push(input.sandboxWarning)
       const raw = list.map((item) => item.text).join("")
       const end = tail(raw, limits.maxLines, limits.maxBytes)
       if (end.cut) cut = true
@@ -604,7 +610,7 @@ export const ShellTool = Tool.define(
         yield* Effect.logInfo("shell tool using shell", { shell })
 
         return {
-          description: prompt.description,
+          description: `${prompt.description}\n\nShell isolation: shell_sandbox=optional uses an enforceable backend when available and warns otherwise; shell_sandbox=required rejects before permission prompts or process spawn when unavailable.`,
           parameters: prompt.parameters,
           execute: (params: Parameters, ctx: Tool.Context) =>
             Effect.gen(function* () {
@@ -617,6 +623,25 @@ export const ShellTool = Tool.define(
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)
+              const env = yield* shellEnv(ctx, cwd)
+              const rawCommand = cmd(shell, params.command, cwd, env)
+              const sandboxMode = cfg.shell_sandbox ?? "disabled"
+              let processCommand: ChildProcess.Command = rawCommand
+              let sandboxWarning: string | undefined
+              if (sandboxMode !== "disabled") {
+                const prepared = yield* sandbox.prepare(rawCommand).pipe(
+                  Effect.map((value) => ({ value })),
+                  Effect.catchTag("ShellSandbox.Unavailable", () => Effect.succeed(undefined)),
+                )
+                if (!prepared) {
+                  if (sandboxMode === "required")
+                    return yield* Effect.die(
+                      new Error("Shell sandboxing is required, but no enforceable backend is available."),
+                    )
+                  sandboxWarning =
+                    "No enforceable shell sandbox backend was available; command ran with host-user filesystem, process, and network authority."
+                } else processCommand = prepared.value
+              }
               yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
@@ -633,8 +658,10 @@ export const ShellTool = Tool.define(
                   shell,
                   command: params.command,
                   cwd,
-                  env: yield* shellEnv(ctx, cwd),
+                  env,
                   timeout,
+                  process: processCommand,
+                  sandboxWarning,
                 },
                 ctx,
               )
