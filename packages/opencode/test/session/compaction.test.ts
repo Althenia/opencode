@@ -923,6 +923,50 @@ describe("session.compaction.process", () => {
   )
 
   itCompaction.instance(
+    "continues once after a successful high-usage summary",
+    () => {
+      const stub = llm()
+      const highUsage = usage({ inputTokens: 90_000, outputTokens: 10_000, totalTokens: 100_000 })
+      stub.push(
+        Stream.make(
+          LLMEvent.textStart({ id: "txt-summary" }),
+          LLMEvent.textDelta({ id: "txt-summary", text: "summary" }),
+          LLMEvent.textEnd({ id: "txt-summary" }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop", usage: highUsage }),
+          LLMEvent.finish({ reason: "stop", usage: highUsage }),
+        ),
+      )
+
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        const msg = yield* createUserMessage(session.id, "hello")
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+
+        const result = yield* SessionCompaction.use.process({
+          parentID: msg.id,
+          messages: msgs,
+          sessionID: session.id,
+          auto: true,
+        })
+
+        const all = yield* ssn.messages({ sessionID: session.id })
+        const continuations = all.filter(
+          (item) =>
+            item.info.role === "user" &&
+            item.parts.some(
+              (part) => part.type === "text" && part.synthetic && part.metadata?.compaction_continue === true,
+            ),
+        )
+
+        expect(result).toBe("continue")
+        expect(continuations).toHaveLength(1)
+      }).pipe(withCompaction({ llm: stub.llmLayer }))
+    },
+    { git: true },
+  )
+
+  itCompaction.instance(
     "persists tail_start_id for retained recent turns",
     Effect.gen(function* () {
       const ssn = yield* SessionNs.Service
