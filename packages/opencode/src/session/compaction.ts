@@ -22,6 +22,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import { Instruction } from "./instruction"
 
 export const Event = SessionCompactionEvent
 
@@ -164,6 +165,7 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const instruction = yield* Instruction.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
@@ -390,7 +392,7 @@ const layer = Layer.effect(
         agent,
         sessionID: input.sessionID,
         tools: {},
-        system: [],
+        system: yield* instruction.system().pipe(Effect.orDie),
         messages: [
           ...modelMessages,
           {
@@ -556,6 +558,7 @@ export const node = LayerNode.make({
     Provider.node,
     EventV2Bridge.node,
     RuntimeFlags.node,
+    Instruction.node,
   ],
 })
 

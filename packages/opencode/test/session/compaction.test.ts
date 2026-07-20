@@ -33,6 +33,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Instruction } from "../../src/session/instruction"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -196,6 +197,7 @@ function createCompactionMarker(sessionID: SessionID) {
 function fake(
   input: Parameters<SessionProcessorModule.SessionProcessor.Interface["create"]>[0],
   result: "continue" | "compact",
+  capture?: (input: LLM.StreamInput) => void,
 ) {
   const msg = input.assistantMessage
   return {
@@ -204,15 +206,20 @@ function fake(
     },
     updateToolCall: Effect.fn("TestSessionProcessor.updateToolCall")(() => Effect.succeed(undefined)),
     completeToolCall: Effect.fn("TestSessionProcessor.completeToolCall")(() => Effect.void),
-    process: Effect.fn("TestSessionProcessor.process")(() => Effect.succeed(result)),
+    process: Effect.fn("TestSessionProcessor.process")((input) =>
+      Effect.sync(() => {
+        capture?.(input)
+        return result
+      }),
+    ),
   } satisfies SessionProcessorModule.SessionProcessor.Handle
 }
 
-function processorLayer(result: "continue" | "compact") {
+function processorLayer(result: "continue" | "compact", capture?: (input: LLM.StreamInput) => void) {
   return Layer.succeed(
     SessionProcessorModule.SessionProcessor.Service,
     SessionProcessorModule.SessionProcessor.Service.of({
-      create: Effect.fn("TestSessionProcessor.create")((input) => Effect.succeed(fake(input, result))),
+      create: Effect.fn("TestSessionProcessor.create")((input) => Effect.succeed(fake(input, result, capture))),
     }),
   )
 }
@@ -246,6 +253,8 @@ const itCompaction = testEffect(compactionEnv)
 
 type CompactionProcessOptions = {
   result?: "continue" | "compact"
+  capture?: (input: LLM.StreamInput) => void
+  instructions?: string[]
   llm?: Layer.Layer<LLM.Service>
   plugin?: Layer.Layer<Plugin.Service>
   provider?: ReturnType<typeof wide>
@@ -259,13 +268,26 @@ function withCompaction(options?: CompactionProcessOptions) {
 function compactionProcessLayer(options?: CompactionProcessOptions) {
   const replacements: LayerNode.Replacements = [
     [Provider.node, (options?.provider ?? wide()).layer],
+    [
+      Instruction.node,
+      Layer.succeed(
+        Instruction.Service,
+        Instruction.Service.of({
+          clear: () => Effect.void,
+          systemPaths: () => Effect.succeed(new Set()),
+          system: () => Effect.succeed(options?.instructions ?? []),
+          find: () => Effect.succeed(undefined),
+          resolve: () => Effect.succeed([]),
+        }),
+      ),
+    ],
     [RuntimeFlags.node, RuntimeFlags.layer({ experimentalEventSystem: true })],
     [SessionSummary.node, summary],
   ]
   if (!options?.llm) {
     return AppNodeBuilder.build(compactionTestNode, [
       ...replacements,
-      [SessionProcessorModule.SessionProcessor.node, processorLayer(options?.result ?? "continue")],
+      [SessionProcessorModule.SessionProcessor.node, processorLayer(options?.result ?? "continue", options?.capture)],
       ...(options?.plugin ? ([[Plugin.node, options.plugin]] as const) : []),
       ...(options?.config ? ([[Config.node, options.config]] as const) : []),
     ])
@@ -797,6 +819,8 @@ describe("session.compaction.prune", () => {
   )
 })
 
+const capturedCompactionSystems: string[][] = []
+
 describe("session.compaction.process", () => {
   it.instance(
     "throws when parent is not a user message",
@@ -826,6 +850,33 @@ describe("session.compaction.process", () => {
         }
       }
     }),
+  )
+
+  itCompaction.instance(
+    "passes active bounded instructions to the compaction model",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      const msg = yield* createUserMessage(session.id, "hello")
+      const msgs = yield* ssn.messages({ sessionID: session.id })
+      capturedCompactionSystems.length = 0
+
+      yield* SessionCompaction.use.process({
+        parentID: msg.id,
+        messages: msgs,
+        sessionID: session.id,
+        auto: false,
+      })
+
+      expect(capturedCompactionSystems[0]).toEqual(["Instructions from: /repo/AGENTS.md\nKeep tests green"])
+    }).pipe(
+      withCompaction({
+        instructions: ["Instructions from: /repo/AGENTS.md\nKeep tests green"],
+        capture: (input) => {
+          capturedCompactionSystems.push([...input.system])
+        },
+      }),
+    ),
   )
 
   it.instance(
