@@ -76,6 +76,21 @@ describe("Config", () => {
     }),
   )
 
+  it.effect("validates and migrates the ambient instruction byte limit", () =>
+    Effect.sync(() => {
+      const decodeV2 = Schema.decodeUnknownSync(Config.Info, { errors: "all" })
+      const decodeV1 = Schema.decodeUnknownSync(ConfigV1.Info, { errors: "all" })
+
+      expect(decodeV2({ instruction_max_bytes: 51_200 }).instruction_max_bytes).toBe(51_200)
+      expect(decodeV1({ instruction_max_bytes: 1_048_576 }).instruction_max_bytes).toBe(1_048_576)
+      expect(() => decodeV2({ instruction_max_bytes: 0 })).toThrow()
+      expect(() => decodeV1({ instruction_max_bytes: 1_048_577 })).toThrow()
+      expect(ConfigMigrateV1.migrate(decodeV1({ instruction_max_bytes: 64_000 })).instruction_max_bytes).toBe(
+        64_000,
+      )
+    }),
+  )
+
   it.effect("migrates arbitrary v1 configuration into valid v2 configuration", () =>
     Effect.sync(() => {
       FastCheck.assert(

@@ -30,19 +30,26 @@ const it = testEffect(
   ]),
 )
 
-const configLayer = Layer.succeed(Config.Service, TestConfig.make())
-
-const instructionLayer = (global: Partial<Global.Interface>, flags: Partial<RuntimeFlags.Info> = {}) =>
-  AppNodeBuilder.build(Instruction.node, [
+const instructionLayer = (
+  global: Partial<Global.Interface>,
+  flags: Partial<RuntimeFlags.Info> = {},
+  config: Record<string, unknown> = {},
+) => {
+  const configLayer = Layer.succeed(
+    Config.Service,
+    TestConfig.make({ get: () => Effect.succeed(config as never) }),
+  )
+  return AppNodeBuilder.build(Instruction.node, [
     [Config.node, configLayer],
     [Global.node, Global.layerWith(global)],
     [RuntimeFlags.node, RuntimeFlags.layer(flags)],
   ])
+}
 
 const provideInstruction =
-  (global: Partial<Global.Interface>, flags?: Partial<RuntimeFlags.Info>) =>
+  (global: Partial<Global.Interface>, flags?: Partial<RuntimeFlags.Info>, config?: Record<string, unknown>) =>
   <A, E, R>(self: Effect.Effect<A, E, R>) =>
-    self.pipe(Effect.provide(instructionLayer(global, flags)))
+    self.pipe(Effect.provide(instructionLayer(global, flags, config)))
 
 const write = (filepath: string, content: string) =>
   Effect.gen(function* () {
@@ -57,11 +64,15 @@ const writeFiles = (dir: string, files: Record<string, string>) =>
     { discard: true },
   )
 
-const withFiles = <A, E, R>(files: Record<string, string>, self: (dir: string) => Effect.Effect<A, E, R>) =>
+const withFiles = <A, E, R>(
+  files: Record<string, string>,
+  self: (dir: string) => Effect.Effect<A, E, R>,
+  config: Record<string, unknown> = {},
+) =>
   provideTmpdirInstance((dir) =>
     Effect.gen(function* () {
       yield* writeFiles(dir, files)
-      return yield* self(dir).pipe(provideInstruction({ home: dir, config: dir }))
+      return yield* self(dir).pipe(provideInstruction({ home: dir, config: dir }, undefined, config))
     }),
   )
 
@@ -206,6 +217,29 @@ describe("Instruction.resolve", () => {
     ),
   )
 
+  it.live("omits oversized nearby instructions discovered after a file read", () =>
+    withFiles(
+      {
+        "subdir/AGENTS.md": `nearby-secret-${"x".repeat(60_000)}`,
+        "subdir/nested/file.ts": "const x = 1",
+      },
+      (dir) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const results = yield* svc.resolve(
+            [],
+            path.join(dir, "subdir", "nested", "file.ts"),
+            MessageID.make("msg_message-oversized-nearby"),
+          )
+
+          expect(results).toHaveLength(1)
+          expect(results[0]?.content).toContain("Instruction content omitted")
+          expect(results[0]?.content).toContain("read tool")
+          expect(results[0]?.content).not.toContain("nearby-secret")
+        }),
+    ),
+  )
+
   test.todo("fetches remote instructions from config URLs via HttpClient", () => {})
 })
 
@@ -227,6 +261,32 @@ describe("Instruction.system", () => {
         expect(rules[1]).toBe(`Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`)
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
     }),
+  )
+
+  it.live("omits oversized startup instructions at the default limit", () =>
+    withFiles({ "AGENTS.md": `startup-secret-${"x".repeat(60_000)}` }, (dir) =>
+      Effect.gen(function* () {
+        const rules = yield* (yield* Instruction.Service).system()
+        expect(rules).toHaveLength(1)
+        expect(rules[0]).toContain("Instruction content omitted")
+        expect(rules[0]).toContain("51200-byte inline limit")
+        expect(rules[0]).not.toContain("startup-secret")
+        expect(rules[0]?.length).toBeLessThan(1_000)
+      }),
+    ),
+  )
+
+  it.live("honors a larger configured instruction byte limit", () =>
+    withFiles(
+      { "AGENTS.md": `allowed-instruction-${"x".repeat(60_000)}` },
+      () =>
+        Effect.gen(function* () {
+          const rules = yield* (yield* Instruction.Service).system()
+          expect(rules[0]).toContain("allowed-instruction")
+          expect(rules[0]).not.toContain("Instruction content omitted")
+        }),
+      { instruction_max_bytes: 70_000 },
+    ),
   )
 
   it.live("skips project and global CLAUDE.md when Claude Code prompt is disabled", () =>

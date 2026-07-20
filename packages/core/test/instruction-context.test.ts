@@ -5,6 +5,7 @@ import path from "path"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Config } from "@opencode-ai/core/config"
 import { Global } from "@opencode-ai/core/global"
 import { InstructionContext } from "@opencode-ai/core/instruction-context"
 import { Location } from "@opencode-ai/core/location"
@@ -21,8 +22,28 @@ const instructionLayer = (input: {
   config: string
   locationServiceLayer: Layer.Layer<Location.Service>
   filesystemLayer?: Layer.Layer<FSUtil.Service>
+  instructionMaxBytes?: number
 }) =>
   AppNodeBuilder.build(LayerNode.group([SystemContextRegistry.node, InstructionContext.node]), [
+    [
+      Config.node,
+      Layer.succeed(
+        Config.Service,
+        Config.Service.of({
+          entries: () =>
+            Effect.succeed(
+              input.instructionMaxBytes === undefined
+                ? []
+                : [
+                    new Config.Document({
+                      type: "document",
+                      info: new Config.Info({ instruction_max_bytes: input.instructionMaxBytes }),
+                    }),
+                  ],
+            ),
+        }),
+      ),
+    ],
     [Global.node, Global.layerWith({ config: input.config })],
     [Location.node, input.locationServiceLayer],
     ...(input.filesystemLayer ? [[FSUtil.node, input.filesystemLayer] as const] : []),
@@ -104,6 +125,72 @@ describe("InstructionContext", () => {
             text: "Previously loaded instructions no longer apply.",
             snapshot: {},
           })
+        }),
+      ),
+    ),
+  )
+
+  it.live("omits oversized AGENTS.md content from the baseline and durable snapshot", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const file = path.join(tmp.path, "AGENTS.md")
+          const oversized = `secret-instruction-${"x".repeat(60_000)}`
+          yield* Effect.promise(() => fs.writeFile(file, oversized))
+          const context = yield* SystemContextRegistry.Service.pipe(
+            Effect.flatMap((service) => service.load()),
+            Effect.provide(
+              instructionLayer({
+                config: path.join(tmp.path, "global"),
+                locationServiceLayer: Layer.succeed(
+                  Location.Service,
+                  Location.Service.of(location({ directory: AbsolutePath.make(tmp.path) })),
+                ),
+              }),
+            ),
+          )
+
+          const initialized = yield* SystemContext.initialize(context)
+          expect(initialized.baseline).toContain("Instruction content omitted")
+          expect(initialized.baseline).toContain("51200-byte inline limit")
+          expect(initialized.baseline).toContain("read tool")
+          expect(initialized.baseline).not.toContain("secret-instruction")
+          expect(JSON.stringify(initialized.snapshot)).not.toContain("secret-instruction")
+          expect(JSON.stringify(initialized.snapshot).length).toBeLessThan(2_000)
+        }),
+      ),
+    ),
+  )
+
+  it.live("honors the effective configured instruction byte limit", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const file = path.join(tmp.path, "AGENTS.md")
+          yield* Effect.promise(() => fs.writeFile(file, `allowed-${"x".repeat(60_000)}`))
+          const context = yield* SystemContextRegistry.Service.pipe(
+            Effect.flatMap((service) => service.load()),
+            Effect.provide(
+              instructionLayer({
+                config: path.join(tmp.path, "global"),
+                instructionMaxBytes: 70_000,
+                locationServiceLayer: Layer.succeed(
+                  Location.Service,
+                  Location.Service.of(location({ directory: AbsolutePath.make(tmp.path) })),
+                ),
+              }),
+            ),
+          )
+
+          const initialized = yield* SystemContext.initialize(context)
+          expect(initialized.baseline).toContain("allowed-")
+          expect(initialized.baseline).not.toContain("Instruction content omitted")
         }),
       ),
     ),

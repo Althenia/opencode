@@ -13,6 +13,7 @@ import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@opencode-ai/core/global"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
+import { DEFAULT_INSTRUCTION_MAX_BYTES, renderInstructionContent } from "@opencode-ai/core/instruction-content"
 
 function extract(messages: SessionV1.WithParts[]) {
   const paths = new Set<string>()
@@ -161,10 +162,21 @@ const layer: Layer.Layer<
 
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
+      const maxBytes = config.instruction_max_bytes ?? DEFAULT_INSTRUCTION_MAX_BYTES
 
       return [
-        ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
-        ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
+        ...Array.from(paths).flatMap((item, i) => {
+          const content = files[i]
+          if (!content) return []
+          const rendered = renderInstructionContent({ source: item, content, maxBytes, retrieval: "read" })
+          return [`Instructions from: ${item}\n${rendered.content}`]
+        }),
+        ...urls.flatMap((item, i) => {
+          const content = remote[i]
+          if (!content) return []
+          const rendered = renderInstructionContent({ source: item, content, maxBytes, retrieval: "webfetch" })
+          return [`Instructions from: ${item}\n${rendered.content}`]
+        }),
       ]
     })
 
@@ -211,7 +223,14 @@ const layer: Layer.Layer<
         set.add(found)
         const content = yield* read(found)
         if (content) {
-          results.push({ filepath: found, content: `Instructions from: ${found}\n${content}` })
+          const config = yield* cfg.get()
+          const rendered = renderInstructionContent({
+            source: found,
+            content,
+            maxBytes: config.instruction_max_bytes ?? DEFAULT_INSTRUCTION_MAX_BYTES,
+            retrieval: "read",
+          })
+          results.push({ filepath: found, content: `Instructions from: ${found}\n${rendered.content}` })
         }
 
         current = path.dirname(current)

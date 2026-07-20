@@ -9,7 +9,8 @@ import { FSUtil } from "./fs-util"
 import { Global } from "./global"
 import { Location } from "./location"
 import { Policy } from "./policy"
-import { AbsolutePath } from "./schema"
+import { AbsolutePath, PositiveInt } from "./schema"
+import { MAX_INSTRUCTION_MAX_BYTES } from "./instruction-content"
 import { ConfigAgent } from "./config/agent"
 import { ConfigAttachments } from "./config/attachments"
 import { ConfigCompaction } from "./config/compaction"
@@ -96,6 +97,12 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   instructions: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs supplying ambient instructions",
   }),
+  instruction_max_bytes: PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_INSTRUCTION_MAX_BYTES))
+    .pipe(Schema.optional)
+    .annotate({
+      description:
+        "Maximum UTF-8 bytes of one ambient instruction source to inline (default: 51200, maximum: 1048576)",
+    }),
   references: ConfigReference.Info.pipe(Schema.optional).annotate({
     description: "Named local directories or Git repositories available as external context",
   }),

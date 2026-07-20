@@ -16,6 +16,7 @@ import { ConfigPluginV1 } from "./plugin"
 import { ConfigProviderV1 } from "./provider"
 import { ConfigServerV1 } from "./server"
 import { ConfigSkillsV1 } from "./skills"
+import { MAX_INSTRUCTION_MAX_BYTES } from "../../instruction-content"
 
 export type Layout = ConfigLayoutV1.Layout
 
@@ -123,6 +124,12 @@ export const Info = Schema.Struct({
   }),
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Additional instruction files or patterns to include",
+  }),
+  instruction_max_bytes: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_INSTRUCTION_MAX_BYTES)),
+  ).annotate({
+    description:
+      "Maximum UTF-8 bytes of one ambient instruction source to inline (default: 51200, maximum: 1048576)",
   }),
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),

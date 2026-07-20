@@ -3,6 +3,8 @@ export * as InstructionContext from "./instruction-context"
 import { Array, Effect, Layer, Schema } from "effect"
 import { isAbsolute, join, relative, sep } from "path"
 import { FSUtil } from "./fs-util"
+import { Config } from "./config"
+import { DEFAULT_INSTRUCTION_MAX_BYTES, renderInstructionContent } from "./instruction-content"
 import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { Location } from "./location"
@@ -14,6 +16,9 @@ import { makeLocationNode } from "./effect/app-node"
 class File extends Schema.Class<File>("InstructionContext.File")({
   path: AbsolutePath,
   content: Schema.String,
+  sourceBytes: Schema.Int.pipe(Schema.optional),
+  sourceDigest: Schema.String.pipe(Schema.optional),
+  omitted: Schema.Boolean.pipe(Schema.optional),
 }) {}
 
 const Files = Schema.Array(File)
@@ -22,6 +27,7 @@ const key = SystemContext.Key.make("core/instructions")
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
+    const config = yield* Config.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
     const registry = yield* SystemContextRegistry.Service
@@ -56,15 +62,24 @@ const layer = Layer.effectDiscard(
         ),
       )
       const paths = Array.dedupe([yield* fs.resolve(join(global.config, "AGENTS.md")), ...discovered])
+      const maxBytes = Config.latest(yield* config.entries(), "instruction_max_bytes") ?? DEFAULT_INSTRUCTION_MAX_BYTES
       const files = yield* Effect.forEach(
         paths,
         (path) =>
           fs
             .readFileStringSafe(path)
             .pipe(
-              Effect.map((content) =>
-                content === undefined ? undefined : new File({ path: AbsolutePath.make(path), content }),
-              ),
+              Effect.map((content) => {
+                if (content === undefined) return undefined
+                const rendered = renderInstructionContent({ source: path, content, maxBytes, retrieval: "read" })
+                return new File({
+                  path: AbsolutePath.make(path),
+                  content: rendered.content,
+                  sourceBytes: rendered.bytes,
+                  sourceDigest: rendered.digest,
+                  omitted: rendered.omitted,
+                })
+              }),
             ),
         { concurrency: "unbounded" },
       )
@@ -93,7 +108,7 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "instruction-context",
   layer,
-  deps: [FSUtil.node, Global.node, Location.node, SystemContextRegistry.node],
+  deps: [Config.node, FSUtil.node, Global.node, Location.node, SystemContextRegistry.node],
 })
 
 function render(files: ReadonlyArray<File>) {
