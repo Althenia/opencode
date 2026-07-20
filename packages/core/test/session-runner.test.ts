@@ -55,6 +55,7 @@ import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
 import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { Routing } from "@opencode-ai/core/self-improvement/routing"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
@@ -159,6 +160,21 @@ let currentModel = model
 const models = SessionRunnerModel.layerWith((session) =>
   modelResolveHook.pipe(Effect.as(session.model?.id === "replacement" ? replacementModel : currentModel)),
 )
+const routing = Layer.succeed(
+  Routing.Service,
+  Routing.Service.of({
+    resolve: ({ session, roleRoute }) =>
+      Effect.succeed({
+        route:
+          session.model ??
+          roleRoute ?? {
+            providerID: ProviderV2.ID.make(currentModel.provider),
+            id: ModelV2.ID.make(currentModel.id),
+          },
+      }),
+    evaluate: () => Effect.die("unused"),
+  }),
+)
 const systemContextKey = SystemContext.Key.make("test/context")
 let systemBaseline = "Initial context"
 let systemRemoved = false
@@ -231,6 +247,7 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [Snapshot.node, Snapshot.noopLayer],
   [LayerNodePlatform.llmClient, client],
   [SessionRunnerModel.node, models],
+  [Routing.node, routing],
   [SystemContextRegistry.node, systemContext],
   [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
   [SkillGuidance.node, skillGuidance],
@@ -280,6 +297,7 @@ const it = testEffect(
       [LayerNodePlatform.llmClient, client],
       [PermissionV2.node, permission],
       [SessionRunnerModel.node, models],
+      [Routing.node, routing],
       [SystemContextRegistry.node, systemContext],
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
       [SkillGuidance.node, skillGuidance],

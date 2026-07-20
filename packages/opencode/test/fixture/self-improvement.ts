@@ -96,6 +96,7 @@ const runtimeLayer = (
     Layer.provide(SelfImprovementIngressStore.evaluationEvidenceLayer.pipe(Layer.provide(baseStores))),
     Layer.provide(
       SelfImprovementKeyring.layer.pipe(
+        Layer.provide(Global.layerWith({ state: globalConfig })),
         Layer.provide(
           ConfigProvider.layer(ConfigProvider.fromUnknown({ OPENCODE_SELF_IMPROVEMENT_HMAC_KEY: "fixture-key" })),
         ),

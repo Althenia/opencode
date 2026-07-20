@@ -267,6 +267,6 @@ export const layer = Layer.effect(
 
 export const node = makeLocationNode({
   service: Service,
-  layer: layer.pipe(Layer.provide(SelfImprovementKeyring.layer), Layer.provide(evaluationEvidenceLayer)),
-  deps: [Database.node, SelfImprovementEvaluationStore.node],
+  layer: layer.pipe(Layer.provide(evaluationEvidenceLayer)),
+  deps: [Database.node, SelfImprovementEvaluationStore.node, SelfImprovementKeyring.node],
 })
