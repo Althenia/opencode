@@ -15,6 +15,7 @@ import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry
 import { Hash } from "@opencode-ai/core/util/hash"
 import * as TestClock from "effect/testing/TestClock"
 import { SelfImprovementContextReconciler } from "@opencode-ai/core/self-improvement/context-reconciler"
+import { SelfImprovementGeneratedSkill } from "@opencode-ai/core/self-improvement/generated-skill"
 import type { Transaction } from "@opencode-ai/core/self-improvement/context-store"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { it } from "./lib/effect"
@@ -128,6 +129,10 @@ const reconcilerLayer = (
         Layer.mock(SelfImprovementIdempotencyStore.Service, { valid: () => Effect.succeed(true) }),
         Layer.mock(SelfImprovementLearningStore.Service, { canaryRegression: () => Effect.void }),
         Layer.mock(SelfImprovementContextReconciler.Materializer, materializer()),
+        Layer.mock(SelfImprovementGeneratedSkill.Service, {
+          directory: () => "/generated",
+          reconcile: () => Effect.void,
+        }),
         Layer.mock(SelfImprovementMutationStore.Service, {
           validateRevision: () => Effect.succeed(true),
           clearTombstonedSlots: () => Effect.succeed(true),
@@ -321,6 +326,91 @@ const outbox = (
     nextRetryAt: SelfImprovementLifecycle.TimestampMillis.make(0),
     createdAt: SelfImprovementLifecycle.TimestampMillis.make(0),
   })
+
+test("reschedules active finalization when generated skill projection is unavailable", async () => {
+  const desired = new SelfImprovementLearning.ContextDesiredState({
+    locationID,
+    artifactID,
+    rolloutSlot: "active",
+    desired: { state: "present", versionID, versionDigest: digest, stage: "active" },
+    desiredRevision: SelfImprovementLifecycle.Revision.make(1),
+  })
+  const requested = new SelfImprovementLearning.ContextOutbox({
+    id: SelfImprovementLifecycle.ContextOutboxID.make("si_obx_generated_retry"),
+    locationID,
+    artifactID,
+    expectedArtifactRevision: SelfImprovementLifecycle.Revision.make(1),
+    expectedStage: "canary",
+    desiredStateRevision: desired.desiredRevision,
+    intent: new SelfImprovementLearning.PendingTransitionIntent({
+      versionID,
+      previousStage: "canary",
+      nextStage: "active",
+      event: "canary-passed",
+      reason: "gates-passed",
+      actorID: SelfImprovementLifecycle.PrincipalID.make("coordinator"),
+      idempotencyRecordID: SelfImprovementLifecycle.IdempotencyRecordID.make("si_idm_generated_retry"),
+      idempotencyDigest: digest,
+    }),
+    status: "pending",
+    attempts: 0,
+    nextRetryAt: SelfImprovementLifecycle.TimestampMillis.make(0),
+    createdAt: SelfImprovementLifecycle.TimestampMillis.make(0),
+  })
+  let rescheduled = 0
+  let applied = 0
+  let transactions = 0
+  const service = SelfImprovementContextReconciler.make({
+    transaction: (work) => {
+      transactions++
+      return work(transaction)
+    },
+    approvals: {
+      approved: () => Effect.succeed(undefined),
+      consume: () => Effect.succeed(true),
+      appendRollback: () => Effect.void,
+    },
+    audit: { append: () => Effect.void },
+    context: {
+      pending: () => Effect.succeed([requested]),
+      recoverable: () => Effect.succeed([]),
+      desired: () => Effect.succeed(desired),
+      markApplying: () => Effect.succeed(true),
+      markApplied: () => Effect.sync(() => (applied++, true)),
+      reschedule: () => Effect.sync(() => (rescheduled++, true)),
+      supersede: () => Effect.succeed(true),
+      supersedeForArtifact: () => Effect.void,
+      terminalGroup: () => Effect.succeed(undefined),
+      blockedForArtifact: () => Effect.void,
+    },
+    idempotency: { valid: () => Effect.succeed(true) },
+    learning: { appendReward: () => Effect.void, canaryRegression: () => Effect.void },
+    materializer: {
+      materialize: () =>
+        Effect.succeed({
+          key: SystemContext.Key.make("self-improvement/context/generated-retry"),
+          context: SystemContext.empty,
+          digest,
+        }),
+    },
+    generatedSkills: {
+      reconcile: () => Effect.fail(new SelfImprovementGeneratedSkill.Unavailable({ message: "disk unavailable" })),
+    },
+    mutations: {
+      validateRevision: () => Effect.succeed(true),
+      clearTombstonedSlots: () => Effect.succeed(true),
+      upsertSlot: () => Effect.succeed(true),
+      removeSlot: () => Effect.succeed(true),
+    },
+    registry: { compareAndSet: (input) => Effect.succeed({ applied: true, current: input.next }) },
+    transitions: { currentStage: () => Effect.succeed("canary"), append: () => Effect.void },
+  })
+
+  expect(await Effect.runPromise(service.drain)).toBe(0)
+  expect(rescheduled).toBe(1)
+  expect(applied).toBe(0)
+  expect(transactions).toBe(0)
+})
 
 const terminalOutbox = (id: SelfImprovementLifecycle.ContextOutboxID, status: "pending" | "applying" = "pending") => {
   const transition = new SelfImprovementLifecycle.StageTransition({

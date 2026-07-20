@@ -17,6 +17,7 @@ import { SelfImprovementMutationStore } from "./mutation-store"
 import { SelfImprovementTransitionStore } from "./transition-store"
 import { Hash } from "../util/hash"
 import type { Transaction } from "./context-store"
+import { SelfImprovementGeneratedSkill } from "./generated-skill"
 
 export class ContextUnavailable extends Schema.TaggedErrorClass<ContextUnavailable>()(
   "SelfImprovementContextReconciler.ContextUnavailable",
@@ -146,6 +147,7 @@ export interface Dependencies {
   readonly idempotency: Pick<SelfImprovementIdempotencyStore.Interface, "valid">
   readonly learning: Pick<SelfImprovementLearningStore.Interface, "appendReward" | "canaryRegression">
   readonly materializer: MaterializerInterface
+  readonly generatedSkills?: Pick<SelfImprovementGeneratedSkill.Interface, "reconcile">
   readonly mutations: Pick<
     SelfImprovementMutationStore.Interface,
     "validateRevision" | "clearTombstonedSlots" | "upsertSlot" | "removeSlot"
@@ -182,6 +184,7 @@ export const make = (dependencies: Dependencies): Interface => {
     transaction,
     transitions,
   } = dependencies
+  const generatedSkills = dependencies.generatedSkills ?? { reconcile: () => Effect.void }
 
   const supersede = (
     outbox: SelfImprovementLearning.ContextOutbox,
@@ -307,6 +310,19 @@ export const make = (dependencies: Dependencies): Interface => {
       ) {
         yield* reschedule(outbox, timestamp)
         return false
+      }
+      if (rolloutSlot === "active") {
+        const projected = yield* generatedSkills.reconcile(desired).pipe(
+          Effect.as(true),
+          Effect.catchTag("SelfImprovementGeneratedSkill.Unavailable", (error) =>
+            Effect.logWarning("generated skill projection unavailable", {
+              artifactID: outbox.artifactID,
+              versionID: outbox.intent.versionID,
+              error,
+            }).pipe(Effect.andThen(reschedule(outbox, timestamp)), Effect.as(false)),
+          ),
+        )
+        if (!projected) return false
       }
       const appliedAt = yield* now
       return yield* transaction((tx) =>
@@ -564,6 +580,7 @@ export const layer = Layer.effect(
       idempotency: yield* SelfImprovementIdempotencyStore.Service,
       learning: yield* SelfImprovementLearningStore.Service,
       materializer: yield* Materializer,
+      generatedSkills: yield* SelfImprovementGeneratedSkill.Service,
       mutations: yield* SelfImprovementMutationStore.Service,
       registry: yield* SystemContextRegistry.Service,
       transitions: yield* SelfImprovementTransitionStore.Service,
@@ -585,6 +602,7 @@ export const node = makeLocationNode({
     SelfImprovementIdempotencyStore.node,
     SelfImprovementLearningStore.node,
     materializerNode,
+    SelfImprovementGeneratedSkill.node,
     SelfImprovementMutationStore.node,
     SystemContextRegistry.node,
     SelfImprovementTransitionStore.node,

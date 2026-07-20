@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect, Layer } from "effect"
 import { Skill } from "../../src/skill"
@@ -16,7 +16,15 @@ import fs from "fs/promises"
 
 const node = LayerNode.compile(CrossSpawnSpawner.node)
 
-const it = testEffect(Layer.mergeAll(LayerNode.compile(Skill.node), node, testInstanceStoreLayer))
+const it = testEffect(
+  Layer.mergeAll(
+    LayerNode.compile(Skill.node, [
+      [RuntimeFlags.node, RuntimeFlags.layer({ disableClaudeCodeSkills: false, disableExternalSkills: false })],
+    ]),
+    node,
+    testInstanceStoreLayer,
+  ),
+)
 const itWithoutClaudeCodeSkills = testEffect(
   Layer.mergeAll(
     LayerNode.compile(Skill.node, [[RuntimeFlags.node, RuntimeFlags.layer({ disableClaudeCodeSkills: true })]]),
@@ -90,6 +98,32 @@ describe("skill", () => {
       expect(output).not.toContain("%23")
     }),
   )
+
+  test("discovers generated skills from the global config directory", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const config = path.join(tmp.path, "config")
+    const generated = path.join(config, "generated", "generated-helper", "SKILL.md")
+    await Bun.write(
+      generated,
+      `---\nname: generated-helper\ndescription: Generated helper.\n---\n\n# Generated Helper\n`,
+    )
+    const layer = Layer.mergeAll(
+      LayerNode.compile(Skill.node, [
+        [Global.node, Global.layerWith({ config })],
+        [RuntimeFlags.node, RuntimeFlags.layer({ disableExternalSkills: true })],
+      ]),
+      node,
+      testInstanceStoreLayer,
+    )
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const skill = yield* Skill.Service
+        const item = (yield* skill.all()).find((candidate) => candidate.name === "generated-helper")
+        expect(item?.location).toBe(generated)
+        expect(item?.description).toBe("Generated helper.")
+      }).pipe(provideInstance(tmp.path), Effect.provide(layer)),
+    )
+  })
 
   it.live("discovers skills from .opencode/skill/ directory", () =>
     provideTmpdirInstance(

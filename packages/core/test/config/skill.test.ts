@@ -61,6 +61,10 @@ describe("ConfigSkillPlugin.Plugin", () => {
       expect(sources).toEqual([
         SkillV2.DirectorySource.make({
           type: "directory",
+          path: AbsolutePath.make(path.join(Global.make().config, "generated")),
+        }),
+        SkillV2.DirectorySource.make({
+          type: "directory",
           path: AbsolutePath.make(path.join("/repo/.opencode", "skill")),
         }),
         SkillV2.DirectorySource.make({

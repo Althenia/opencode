@@ -182,6 +182,10 @@ const discoverSkills = Effect.fnUntraced(function* (
 ) {
   const state: ScanState = { matches: new Set(), dirs: new Set() }
 
+  const generatedRoot = path.join(global.config, "generated")
+  if (yield* fsys.isDir(generatedRoot))
+    yield* scan(state, generatedRoot, SKILL_PATTERN, { dot: true, scope: "generated" })
+
   const externalDirs: string[] = []
   if (!disableExternalSkills) {
     if (!disableClaudeCodeSkills) externalDirs.push(CLAUDE_EXTERNAL_DIR)
