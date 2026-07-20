@@ -12,6 +12,7 @@ import { Location } from "@opencode-ai/core/location"
 import { LocationMutation } from "@opencode-ai/core/location-mutation"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AppProcess } from "@opencode-ai/core/process"
+import { ShellSandbox } from "@opencode-ai/core/shell-sandbox"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { BashTool } from "@opencode-ai/core/tool/bash"
@@ -43,6 +44,7 @@ let result: AppProcess.RunResult = {
 }
 let runFailure: AppProcess.AppProcessError | undefined
 let afterPermission = (_input: PermissionV2.AssertInput): Effect.Effect<void> => Effect.void
+let configEntries: Config.Entry[] = []
 
 const permission = Layer.succeed(
   PermissionV2.Service,
@@ -75,7 +77,13 @@ const appProcess = Layer.succeed(
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
-    entries: () => Effect.succeed([]),
+    entries: () => Effect.succeed(configEntries),
+  }),
+)
+const unavailableSandbox = Layer.succeed(
+  ShellSandbox.Service,
+  ShellSandbox.Service.of({
+    prepare: () => Effect.fail(new ShellSandbox.Unavailable({ message: "No enforceable shell sandbox backend" })),
   }),
 )
 
@@ -85,6 +93,7 @@ const reset = () => {
   denyAction = undefined
   runFailure = undefined
   afterPermission = () => Effect.void
+  configEntries = []
   result = {
     command: "mock",
     exitCode: 0,
@@ -101,6 +110,7 @@ const withTool = <A, E, R>(
   directory: string,
   body: (registry: ToolRegistry.Interface) => Effect.Effect<A, E, R>,
   processLayer: Layer.Layer<AppProcess.Service> = appProcess,
+  sandboxLayer: Layer.Layer<ShellSandbox.Service> = unavailableSandbox,
 ) => {
   const activeLocation = Layer.succeed(
     Location.Service,
@@ -117,6 +127,7 @@ const withTool = <A, E, R>(
           [PermissionV2.node, permission],
           [AppProcess.node, processLayer],
           [Config.node, config],
+          [ShellSandbox.node, sandboxLayer],
           [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
         ],
       ),
@@ -133,6 +144,124 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live("fails closed before approval or spawn when sandboxing is required but unavailable", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configEntries = [
+          new Config.Document({ type: "document", info: new Config.Info({ shell_sandbox: "required" }) }),
+        ]
+        return withTool(tmp.path, (registry) => executeTool(registry, call({ command: "pwd" }))).pipe(
+          Effect.andThen((output) =>
+            Effect.sync(() => {
+              expect(output).toEqual({
+                type: "error",
+                value: "Shell sandboxing is required, but no enforceable backend is available.",
+              })
+              expect(assertions).toEqual([])
+              expect(runs).toEqual([])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("runs with an explicit warning when optional sandboxing is unavailable", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configEntries = [
+          new Config.Document({ type: "document", info: new Config.Info({ shell_sandbox: "optional" }) }),
+        ]
+        return withTool(tmp.path, (registry) => settleTool(registry, call({ command: "pwd" }))).pipe(
+          Effect.andThen((settled) =>
+            Effect.sync(() => {
+              expect(runs).toHaveLength(1)
+              expect(assertions.map((input) => input.action)).toEqual(["bash"])
+              expect(settled.output?.content[1]).toMatchObject({
+                type: "text",
+                text: expect.stringContaining("No enforceable shell sandbox backend was available"),
+              })
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("delegates the spawned command to an enforceable sandbox backend", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configEntries = [
+          new Config.Document({ type: "document", info: new Config.Info({ shell_sandbox: "required" }) }),
+        ]
+        let prepared = 0
+        const sandbox = Layer.succeed(
+          ShellSandbox.Service,
+          ShellSandbox.Service.of({
+            prepare: (command) =>
+              Effect.sync(() => {
+                prepared++
+                if (command._tag !== "StandardCommand") throw new Error("expected standard command")
+                return ChildProcess.make("sandboxed-shell", [command.command], command.options)
+              }),
+          }),
+        )
+        return withTool(
+          tmp.path,
+          (registry) => executeTool(registry, call({ command: "pwd" })),
+          appProcess,
+          sandbox,
+        ).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              expect(prepared).toBe(1)
+              expect(runs).toMatchObject([{ command: "sandboxed-shell" }])
+              expect(assertions.map((input) => input.action)).toEqual(["bash"])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("does not consult the sandbox backend when sandboxing is disabled", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configEntries = [
+          new Config.Document({ type: "document", info: new Config.Info({ shell_sandbox: "disabled" }) }),
+        ]
+        const sandbox = Layer.succeed(
+          ShellSandbox.Service,
+          ShellSandbox.Service.of({ prepare: () => Effect.die("sandbox backend must not be called") }),
+        )
+        return withTool(
+          tmp.path,
+          (registry) => executeTool(registry, call({ command: "pwd" })),
+          appProcess,
+          sandbox,
+        ).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              expect(runs).toMatchObject([{ command: "pwd" }])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("registers and returns structured successful output from the active Location", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

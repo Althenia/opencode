@@ -76,7 +76,7 @@ describe("Config", () => {
     }),
   )
 
-  it.effect("validates and migrates the ambient instruction byte limit", () =>
+  it.effect("validates and migrates bounded instruction and shell sandbox settings", () =>
     Effect.sync(() => {
       const decodeV2 = Schema.decodeUnknownSync(Config.Info, { errors: "all" })
       const decodeV1 = Schema.decodeUnknownSync(ConfigV1.Info, { errors: "all" })
@@ -88,6 +88,12 @@ describe("Config", () => {
       expect(ConfigMigrateV1.migrate(decodeV1({ instruction_max_bytes: 64_000 })).instruction_max_bytes).toBe(
         64_000,
       )
+      for (const mode of ["disabled", "optional", "required"] as const) {
+        expect(decodeV2({ shell_sandbox: mode }).shell_sandbox).toBe(mode)
+        expect(decodeV1({ shell_sandbox: mode }).shell_sandbox).toBe(mode)
+        expect(ConfigMigrateV1.migrate(decodeV1({ shell_sandbox: mode })).shell_sandbox).toBe(mode)
+      }
+      expect(() => decodeV2({ shell_sandbox: "pretend" })).toThrow()
     }),
   )
 

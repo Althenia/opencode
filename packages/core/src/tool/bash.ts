@@ -11,6 +11,7 @@ import { LocationMutation } from "../location-mutation"
 import { AppProcess } from "../process"
 import { PermissionV2 } from "../permission"
 import { PositiveInt } from "../schema"
+import { ShellSandbox } from "../shell-sandbox"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -102,11 +103,12 @@ const layer = Layer.effectDiscard(
     const appProcess = yield* AppProcess.Service
     const config = yield* Config.Service
     const permission = yield* PermissionV2.Service
+    const sandbox = yield* ShellSandbox.Service
 
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
+          description: `Execute one shell command string. By default, commands use the host user's filesystem, process, and network authority. shell_sandbox=optional uses an enforceable sandbox backend when available and warns otherwise; shell_sandbox=required rejects before approval or spawn when unavailable. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
           input: Input,
           output: Output,
           structured: StructuredOutput,
@@ -127,6 +129,34 @@ const layer = Layer.effectDiscard(
                 callID: context.toolCallID,
               }
               const target = yield* mutation.resolve({ path: input.workdir ?? ".", kind: "directory" })
+              const entries = yield* config.entries()
+              const shell = Config.latest(entries, "shell") ?? defaultShell()
+              const sandboxMode = Config.latest(entries, "shell_sandbox") ?? "disabled"
+              const rawCommand = ChildProcess.make(input.command, [], {
+                cwd: target.canonical,
+                shell,
+                stdin: "ignore",
+                detached: process.platform !== "win32",
+                forceKillAfter: Duration.seconds(3),
+              })
+              const warnings: string[] = []
+              let command: ChildProcess.Command = rawCommand
+              if (sandboxMode !== "disabled") {
+                const prepared = yield* sandbox.prepare(rawCommand).pipe(
+                  Effect.map((value) => ({ value })),
+                  Effect.catchTag("ShellSandbox.Unavailable", () => Effect.succeed(undefined)),
+                )
+                if (!prepared) {
+                  if (sandboxMode === "required")
+                    return yield* new ToolFailure({
+                      message: "Shell sandboxing is required, but no enforceable backend is available.",
+                    })
+                  warnings.push(
+                    "No enforceable shell sandbox backend was available; command ran with host-user filesystem, process, and network authority.",
+                  )
+                } else command = prepared.value
+              }
+
               const external = target.externalDirectory
               if (external)
                 yield* permission.assert({
@@ -135,9 +165,11 @@ const layer = Layer.effectDiscard(
                   agent: context.agent,
                   source,
                 })
-              const warnings = (yield* externalCommandDirectories(fs, input.command, target.canonical)).map(
-                (directory) =>
-                  `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
+              warnings.push(
+                ...(yield* externalCommandDirectories(fs, input.command, target.canonical)).map(
+                  (directory) =>
+                    `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
+                ),
               )
               yield* permission.assert({
                 action: name,
@@ -151,17 +183,6 @@ const layer = Layer.effectDiscard(
               if ((yield* fs.stat(target.canonical)).type !== "Directory")
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
 
-              const entries = yield* config.entries()
-              const shell =
-                Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
-                  .shell ?? defaultShell()
-              const command = ChildProcess.make(input.command, [], {
-                cwd: target.canonical,
-                shell,
-                stdin: "ignore",
-                detached: process.platform !== "win32",
-                forceKillAfter: Duration.seconds(3),
-              })
               const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
               const result = yield* appProcess
                 .run(command, {
@@ -193,7 +214,13 @@ const layer = Layer.effectDiscard(
                 truncated: result.outputTruncated === true,
                 ...(warnings.length ? { warnings } : {}),
               }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to execute command: ${input.command}` }))),
+            }).pipe(
+              Effect.mapError((error) =>
+                error instanceof ToolFailure
+                  ? error
+                  : new ToolFailure({ message: `Unable to execute command: ${input.command}` }),
+              ),
+            ),
         }),
       })
       .pipe(Effect.orDie)
@@ -203,5 +230,13 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/bash",
   layer,
-  deps: [ToolRegistry.node, LocationMutation.node, FSUtil.node, AppProcess.node, Config.node, PermissionV2.node],
+  deps: [
+    ToolRegistry.node,
+    LocationMutation.node,
+    FSUtil.node,
+    AppProcess.node,
+    Config.node,
+    PermissionV2.node,
+    ShellSandbox.node,
+  ],
 })
