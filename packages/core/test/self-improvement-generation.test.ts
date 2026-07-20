@@ -2,7 +2,12 @@ import { expect, test } from "bun:test"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { LLMClient, LLMError, LLMEvent, LLMResponse, Message, TransportReason, type LLMRequest } from "@opencode-ai/llm"
-import { SelfImprovement, SelfImprovementLearning, SelfImprovementLifecycle } from "@opencode-ai/schema"
+import {
+  SelfImprovement,
+  SelfImprovementEvaluation,
+  SelfImprovementLearning,
+  SelfImprovementLifecycle,
+} from "@opencode-ai/schema"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Database } from "@opencode-ai/core/database/database"
@@ -24,6 +29,14 @@ const ownerID = SelfImprovementLifecycle.PrincipalID.make("generator")
 const patternDigest = SelfImprovement.Digest.make("1".repeat(64))
 const requestDigest = SelfImprovement.Digest.make("2".repeat(64))
 const taskIDDigest = SelfImprovement.Digest.make("3".repeat(64))
+const patternMetadata = {
+  patternDigest,
+  workload: SelfImprovementEvaluation.Workload.make("agent:build"),
+  workloadRevision: SelfImprovementLifecycle.Revision.make(1),
+  errorClass: "tool.bash.failed",
+  orderedToolSymbolDigest: SelfImprovement.Digest.make("4".repeat(64)),
+  outcomeClass: "failure" as const,
+}
 const now = SelfImprovementLifecycle.TimestampMillis.make(1_000_000_000)
 const token = (value: string) => SelfImprovement.Digest.make(value.repeat(64).slice(0, 64))
 
@@ -258,7 +271,7 @@ test("waits for variants before reading generation models or their provider", as
         const generation = yield* SelfImprovementGeneration.Service.use((service) =>
           service.generate({
             principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-            patternDigest,
+            pattern: patternMetadata,
             now,
           }),
         ).pipe(Effect.provide(coordinator))
@@ -350,7 +363,7 @@ test("does not select, reward, or call the LLM when a typed credential preflight
           service
             .generate({
               principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-              patternDigest,
+              pattern: patternMetadata,
               now,
             })
             .pipe(Effect.exit),
@@ -424,7 +437,7 @@ test("returns ModelUnavailable after persisting a model preflight failure", asyn
         const result = yield* service
           .generate({
             principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-            patternDigest,
+            pattern: patternMetadata,
             now,
           })
           .pipe(Effect.exit)
@@ -523,7 +536,7 @@ test("returns AdmissionRejected after persisting a governed admission rejection"
           service
             .generate({
               principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-              patternDigest,
+              pattern: patternMetadata,
               now,
             })
             .pipe(Effect.exit),
@@ -618,7 +631,7 @@ test("binds the selected generation strategy into the redacted model request and
           service
             .generate({
               principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-              patternDigest,
+              pattern: patternMetadata,
               now,
             })
             .pipe(Effect.exit),
@@ -632,8 +645,19 @@ test("binds the selected generation strategy into the redacted model request and
         const content = requests[0]!.messages[0]!.content[0]!
         if (content.type !== "text") throw new Error("expected text prompt")
         expect(JSON.parse(content.text)).toMatchObject({
+          pattern: {
+            derivationRevision: 1,
+            digest: patternDigest,
+            workload: patternMetadata.workload,
+            workloadRevision: patternMetadata.workloadRevision,
+            errorClass: patternMetadata.errorClass,
+            orderedToolSymbolDigest: patternMetadata.orderedToolSymbolDigest,
+            outcomeClass: patternMetadata.outcomeClass,
+          },
           strategy: { id: arm.id, strategyID: arm.strategyID },
         })
+        expect(content.text).not.toContain("secret prompt")
+        expect(content.text).not.toContain("secret tool input")
       }),
     ),
   )
@@ -746,7 +770,7 @@ test("replays persisted output after admission defects when the model becomes un
         )
         const service = yield* SelfImprovementGeneration.Service.pipe(Effect.provide(coordinator))
         const principal = new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID })
-        const first = yield* service.generate({ principal, patternDigest, now }).pipe(Effect.exit)
+        const first = yield* service.generate({ principal, pattern: patternMetadata, now }).pipe(Effect.exit)
         expect(first._tag).toBe("Failure")
         if (first._tag === "Failure") expect(first.cause.reasons.some((reason) => Cause.isDieReason(reason))).toBe(true)
         if (leaseID === undefined) throw new Error("expected generation lease")
@@ -756,7 +780,7 @@ test("replays persisted output after admission defects when the model becomes un
         modelAvailable = false
         const second = yield* service.generate({
           principal,
-          patternDigest,
+          pattern: patternMetadata,
           now: SelfImprovementLifecycle.TimestampMillis.make(now + 10 * 60_000),
         })
         expect(second.outcome).toBe("admitted")
@@ -830,7 +854,7 @@ test("terminally rejects persisted output without its original strategy pull", a
         const result = yield* service
           .generate({
             principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-            patternDigest,
+            pattern: patternMetadata,
             now: SelfImprovementLifecycle.TimestampMillis.make(now + 10 * 60_000),
           })
           .pipe(Effect.exit)
@@ -870,7 +894,7 @@ test("appends same-name generation only to the active generated lineage and inhe
         const result = yield* SelfImprovementGeneration.Service.use((service) =>
           service.generate({
             principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-            patternDigest,
+            pattern: patternMetadata,
             now,
           }),
         ).pipe(Effect.provide(coordinator))
@@ -913,7 +937,7 @@ test("creates a new generated skill as an instruction-only lineage", async () =>
         const result = yield* SelfImprovementGeneration.Service.use((service) =>
           service.generate({
             principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-            patternDigest,
+            pattern: patternMetadata,
             now,
           }),
         ).pipe(Effect.provide(coordinator))
@@ -967,7 +991,7 @@ test("rejects same-name generation without a live generated active lineage", asy
             service
               .generate({
                 principal: new SelfImprovementLifecycle.Principal({ id: ownerID, kind: "coordinator", locationID }),
-                patternDigest,
+                pattern: patternMetadata,
                 now,
               })
               .pipe(Effect.exit),

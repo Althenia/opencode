@@ -56,6 +56,7 @@ import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
 import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Routing } from "@opencode-ai/core/self-improvement/routing"
+import { SelfImprovementSessionObserver } from "@opencode-ai/core/self-improvement/session-observer"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
@@ -160,6 +161,13 @@ let currentModel = model
 const models = SessionRunnerModel.layerWith((session) =>
   modelResolveHook.pipe(Effect.as(session.model?.id === "replacement" ? replacementModel : currentModel)),
 )
+const observerCalls: Array<{ readonly sessionID: SessionV2.ID; readonly exit: Exit.Exit<void, unknown> }> = []
+const observer = Layer.succeed(
+  SelfImprovementSessionObserver.Service,
+  SelfImprovementSessionObserver.Service.of({
+    record: (input) => Effect.sync(() => observerCalls.push(input)),
+  }),
+)
 const routing = Layer.succeed(
   Routing.Service,
   Routing.Service.of({
@@ -248,6 +256,7 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [LayerNodePlatform.llmClient, client],
   [SessionRunnerModel.node, models],
   [Routing.node, routing],
+  [SelfImprovementSessionObserver.node, observer],
   [SystemContextRegistry.node, systemContext],
   [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
   [SkillGuidance.node, skillGuidance],
@@ -284,6 +293,7 @@ const it = testEffect(
       ToolRegistry.toolsNode,
       echoNode,
       SessionRunnerModel.node,
+      SelfImprovementSessionObserver.node,
       SystemContextRegistry.node,
       SkillGuidance.node,
       ReferenceGuidance.node,
@@ -298,6 +308,7 @@ const it = testEffect(
       [PermissionV2.node, permission],
       [SessionRunnerModel.node, models],
       [Routing.node, routing],
+      [SelfImprovementSessionObserver.node, observer],
       [SystemContextRegistry.node, systemContext],
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
       [SkillGuidance.node, skillGuidance],
@@ -339,6 +350,7 @@ const setup = Effect.gen(function* () {
   systemLoadHook = Effect.void
   modelResolveHook = Effect.void
   currentModel = model
+  observerCalls.length = 0
   skillBaselines.clear()
   responses = undefined
   streamFailure = undefined
@@ -678,6 +690,20 @@ describe("SessionRunnerLLM", () => {
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
       ])
+    }),
+  )
+
+  it.effect("records terminal session evidence after a normal prompt cycle", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = []
+
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Record self improvement evidence" }) })
+
+      expect(observerCalls).toHaveLength(1)
+      expect(observerCalls[0]?.sessionID).toBe(sessionID)
+      expect(observerCalls[0] && Exit.isSuccess(observerCalls[0].exit)).toBe(true)
     }),
   )
 

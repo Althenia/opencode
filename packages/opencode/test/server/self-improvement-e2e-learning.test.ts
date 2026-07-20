@@ -95,7 +95,7 @@ async function generateRoutingSkill(fixture: Fixture, pattern: string) {
     ),
   )
   const observer = principal(fixture, "runtime-evidence-service", `${pattern}-observer`)
-  let patternDigest: SelfImprovement.Digest | undefined
+  let generatedPattern: SelfImprovementGeneration.Pattern | undefined
   for (let index = 0; index < 3; index++) {
     const observation = await fixture.run(
       SelfImprovementPrivateEvidenceCommand.Service.use((command) =>
@@ -117,18 +117,25 @@ async function generateRoutingSkill(fixture: Fixture, pattern: string) {
         ),
       ),
     )
-    patternDigest = observation.observation.patternDigest
+    generatedPattern = {
+      patternDigest: observation.observation.patternDigest,
+      workload: observation.observation.workload,
+      workloadRevision: observation.observation.workloadRevision,
+      errorClass: observation.observation.errorClass,
+      orderedToolSymbolDigest: observation.observation.orderedToolSymbolDigest,
+      outcomeClass: observation.observation.outcomeClass,
+    }
     if (index === 2) {
       expect(observation.matchingCount).toBe(3)
       expect(observation.generationEligible).toBe(true)
     }
   }
-  if (patternDigest === undefined) throw new Error("Expected a generated routing pattern")
+  if (generatedPattern === undefined) throw new Error("Expected a generated routing pattern")
   const lease = await fixture.run(
     SelfImprovementGeneration.Service.use((generation) =>
       generation.generate({
         principal: principal(fixture, "coordinator", `${pattern}-generator`),
-        patternDigest,
+        pattern: generatedPattern,
         now,
       }),
     ),

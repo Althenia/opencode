@@ -2,7 +2,12 @@ export * as SelfImprovementGeneration from "./generation"
 
 import { LLM, LLMClient } from "@opencode-ai/llm"
 import { Clock, Context, Duration, Effect, Layer, Schema } from "effect"
-import { SelfImprovement, SelfImprovementLearning, SelfImprovementLifecycle } from "@opencode-ai/schema"
+import {
+  SelfImprovement,
+  SelfImprovementEvaluation,
+  SelfImprovementLearning,
+  SelfImprovementLifecycle,
+} from "@opencode-ai/schema"
 import { Catalog } from "../catalog"
 import { makeLocationNode } from "../effect/app-node"
 import { llmClient } from "../effect/app-node-platform"
@@ -19,10 +24,19 @@ import { SelfImprovementGenerationStore } from "./generation-store"
 import { SelfImprovementLearningStore } from "./learning-store"
 import { SelfImprovementProposal } from "./proposal"
 
+export interface Pattern {
+  readonly patternDigest: SelfImprovement.Digest
+  readonly workload: SelfImprovementEvaluation.Workload
+  readonly workloadRevision: SelfImprovementLifecycle.Revision
+  readonly errorClass: string
+  readonly orderedToolSymbolDigest: SelfImprovement.Digest
+  readonly outcomeClass: SelfImprovementLearning.ObservationOutcomeClass
+}
+
 export interface Interface {
   readonly generate: (input: {
     readonly principal: SelfImprovementLifecycle.Principal
-    readonly patternDigest: SelfImprovement.Digest
+    readonly pattern: Pattern
     readonly now: SelfImprovementLifecycle.TimestampMillis
   }) => Effect.Effect<
     SelfImprovementLearning.GenerationLease,
@@ -61,7 +75,7 @@ export const layer = Layer.effect(
     const plugins = yield* PluginV2.Service
     const generate = Effect.fn("SelfImprovementGeneration.generate")(function* (input: {
       readonly principal: SelfImprovementLifecycle.Principal
-      readonly patternDigest: SelfImprovement.Digest
+      readonly pattern: Pattern
       readonly now: SelfImprovementLifecycle.TimestampMillis
     }) {
       yield* SelfImprovementAuthorization.authorize(input.principal, "generation.execute", input.principal.locationID)
@@ -83,6 +97,15 @@ export const layer = Layer.effect(
         Effect.map((right) => ({ _tag: "Right" as const, right })),
         Effect.catch((left) => Effect.succeed({ _tag: "Left" as const, left })),
       )
+      const patternMetadata = {
+        derivationRevision: 1,
+        digest: input.pattern.patternDigest,
+        workload: input.pattern.workload,
+        workloadRevision: input.pattern.workloadRevision,
+        errorClass: input.pattern.errorClass,
+        orderedToolSymbolDigest: input.pattern.orderedToolSymbolDigest,
+        outcomeClass: input.pattern.outcomeClass,
+      }
       const baseRequestDigest = SelfImprovement.Digest.make(
         Hash.sha256(
           JSON.stringify({
@@ -90,7 +113,7 @@ export const layer = Layer.effect(
               preflight._tag === "Right" && preflight.right !== undefined
                 ? { id: preflight.right.model.id, providerID: preflight.right.model.providerID }
                 : undefined,
-            pattern: { derivationRevision: 1, digest: input.patternDigest },
+            pattern: patternMetadata,
           }),
         ),
       )
@@ -99,7 +122,7 @@ export const layer = Layer.effect(
         const lease = yield* generation.acquire({
           locationID: input.principal.locationID,
           ownerID: input.principal.id,
-          patternDigest: input.patternDigest,
+          patternDigest: input.pattern.patternDigest,
           requestDigest: baseRequestDigest,
           leaseTokenDigest,
           now: input.now,
@@ -138,14 +161,14 @@ export const layer = Layer.effect(
               derivationRevision: SelfImprovementLifecycle.Revision.make(1),
               allowlistRevision,
               eligibleArmIDs,
-              buckets: [input.patternDigest],
+              buckets: [input.pattern.patternDigest],
             })
       const strategy = selected === undefined ? undefined : arms.find((arm) => arm.id === selected.selectedArmID)
       const modelRequestDigest = SelfImprovement.Digest.make(
         Hash.sha256(
           JSON.stringify({
             model: { id: model.model.id, providerID: model.model.providerID },
-            pattern: { derivationRevision: 1, digest: input.patternDigest },
+            pattern: patternMetadata,
             strategy: strategy === undefined ? undefined : { id: strategy.id, strategyID: strategy.strategyID },
           }),
         ),
@@ -177,7 +200,7 @@ export const layer = Layer.effect(
       const lease = yield* generation.acquire({
         locationID: input.principal.locationID,
         ownerID: input.principal.id,
-        patternDigest: input.patternDigest,
+        patternDigest: input.pattern.patternDigest,
         requestDigest: modelRequestDigest,
         leaseTokenDigest,
         now: input.now,
@@ -212,7 +235,7 @@ export const layer = Layer.effect(
         system:
           "Return exactly one SkillProposal JSON object. Do not include prose, markdown, or any other proposal kind.",
         prompt: JSON.stringify({
-          pattern: { derivationRevision: 1, digest: input.patternDigest },
+          pattern: patternMetadata,
           strategy: strategy === undefined ? undefined : { id: strategy.id, strategyID: strategy.strategyID },
         }),
       })

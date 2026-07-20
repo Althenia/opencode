@@ -53,6 +53,7 @@ import { SelfImprovementMutationStore } from "./self-improvement/mutation-store"
 import { SelfImprovementPrivateArtifactCommand } from "./self-improvement/private-artifact-command"
 import { SelfImprovementPrivateEvidenceCommand } from "./self-improvement/private-evidence-command"
 import { SelfImprovementPrivateQuery } from "./self-improvement/private-query"
+import { SelfImprovementSessionObserver } from "./self-improvement/session-observer"
 import { SelfImprovementTransitionStore } from "./self-improvement/transition-store"
 import { BuiltInTools } from "./tool/builtins"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
@@ -117,6 +118,7 @@ export const locationServices = LayerNode.group([
   Routing.node,
   SessionRunnerModel.node,
   Snapshot.node,
+  SelfImprovementSessionObserver.node,
   SessionRunnerLLM.node,
   SelfImprovementGenerationStore.node,
   SelfImprovementGeneration.node,

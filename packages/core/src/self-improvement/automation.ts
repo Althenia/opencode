@@ -1,6 +1,6 @@
 export * as SelfImprovementAutomation from "./automation"
 
-import { and, asc, desc, eq, gt, isNotNull } from "drizzle-orm"
+import { and, asc, desc, eq, gt, isNotNull, isNull } from "drizzle-orm"
 import { Cause, Clock, Context, Duration, Effect, Layer, Schedule } from "effect"
 import {
   SelfImprovement,
@@ -14,6 +14,7 @@ import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { Location } from "../location"
 import { Hash } from "../util/hash"
+import { SelfImprovementApprovalRequestTable, SelfImprovementApprovalTable } from "./approval-rollback.sql"
 import { SelfImprovementArtifactTable, SelfImprovementArtifactVersionTable } from "./artifact.sql"
 import { SelfImprovementContextReconciler } from "./context-reconciler"
 import { locationID as makeLocationID } from "./contracts"
@@ -21,7 +22,9 @@ import { SelfImprovementGeneration } from "./generation"
 import { SelfImprovementGenerationStore } from "./generation-store"
 import { SelfImprovementObservationTable } from "./ingress.sql"
 import { SelfImprovementLifecycleWorkflow } from "./lifecycle-workflow"
+import { SelfImprovementLearningStore } from "./learning-store"
 import { SelfImprovementMetrics } from "./metrics"
+import { SelfImprovementPrivateArtifactCommand } from "./private-artifact-command"
 import { SelfImprovementPrivateEvidenceCommand } from "./private-evidence-command"
 import { SelfImprovementPrivateQuery } from "./private-query"
 import { SelfImprovementTransitionStore } from "./transition-store"
@@ -37,11 +40,17 @@ const preparableStages = new Set<SelfImprovementLifecycle.ArtifactStage>(["draft
 
 export interface Settings {
   readonly enabled: boolean
+  readonly autoApprove: boolean
   readonly evaluationWindowMillis: number
 }
 
 export interface EligiblePattern {
   readonly patternDigest: SelfImprovement.Digest
+  readonly workload: SelfImprovementEvaluation.Workload
+  readonly workloadRevision: SelfImprovementLifecycle.Revision
+  readonly errorClass: string
+  readonly orderedToolSymbolDigest: SelfImprovement.Digest
+  readonly outcomeClass: SelfImprovementLearning.ObservationOutcomeClass
 }
 
 export interface GeneratedWork {
@@ -71,12 +80,13 @@ export interface RunWork {
 
 export interface Dependencies {
   readonly now: Effect.Effect<SelfImprovementLifecycle.TimestampMillis>
+  readonly seedGenerationStrategy: Effect.Effect<void, unknown>
   readonly listEligiblePatterns: (input: {
     readonly locationID: SelfImprovementLifecycle.LocationID
     readonly now: SelfImprovementLifecycle.TimestampMillis
   }) => Effect.Effect<ReadonlyArray<EligiblePattern>, unknown>
   readonly generate: (input: {
-    readonly patternDigest: SelfImprovement.Digest
+    readonly pattern: EligiblePattern
     readonly now: SelfImprovementLifecycle.TimestampMillis
   }) => Effect.Effect<"admitted" | "skipped", unknown>
   readonly listGeneratedWork: (input: {
@@ -103,6 +113,11 @@ export interface Dependencies {
   }) => Effect.Effect<void, unknown>
   readonly decideRun: (input: {
     readonly run: RunWork & { readonly cutoffSampleSetDigest: SelfImprovement.Digest }
+    readonly now: SelfImprovementLifecycle.TimestampMillis
+  }) => Effect.Effect<void, unknown>
+  readonly listPendingApprovals: () => Effect.Effect<ReadonlyArray<SelfImprovementLifecycle.ApprovalRequest>, unknown>
+  readonly approve: (input: {
+    readonly request: SelfImprovementLifecycle.ApprovalRequest
     readonly now: SelfImprovementLifecycle.TimestampMillis
   }) => Effect.Effect<void, unknown>
   readonly reconcile: Effect.Effect<number, unknown>
@@ -145,13 +160,16 @@ export function make(input: {
 
   const tick = Effect.fn("SelfImprovementAutomation.tick")(function* () {
     const now = yield* input.dependencies.now
+    const seedResult = yield* attempt("seed generation strategy", input.dependencies.seedGenerationStrategy)
     const patternsResult = yield* attempt(
       "list eligible patterns",
       input.dependencies.listEligiblePatterns({ locationID: input.locationID, now }),
     )
-    const patterns = patternsResult.ok ? patternsResult.value : []
+    const patterns = (patternsResult.ok ? patternsResult.value : []).filter(
+      (pattern) => pattern.outcomeClass === "failure",
+    )
     const generated = yield* Effect.forEach(patterns, (pattern) =>
-      attempt("generate candidate", input.dependencies.generate({ patternDigest: pattern.patternDigest, now })),
+      attempt("generate candidate", input.dependencies.generate({ pattern, now })),
     )
     const generatedCount = generated.filter((result) => result.ok && result.value === "admitted").length
     const workResult = yield* attempt(
@@ -172,6 +190,12 @@ export function make(input: {
       ),
       (run) => attempt("decide evaluation run", input.dependencies.decideRun({ run, now })),
     )
+    const approvalsResult = input.settings.autoApprove
+      ? yield* attempt("list pending approvals", input.dependencies.listPendingApprovals())
+      : ({ ok: true, value: [] } as const)
+    const approvals = yield* Effect.forEach(approvalsResult.ok ? approvalsResult.value : [], (request) =>
+      attempt("approve generated candidate", input.dependencies.approve({ request, now })),
+    )
     const reconciliation = yield* attempt("reconcile self-improvement context", input.dependencies.reconcile)
 
     return {
@@ -182,12 +206,15 @@ export function make(input: {
       runsDecided: decisions.filter((result) => result.ok).length,
       reconciled: reconciliation.ok ? reconciliation.value : 0,
       failures:
+        (seedResult.ok ? 0 : 1) +
         (patternsResult.ok ? 0 : 1) +
         generated.filter((result) => !result.ok).length +
         (workResult.ok ? 0 : 1) +
         progressed.filter((result) => !result.ok).length +
         (openRunsResult.ok ? 0 : 1) +
         decisions.filter((result) => !result.ok).length +
+        (approvalsResult.ok ? 0 : 1) +
+        approvals.filter((result) => !result.ok).length +
         (reconciliation.ok ? 0 : 1),
     }
 
@@ -246,7 +273,9 @@ export const layer = Layer.effect(
     const db = (yield* Database.Service).db
     const generation = yield* SelfImprovementGeneration.Service
     const generationStore = yield* SelfImprovementGenerationStore.Service
+    const learning = yield* SelfImprovementLearningStore.Service
     const query = yield* SelfImprovementPrivateQuery.Service
+    const artifacts = yield* SelfImprovementPrivateArtifactCommand.Service
     const workflow = yield* SelfImprovementLifecycleWorkflow.Service
     const evidence = yield* SelfImprovementPrivateEvidenceCommand.Service
     const transitions = yield* SelfImprovementTransitionStore.Service
@@ -259,6 +288,7 @@ export const layer = Layer.effect(
     const locationID = makeLocationID(locationRef)
     const coordinator = principal(locationID, "coordinator", "self-improvement-automation-coordinator")
     const evaluator = principal(locationID, "evaluator", "self-improvement-automation-evaluator")
+    const approver = principal(locationID, "location-approver", "self-improvement-automatic-approver")
     const runtimeEvidence = principal(
       locationID,
       "runtime-evidence-service",
@@ -266,6 +296,7 @@ export const layer = Layer.effect(
     )
     const settings: Settings = {
       enabled: configured?.automatic === true,
+      autoApprove: configured?.auto_approve !== false,
       evaluationWindowMillis: (configured?.evaluation_window_minutes ?? 60) * 60_000,
     }
     const service = make({
@@ -273,11 +304,31 @@ export const layer = Layer.effect(
       settings,
       dependencies: {
         now: Clock.currentTimeMillis.pipe(Effect.map((now) => SelfImprovementLifecycle.TimestampMillis.make(now))),
+        seedGenerationStrategy: learning
+          .putGenerationArm(
+            new SelfImprovementLearning.GenerationStrategyArm({
+              id: SelfImprovementLifecycle.GenerationStrategyArmID.make(`si_gsa_default_${locationID}`),
+              locationID,
+              strategyID: "generalize-remediation",
+              allowlistRevision: SelfImprovementLifecycle.Revision.make(1),
+              active: true,
+            }),
+          )
+          .pipe(
+            Effect.catchTag("SelfImprovementLearningStore.Conflict", (error) =>
+              error.message === "Generation strategy arm already exists" ? Effect.void : Effect.fail(error),
+            ),
+          ),
         listEligiblePatterns: ({ now }) =>
           db
             .select({
               patternDigest: SelfImprovementObservationTable.pattern_digest,
               identityDigest: SelfImprovementObservationTable.identity_digest,
+              workload: SelfImprovementObservationTable.workload,
+              workloadRevision: SelfImprovementObservationTable.workload_revision,
+              errorClass: SelfImprovementObservationTable.error_class,
+              orderedToolSymbolDigest: SelfImprovementObservationTable.ordered_tool_symbol_digest,
+              outcomeClass: SelfImprovementObservationTable.outcome_class,
               occurredAt: SelfImprovementObservationTable.occurred_at,
               id: SelfImprovementObservationTable.id,
             })
@@ -285,6 +336,7 @@ export const layer = Layer.effect(
             .where(
               and(
                 eq(SelfImprovementObservationTable.location_id, locationID),
+                eq(SelfImprovementObservationTable.outcome_class, "failure"),
                 gt(SelfImprovementObservationTable.expires_at, now),
               ),
             )
@@ -293,20 +345,33 @@ export const layer = Layer.effect(
             .pipe(
               Effect.orDie,
               Effect.map((rows) => {
-                const grouped = new Map<SelfImprovement.Digest, Set<SelfImprovement.Digest>>()
+                const grouped = new Map<
+                  SelfImprovement.Digest,
+                  { readonly representative: (typeof rows)[number]; readonly identities: Set<SelfImprovement.Digest> }
+                >()
                 rows.forEach((row) => {
-                  const identities = grouped.get(row.patternDigest) ?? new Set<SelfImprovement.Digest>()
-                  identities.add(row.identityDigest)
-                  grouped.set(row.patternDigest, identities)
+                  const current = grouped.get(row.patternDigest)
+                  if (current) {
+                    current.identities.add(row.identityDigest)
+                    return
+                  }
+                  grouped.set(row.patternDigest, { representative: row, identities: new Set([row.identityDigest]) })
                 })
-                return Array.from(grouped)
-                  .filter(([, identities]) => identities.size >= 3)
-                  .map(([patternDigest]) => ({ patternDigest }))
+                return Array.from(grouped.values())
+                  .filter((entry) => entry.identities.size >= 3)
+                  .map(({ representative }) => ({
+                    patternDigest: representative.patternDigest,
+                    workload: SelfImprovementEvaluation.Workload.make(representative.workload),
+                    workloadRevision: representative.workloadRevision,
+                    errorClass: representative.errorClass,
+                    orderedToolSymbolDigest: representative.orderedToolSymbolDigest,
+                    outcomeClass: representative.outcomeClass,
+                  }))
                   .slice(0, 32)
               }),
             ),
-        generate: ({ patternDigest, now }) =>
-          generation.generate({ principal: coordinator, patternDigest, now }).pipe(
+        generate: ({ pattern, now }) =>
+          generation.generate({ principal: coordinator, pattern, now }).pipe(
             Effect.map((lease) => (lease.outcome === "admitted" ? ("admitted" as const) : ("skipped" as const))),
             Effect.catchTag("SelfImprovementGenerationStore.NotEligible", () => Effect.succeed("skipped" as const)),
           ),
@@ -465,6 +530,71 @@ export const layer = Layer.effect(
               }),
             )
             .pipe(Effect.asVoid),
+        listPendingApprovals: () =>
+          db
+            .select({
+              id: SelfImprovementApprovalRequestTable.id,
+              versionID: SelfImprovementApprovalRequestTable.version_id,
+              versionDigest: SelfImprovementApprovalRequestTable.version_digest,
+              suiteID: SelfImprovementApprovalRequestTable.suite_id,
+              suiteRevision: SelfImprovementApprovalRequestTable.suite_revision,
+              evaluationRunID: SelfImprovementApprovalRequestTable.evaluation_run_id,
+              shadowEvidenceDigest: SelfImprovementApprovalRequestTable.shadow_evidence_digest,
+              creatorID: SelfImprovementApprovalRequestTable.creator_id,
+              requestedAt: SelfImprovementApprovalRequestTable.requested_at,
+            })
+            .from(SelfImprovementApprovalRequestTable)
+            .leftJoin(
+              SelfImprovementApprovalTable,
+              eq(SelfImprovementApprovalTable.request_id, SelfImprovementApprovalRequestTable.id),
+            )
+            .where(
+              and(
+                eq(SelfImprovementApprovalRequestTable.location_id, locationID),
+                isNull(SelfImprovementApprovalTable.id),
+              ),
+            )
+            .orderBy(
+              asc(SelfImprovementApprovalRequestTable.requested_at),
+              asc(SelfImprovementApprovalRequestTable.id),
+            )
+            .limit(100)
+            .all()
+            .pipe(
+              Effect.orDie,
+              Effect.map((rows) =>
+                rows.map(
+                  (row) =>
+                    new SelfImprovementLifecycle.ApprovalRequest({
+                      id: row.id,
+                      locationID,
+                      binding: new SelfImprovementLifecycle.ApprovalBinding({
+                        versionID: row.versionID,
+                        versionDigest: row.versionDigest,
+                        suiteID: row.suiteID,
+                        suiteRevision: row.suiteRevision,
+                        evaluationRunID: row.evaluationRunID,
+                        shadowEvidenceDigest: row.shadowEvidenceDigest,
+                      }),
+                      creatorID: row.creatorID,
+                      requestedAt: row.requestedAt,
+                    }),
+                ),
+              ),
+            ),
+        approve: ({ request, now }) =>
+          artifacts
+            .approve({
+              locationID,
+              principal: approver,
+              request: new SelfImprovementApi.ApproveRequest({
+                approvalRequestID: request.id,
+                binding: request.binding,
+              }),
+              idempotencyKey: key(`automation/approve/v1\0${request.id}\0${request.binding.shadowEvidenceDigest}`),
+              now,
+            })
+            .pipe(Effect.asVoid),
         reconcile: reconciler.drain,
       },
     })
@@ -488,7 +618,9 @@ export const node = makeLocationNode({
     SelfImprovementContextReconciler.node,
     SelfImprovementGeneration.node,
     SelfImprovementGenerationStore.node,
+    SelfImprovementLearningStore.node,
     SelfImprovementLifecycleWorkflow.node,
+    SelfImprovementPrivateArtifactCommand.node,
     SelfImprovementPrivateEvidenceCommand.node,
     SelfImprovementPrivateQuery.node,
     SelfImprovementTransitionStore.node,

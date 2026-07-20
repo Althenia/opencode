@@ -8,7 +8,7 @@ import {
   isContextOverflowFailure,
   type ProviderErrorEvent,
 } from "@opencode-ai/llm"
-import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
+import { Cause, DateTime, Effect, Exit, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
@@ -35,6 +35,7 @@ import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
 import { Routing } from "../../self-improvement/routing"
+import { SelfImprovementSessionObserver } from "../../self-improvement/session-observer"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
@@ -101,6 +102,7 @@ const layer = Layer.effect(
     const tools = yield* ToolRegistry.Service
     const models = yield* SessionRunnerModel.Service
     const routing = yield* Routing.Service
+    const observer = yield* SelfImprovementSessionObserver.Service
     const store = yield* SessionStore.Service
     const location = yield* Location.Service
     const systemContext = yield* SystemContextRegistry.Service
@@ -396,15 +398,19 @@ const layer = Layer.effect(
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
       while (shouldRun) {
-        let needsContinuation = true
-        let step = 1
-        while (needsContinuation) {
-          const result = yield* runTurn(input.sessionID, promotion, step)
-          needsContinuation = result.needsContinuation
-          step = result.step + 1
-          promotion = "steer"
-          if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
-        }
+        const cycle = yield* Effect.gen(function* () {
+          let needsContinuation = true
+          let step = 1
+          while (needsContinuation) {
+            const result = yield* runTurn(input.sessionID, promotion, step)
+            needsContinuation = result.needsContinuation
+            step = result.step + 1
+            promotion = "steer"
+            if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+          }
+        }).pipe(Effect.exit)
+        yield* observer.record({ sessionID: input.sessionID, exit: cycle })
+        if (Exit.isFailure(cycle)) return yield* cycle
         shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
         promotion = shouldRun ? "queue" : undefined
       }
@@ -425,6 +431,7 @@ export const node = makeLocationNode({
     AgentV2.node,
     ToolRegistry.node,
     Routing.node,
+    SelfImprovementSessionObserver.node,
     SessionRunnerModel.node,
     SessionStore.node,
     Location.node,

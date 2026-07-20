@@ -9,6 +9,18 @@ const now = SelfImprovementLifecycle.TimestampMillis.make(1_000)
 const revision = SelfImprovementLifecycle.Revision.make(1)
 const workload = SelfImprovementEvaluation.Workload.make("backend-fix")
 const patternDigest = SelfImprovement.Digest.make("b".repeat(64))
+const orderedToolSymbolDigest = SelfImprovement.Digest.make("e".repeat(64))
+const pattern = (
+  digest = patternDigest,
+  outcomeClass: "success" | "failure" | "cancelled" = "failure",
+) => ({
+  patternDigest: digest,
+  workload,
+  workloadRevision: revision,
+  errorClass: outcomeClass === "failure" ? "tool.bash.failed" : "none",
+  orderedToolSymbolDigest,
+  outcomeClass,
+})
 const artifactID = SelfImprovementLifecycle.ArtifactID.make("si_art_generated")
 const versionID = SelfImprovementLifecycle.ArtifactVersionID.make("si_ver_generated")
 const baseline = {
@@ -20,8 +32,24 @@ const baseline = {
 }
 const settings = {
   enabled: true,
+  autoApprove: true,
   evaluationWindowMillis: 60_000,
 }
+const approvalBinding = new SelfImprovementLifecycle.ApprovalBinding({
+  versionID,
+  versionDigest: SelfImprovement.Digest.make("f".repeat(64)),
+  suiteID: baseline.suiteID,
+  suiteRevision: revision,
+  evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.make("si_run_approval"),
+  shadowEvidenceDigest: SelfImprovement.Digest.make("9".repeat(64)),
+})
+const pendingApproval = new SelfImprovementLifecycle.ApprovalRequest({
+  id: SelfImprovementLifecycle.ApprovalRequestID.make("si_apr_automation"),
+  locationID,
+  binding: approvalBinding,
+  creatorID: SelfImprovementLifecycle.PrincipalID.make("creator"),
+  requestedAt: now,
+})
 
 const work = (stage: SelfImprovementLifecycle.ArtifactStage = "draft") => ({
   artifactID,
@@ -34,7 +62,8 @@ const work = (stage: SelfImprovementLifecycle.ArtifactStage = "draft") => ({
 const dependencies = (overrides: Partial<SelfImprovementAutomation.Dependencies> = {}) =>
   SelfImprovementAutomation.dependencies({
     now: Effect.succeed(now),
-    listEligiblePatterns: () => Effect.succeed([{ patternDigest }]),
+    seedGenerationStrategy: Effect.void,
+    listEligiblePatterns: () => Effect.succeed([pattern()]),
     generate: () => Effect.succeed("admitted" as const),
     listGeneratedWork: () => Effect.succeed([work()]),
     listBaselines: () => Effect.succeed([baseline]),
@@ -42,6 +71,8 @@ const dependencies = (overrides: Partial<SelfImprovementAutomation.Dependencies>
     listRuns: () => Effect.succeed([]),
     createRun: () => Effect.void,
     decideRun: () => Effect.void,
+    listPendingApprovals: () => Effect.succeed([]),
+    approve: () => Effect.void,
     reconcile: Effect.succeed(0),
     ...overrides,
   })
@@ -130,9 +161,9 @@ test("does not duplicate an existing stage run and isolates one failed pattern",
     locationID,
     settings,
     dependencies: dependencies({
-      listEligiblePatterns: () => Effect.succeed([{ patternDigest }, { patternDigest: secondPattern }]),
+      listEligiblePatterns: () => Effect.succeed([pattern(), pattern(secondPattern)]),
       generate: (input) =>
-        input.patternDigest === patternDigest
+        input.pattern.patternDigest === patternDigest
           ? Effect.fail(new Error("model unavailable"))
           : Effect.succeed("admitted"),
       listGeneratedWork: () => Effect.succeed([work("shadow")]),
@@ -148,10 +179,127 @@ test("does not duplicate an existing stage run and isolates one failed pattern",
   expect(result.failures).toBe(1)
 })
 
+test("seeds one default generation strategy before processing patterns", async () => {
+  const calls: string[] = []
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings,
+    dependencies: dependencies({
+      seedGenerationStrategy: Effect.sync(() => calls.push("seed")),
+      listEligiblePatterns: () => Effect.sync(() => calls.push("patterns")).pipe(Effect.as([])),
+      listGeneratedWork: () => Effect.succeed([]),
+    }),
+  })
+
+  await Effect.runPromise(service.tick)
+
+  expect(calls).toEqual(["seed", "patterns"])
+})
+
+test("ignores successful observation patterns", async () => {
+  let generated = 0
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings,
+    dependencies: dependencies({
+      listEligiblePatterns: () => Effect.succeed([pattern(patternDigest, "success")]),
+      generate: () => Effect.sync(() => generated++).pipe(Effect.as("admitted" as const)),
+      listGeneratedWork: () => Effect.succeed([]),
+    }),
+  })
+
+  const result = await Effect.runPromise(service.tick)
+
+  expect(generated).toBe(0)
+  expect(result.eligiblePatterns).toBe(0)
+})
+
+test("passes privacy-safe pattern metadata to generation", async () => {
+  const expected = pattern()
+  let received: unknown
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings,
+    dependencies: dependencies({
+      listEligiblePatterns: () => Effect.succeed([expected]),
+      generate: (input) => Effect.sync(() => (received = input)).pipe(Effect.as("admitted" as const)),
+      listGeneratedWork: () => Effect.succeed([]),
+    }),
+  })
+
+  await Effect.runPromise(service.tick)
+
+  expect(received).toEqual({ pattern: expected, now })
+  expect(JSON.stringify(received)).not.toContain("prompt")
+})
+
+test("automatically approves pending governed requests", async () => {
+  const calls: string[] = []
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings,
+    dependencies: dependencies({
+      listEligiblePatterns: () => Effect.succeed([]),
+      listGeneratedWork: () => Effect.succeed([]),
+      listPendingApprovals: () => Effect.succeed([pendingApproval]),
+      approve: (input) =>
+        Effect.sync(() => {
+          expect(input.request.id).toBe(pendingApproval.id)
+          expect(input.request.binding).toEqual(approvalBinding)
+          calls.push("approve")
+        }),
+      reconcile: Effect.sync(() => calls.push("reconcile")).pipe(Effect.as(0)),
+    }),
+  })
+
+  const result = await Effect.runPromise(service.tick)
+
+  expect(calls).toEqual(["approve", "reconcile"])
+  expect(result.failures).toBe(0)
+})
+
+test("does not approve when automatic approval is disabled", async () => {
+  let listed = 0
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings: { ...settings, autoApprove: false },
+    dependencies: dependencies({
+      listEligiblePatterns: () => Effect.succeed([]),
+      listGeneratedWork: () => Effect.succeed([]),
+      listPendingApprovals: () => Effect.sync(() => listed++).pipe(Effect.as([pendingApproval])),
+    }),
+  })
+
+  await Effect.runPromise(service.tick)
+
+  expect(listed).toBe(0)
+})
+
+test("isolates automatic approval failure and continues reconciliation", async () => {
+  let reconciled = 0
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings,
+    dependencies: dependencies({
+      listEligiblePatterns: () => Effect.succeed([]),
+      listGeneratedWork: () => Effect.succeed([]),
+      listPendingApprovals: () => Effect.succeed([pendingApproval]),
+      approve: () => Effect.fail(new Error("approval failed")),
+      reconcile: Effect.sync(() => reconciled++).pipe(Effect.as(0)),
+    }),
+  })
+
+  const result = await Effect.runPromise(service.tick)
+
+  expect(reconciled).toBe(1)
+  expect(result.failures).toBe(1)
+})
+
 test("accepts bounded opt-in automation config", () => {
   const decoded = Schema.decodeUnknownSync(ConfigExperimental.Experimental)({
     self_improvement: {
       automatic: true,
+      auto_approve: true,
       interval_seconds: 30,
       evaluation_window_minutes: 120,
       evidence_principal_id: "runtime-evidence",
@@ -159,6 +307,7 @@ test("accepts bounded opt-in automation config", () => {
   })
 
   expect(decoded.self_improvement?.automatic).toBe(true)
+  expect(decoded.self_improvement?.auto_approve).toBe(true)
   expect(decoded.self_improvement?.interval_seconds).toBe(30)
   expect(decoded.self_improvement?.evaluation_window_minutes).toBe(120)
   expect(String(decoded.self_improvement?.evidence_principal_id)).toBe("runtime-evidence")

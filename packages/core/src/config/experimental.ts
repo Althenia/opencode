@@ -16,6 +16,7 @@ export class Policy extends Schema.Class<Policy>("ConfigV2.Experimental.Policy")
 
 export class SelfImprovement extends Schema.Class<SelfImprovement>("ConfigV2.Experimental.SelfImprovement")({
   automatic: Schema.Boolean.pipe(Schema.optional),
+  auto_approve: Schema.Boolean.pipe(Schema.optional),
   interval_seconds: Schema.Int.check(Schema.isGreaterThanOrEqualTo(5), Schema.isLessThanOrEqualTo(3_600)).pipe(
     Schema.optional,
   ),

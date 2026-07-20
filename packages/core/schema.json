@@ -1,8 +1,10 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "ba067229-e19d-47c2-a62a-3e76b0272611",
-  "prevIds": ["0ff46586-d354-4d35-ae30-ce75fd8805fd"],
+  "id": "c362ca18-c241-4602-92ea-9e05333d78dc",
+  "prevIds": [
+    "ba067229-e19d-47c2-a62a-3e76b0272611"
+  ],
   "ddl": [
     {
       "name": "workspace",
@@ -110,6 +112,10 @@
     },
     {
       "name": "self_improvement_artifact_slot",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_session_evidence",
       "entityType": "tables"
     },
     {
@@ -2766,6 +2772,146 @@
       "generated": null,
       "name": "id",
       "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id_digest",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sample_id_digest",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_digest",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload_revision",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "producer_id",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome_class",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "metrics_json",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "terminal_at",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
       "table": "self_improvement_stage_transition"
     },
     {
@@ -4269,9 +4415,13 @@
       "table": "session_share"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4280,9 +4430,13 @@
       "table": "workspace"
     },
     {
-      "columns": ["version_id"],
+      "columns": [
+        "version_id"
+      ],
       "tableTo": "self_improvement_artifact_version",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4291,9 +4445,13 @@
       "table": "self_improvement_approval_request"
     },
     {
-      "columns": ["request_id"],
+      "columns": [
+        "request_id"
+      ],
       "tableTo": "self_improvement_approval_request",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4302,9 +4460,13 @@
       "table": "self_improvement_approval"
     },
     {
-      "columns": ["artifact_id"],
+      "columns": [
+        "artifact_id"
+      ],
       "tableTo": "self_improvement_artifact",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4313,9 +4475,13 @@
       "table": "self_improvement_rollback"
     },
     {
-      "columns": ["candidate_version_id"],
+      "columns": [
+        "candidate_version_id"
+      ],
       "tableTo": "self_improvement_artifact_version",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4324,9 +4490,13 @@
       "table": "self_improvement_rollback"
     },
     {
-      "columns": ["retained_active_version_id"],
+      "columns": [
+        "retained_active_version_id"
+      ],
       "tableTo": "self_improvement_artifact_version",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4335,9 +4505,13 @@
       "table": "self_improvement_rollback"
     },
     {
-      "columns": ["artifact_id"],
+      "columns": [
+        "artifact_id"
+      ],
       "tableTo": "self_improvement_artifact",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4346,9 +4520,13 @@
       "table": "self_improvement_artifact_version"
     },
     {
-      "columns": ["artifact_id"],
+      "columns": [
+        "artifact_id"
+      ],
       "tableTo": "self_improvement_artifact",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4357,9 +4535,13 @@
       "table": "self_improvement_context_desired_state"
     },
     {
-      "columns": ["version_id"],
+      "columns": [
+        "version_id"
+      ],
       "tableTo": "self_improvement_artifact_version",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4368,9 +4550,13 @@
       "table": "self_improvement_context_desired_state"
     },
     {
-      "columns": ["artifact_id"],
+      "columns": [
+        "artifact_id"
+      ],
       "tableTo": "self_improvement_artifact",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4379,9 +4565,13 @@
       "table": "self_improvement_context_outbox"
     },
     {
-      "columns": ["artifact_id"],
+      "columns": [
+        "artifact_id"
+      ],
       "tableTo": "self_improvement_artifact",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4390,9 +4580,13 @@
       "table": "self_improvement_context_selection_evidence"
     },
     {
-      "columns": ["version_id"],
+      "columns": [
+        "version_id"
+      ],
       "tableTo": "self_improvement_artifact_version",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4401,9 +4595,13 @@
       "table": "self_improvement_context_selection_evidence"
     },
     {
-      "columns": ["outbox_id"],
+      "columns": [
+        "outbox_id"
+      ],
       "tableTo": "self_improvement_context_outbox",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4412,9 +4610,13 @@
       "table": "self_improvement_context_selection_evidence"
     },
     {
-      "columns": ["artifact_id"],
+      "columns": [
+        "artifact_id"
+      ],
       "tableTo": "self_improvement_artifact",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4423,9 +4625,13 @@
       "table": "self_improvement_artifact_slot"
     },
     {
-      "columns": ["version_id"],
+      "columns": [
+        "version_id"
+      ],
       "tableTo": "self_improvement_artifact_version",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4434,9 +4640,13 @@
       "table": "self_improvement_artifact_slot"
     },
     {
-      "columns": ["version_id"],
+      "columns": [
+        "version_id"
+      ],
       "tableTo": "self_improvement_artifact_version",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -4445,9 +4655,13 @@
       "table": "self_improvement_stage_transition"
     },
     {
-      "columns": ["active_account_id"],
+      "columns": [
+        "active_account_id"
+      ],
       "tableTo": "account",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -4456,9 +4670,13 @@
       "table": "account_state"
     },
     {
-      "columns": ["aggregate_id"],
+      "columns": [
+        "aggregate_id"
+      ],
       "tableTo": "event_sequence",
-      "columnsTo": ["aggregate_id"],
+      "columnsTo": [
+        "aggregate_id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4467,9 +4685,13 @@
       "table": "event"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4478,9 +4700,13 @@
       "table": "permission"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4489,9 +4715,13 @@
       "table": "project_directory"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4500,9 +4730,13 @@
       "table": "session_goal"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4511,9 +4745,13 @@
       "table": "message"
     },
     {
-      "columns": ["message_id"],
+      "columns": [
+        "message_id"
+      ],
       "tableTo": "message",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4522,9 +4760,13 @@
       "table": "part"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4533,9 +4775,13 @@
       "table": "session_context_epoch"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4544,9 +4790,13 @@
       "table": "session_input"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4555,9 +4805,13 @@
       "table": "session_message"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4566,9 +4820,13 @@
       "table": "session"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4577,9 +4835,13 @@
       "table": "todo"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -4588,308 +4850,412 @@
       "table": "session_share"
     },
     {
-      "columns": ["location_id", "artifact_id", "rollout_slot"],
+      "columns": [
+        "location_id",
+        "artifact_id",
+        "rollout_slot"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_context_desired_state_pk",
       "entityType": "pks",
       "table": "self_improvement_context_desired_state"
     },
     {
-      "columns": ["location_id", "artifact_id", "slot"],
+      "columns": [
+        "location_id",
+        "artifact_id",
+        "slot"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_artifact_slot_pk",
       "entityType": "pks",
       "table": "self_improvement_artifact_slot"
     },
     {
-      "columns": ["email", "url"],
+      "columns": [
+        "email",
+        "url"
+      ],
       "nameExplicit": false,
       "name": "control_account_pk",
       "entityType": "pks",
       "table": "control_account"
     },
     {
-      "columns": ["project_id", "directory"],
+      "columns": [
+        "project_id",
+        "directory"
+      ],
       "nameExplicit": false,
       "name": "project_directory_pk",
       "entityType": "pks",
       "table": "project_directory"
     },
     {
-      "columns": ["session_id", "position"],
+      "columns": [
+        "session_id",
+        "position"
+      ],
       "nameExplicit": false,
       "name": "todo_pk",
       "entityType": "pks",
       "table": "todo"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "workspace_pk",
       "table": "workspace",
       "entityType": "pks"
     },
     {
-      "columns": ["name"],
+      "columns": [
+        "name"
+      ],
       "nameExplicit": false,
       "name": "data_migration_pk",
       "table": "data_migration",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_approval_request_pk",
       "table": "self_improvement_approval_request",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_approval_pk",
       "table": "self_improvement_approval",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_rollback_pk",
       "table": "self_improvement_rollback",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_artifact_pk",
       "table": "self_improvement_artifact",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_artifact_version_pk",
       "table": "self_improvement_artifact_version",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_audit_entry_pk",
       "table": "self_improvement_audit_entry",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_context_outbox_pk",
       "table": "self_improvement_context_outbox",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_context_selection_evidence_pk",
       "table": "self_improvement_context_selection_evidence",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_evaluation_baseline_pk",
       "table": "self_improvement_evaluation_baseline",
       "entityType": "pks"
     },
     {
-      "columns": ["run_id"],
+      "columns": [
+        "run_id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_evaluation_decision_pk",
       "table": "self_improvement_evaluation_decision",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_evaluation_finding_pk",
       "table": "self_improvement_evaluation_finding",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_evaluation_run_pk",
       "table": "self_improvement_evaluation_run",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_evaluation_sample_pk",
       "table": "self_improvement_evaluation_sample",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_generation_lease_pk",
       "table": "self_improvement_generation_lease",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_idempotency_pk",
       "table": "self_improvement_idempotency",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_observation_pk",
       "table": "self_improvement_observation",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_generation_strategy_arm_pk",
       "table": "self_improvement_generation_strategy_arm",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_model_route_arm_pk",
       "table": "self_improvement_model_route_arm",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_pull_event_pk",
       "table": "self_improvement_pull_event",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_reward_event_pk",
       "table": "self_improvement_reward_event",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_routing_decision_pk",
       "table": "self_improvement_routing_decision",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "self_improvement_session_evidence_pk",
+      "table": "self_improvement_session_evidence",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "self_improvement_stage_transition_pk",
       "table": "self_improvement_stage_transition",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "account_state_pk",
       "table": "account_state",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "account_pk",
       "table": "account",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "credential_pk",
       "table": "credential",
       "entityType": "pks"
     },
     {
-      "columns": ["aggregate_id"],
+      "columns": [
+        "aggregate_id"
+      ],
       "nameExplicit": false,
       "name": "event_sequence_pk",
       "table": "event_sequence",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "event_pk",
       "table": "event",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "permission_pk",
       "table": "permission",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "project_pk",
       "table": "project",
       "entityType": "pks"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "nameExplicit": false,
       "name": "session_goal_pk",
       "table": "session_goal",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "message_pk",
       "table": "message",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "part_pk",
       "table": "part",
       "entityType": "pks"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "nameExplicit": false,
       "name": "session_context_epoch_pk",
       "table": "session_context_epoch",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "session_input_pk",
       "table": "session_input",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "session_message_pk",
       "table": "session_message",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "session_pk",
       "table": "session",
       "entityType": "pks"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "nameExplicit": false,
       "name": "session_share_pk",
       "table": "session_share",
@@ -5740,6 +6106,50 @@
       "name": "self_improvement_artifact_slot_location_artifact_slot_idx",
       "entityType": "indexes",
       "table": "self_improvement_artifact_slot"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "task_id_digest",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_session_evidence_location_task_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_session_evidence"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "workload",
+          "isExpression": false
+        },
+        {
+          "value": "workload_revision",
+          "isExpression": false
+        },
+        {
+          "value": "terminal_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_session_evidence_location_workload_terminal_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_session_evidence"
     },
     {
       "columns": [

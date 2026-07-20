@@ -116,7 +116,14 @@ async function generateSkill(fixture: Fixture, name: string, pattern: string) {
     SelfImprovementGeneration.Service.use((generation) =>
       generation.generate({
         principal: principal(fixture, "coordinator", `${pattern}-generator`),
-        patternDigest: latest.observation.patternDigest,
+        pattern: {
+          patternDigest: latest.observation.patternDigest,
+          workload: latest.observation.workload,
+          workloadRevision: latest.observation.workloadRevision,
+          errorClass: latest.observation.errorClass,
+          orderedToolSymbolDigest: latest.observation.orderedToolSymbolDigest,
+          outcomeClass: latest.observation.outcomeClass,
+        },
         now,
       }),
     ),
