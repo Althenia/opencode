@@ -73,10 +73,10 @@ describe("ToolRegistry", () => {
         toolDefinitions(service, rules).pipe(Effect.map((definitions) => definitions.map((tool) => tool.name)))
 
       expect(yield* names([{ action: "question", resource: "*", effect: "deny" }])).toEqual([
+        "apply_patch",
         "bash",
         "edit",
         "write",
-        "apply_patch",
       ])
       expect(
         yield* names([
@@ -90,7 +90,7 @@ describe("ToolRegistry", () => {
           { action: "*", resource: "*", effect: "deny" },
         ]),
       ).toEqual([])
-      expect(yield* names([{ action: "edit", resource: "*", effect: "deny" }])).toEqual(["question", "bash"])
+      expect(yield* names([{ action: "edit", resource: "*", effect: "deny" }])).toEqual(["bash", "question"])
     }),
   )
 
@@ -107,6 +107,19 @@ describe("ToolRegistry", () => {
           (definition) => definition.name,
         ),
       ).toEqual(["first"])
+    }),
+  )
+
+  it.effect("sorts model definitions lexically for cache-stable prefixes", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      yield* service.register({
+        zebra: make(),
+        alpha: make(),
+        middle: make(),
+      })
+
+      expect((yield* toolDefinitions(service)).map((tool) => tool.name)).toEqual(["alpha", "middle", "zebra"])
     }),
   )
 

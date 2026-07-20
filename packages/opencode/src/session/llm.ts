@@ -29,6 +29,8 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { InstanceState } from "@/effect/instance-state"
+import { promptCacheNamespace } from "@opencode-ai/core/session/runner/cache"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -103,8 +105,19 @@ const live: Layer.Layer<
       )
 
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel
+      const instance = yield* InstanceState.context
+      const workspaceID = yield* InstanceState.workspaceID
+      const cacheKey = promptCacheNamespace({
+        projectID: instance.project.id,
+        directory: instance.directory,
+        workspaceID,
+        agentID: input.agent.name,
+        providerID: input.model.providerID,
+        modelID: input.model.api.id,
+      })
       const prepared = yield* LLMRequestPrep.prepare({
         ...input,
+        cacheKey,
         provider: item,
         auth: info,
         plugin,

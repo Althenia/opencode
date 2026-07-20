@@ -39,6 +39,7 @@ import { SelfImprovementSessionObserver } from "../../self-improvement/session-o
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
+import { promptCacheNamespace } from "./cache"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
@@ -208,10 +209,20 @@ const layer = Layer.effect(
       const context = entries.map((entry) => entry.message)
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
       const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
-      const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
+      const promptCacheKey = promptCacheNamespace({
+        projectID: location.project.id,
+        directory: session.location.directory,
+        workspaceID: session.location.workspaceID,
+        agentID: agent.id,
+        providerID: model.provider,
+        modelID: model.id,
+      })
       const request = LLM.request({
         model,
-        providerOptions: { openai: { promptCacheKey } },
+        providerOptions: {
+          openai: { promptCacheKey },
+          openrouter: { sessionID: promptCacheKey },
+        },
         system: [agent.info?.system, system.baseline, goalContext]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),

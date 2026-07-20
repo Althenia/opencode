@@ -51,6 +51,16 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
+  test("should prefer a stable cache namespace over the session ID", () => {
+    const result = ProviderTransform.options({
+      model: mockModel,
+      sessionID,
+      cacheKey: "stable-project-cache-key",
+      providerOptions: { setCacheKey: true },
+    })
+    expect(result.promptCacheKey).toBe("stable-project-cache-key")
+  })
+
   test("should not set promptCacheKey when providerOptions.setCacheKey is false", () => {
     const result = ProviderTransform.options({
       model: mockModel,

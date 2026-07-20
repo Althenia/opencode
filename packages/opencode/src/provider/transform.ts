@@ -1125,6 +1125,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
 export function options(input: {
   model: Provider.Model
   sessionID: string
+  cacheKey?: string
   providerOptions?: Record<string, any>
 }): Record<string, any> {
   const result: Record<string, any> = cachingOptions(input)
@@ -1259,7 +1260,7 @@ export function options(input: {
     }
 
     if (input.model.providerID.startsWith("opencode") && input.providerOptions?.setCacheKey !== false) {
-      result["promptCacheKey"] = input.sessionID
+      result["promptCacheKey"] = input.cacheKey ?? input.sessionID
       result["include"] = INCLUDE_ENCRYPTED_REASONING
       result["reasoningSummary"] = "auto"
     }
@@ -1271,15 +1272,17 @@ export function options(input: {
 function cachingOptions(input: {
   model: Provider.Model
   sessionID: string
+  cacheKey?: string
   providerOptions?: Record<string, any>
 }): Record<string, any> {
+  const cacheKey = input.cacheKey ?? input.sessionID
   if (input.providerOptions?.setCacheKey === false) {
     if (input.model.api.npm === "@ai-sdk/gateway") return { gateway: { caching: "auto" } }
     return {}
   }
 
   if (input.model.api.npm === "@ai-sdk/deepinfra" || input.model.api.npm === "@ai-sdk/cerebras") {
-    return { prompt_cache_key: input.sessionID }
+    return { prompt_cache_key: cacheKey }
   }
 
   if (
@@ -1291,16 +1294,21 @@ function cachingOptions(input: {
     input.model.api.npm === "venice-ai-sdk-provider" ||
     input.providerOptions?.setCacheKey === true
   ) {
-    return { promptCacheKey: input.sessionID }
+    return { promptCacheKey: cacheKey }
   }
 
   if (input.model.api.npm === "@ai-sdk/gateway") return { gateway: { caching: "auto" } }
   return {}
 }
 
-export function smallOptions(model: Provider.Model, sessionID?: string, providerOptions?: Record<string, any>) {
+export function smallOptions(
+  model: Provider.Model,
+  sessionID?: string,
+  providerOptions?: Record<string, any>,
+  cacheKey?: string,
+) {
   const small = Object.values(model.variants ?? {})[0] ?? {}
-  const caching = sessionID ? cachingOptions({ model, sessionID, providerOptions }) : {}
+  const caching = sessionID ? cachingOptions({ model, sessionID, cacheKey, providerOptions }) : {}
   if (
     model.providerID === "openai" ||
     model.api.npm === "@ai-sdk/openai" ||

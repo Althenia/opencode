@@ -723,7 +723,7 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.model).toBe(model)
-      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["echo", "defect"])
+      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["defect", "echo"])
       expect(requests[0]?.messages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
         { role: "user", content: [{ type: "text", text: "First" }] },
         { role: "user", content: [{ type: "text", text: "Second" }] },
@@ -1497,7 +1497,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(requests).toHaveLength(1)
-      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["echo", "defect"])
+      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["defect", "echo"])
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Use tools" },
         {
@@ -2639,10 +2639,11 @@ describe("SessionRunnerLLM", () => {
       yield* Effect.yieldNow
 
       expect(requests).toHaveLength(2)
-      expect(requests.map((request) => request.providerOptions?.openai?.promptCacheKey)).toEqual([
-        sessionID,
-        otherSessionID,
-      ])
+      const openAIKeys = requests.map((request) => request.providerOptions?.openai?.promptCacheKey)
+      const openRouterKeys = requests.map((request) => request.providerOptions?.openrouter?.sessionID)
+      expect(openAIKeys).toEqual([openAIKeys[0], openAIKeys[0]])
+      expect(openRouterKeys).toEqual(openAIKeys)
+      expect(openAIKeys[0]).toMatch(/^[0-9a-f]{64}$/)
       yield* Deferred.succeed(streamGate, undefined)
       yield* Fiber.join(first)
       yield* Fiber.join(second)
@@ -2651,7 +2652,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("bounds 64-character session prompt cache keys", () =>
+  it.effect("shares one bounded project cache namespace across long session IDs", () =>
     Effect.gen(function* () {
       yield* setup
       const longSessionID = SessionV2.ID.make(`ses_${"a".repeat(64)}`)
@@ -2675,9 +2676,10 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(otherLongSessionID)
 
       const keys = requests.map((request) => request.providerOptions?.openai?.promptCacheKey)
-      expect(keys).toEqual([longSessionID.slice(4), otherLongSessionID.slice(4)])
+      expect(keys).toEqual([keys[0], keys[0]])
       expect(keys.every((key) => typeof key === "string" && key.length === 64)).toBe(true)
-      expect(keys[0]).not.toBe(keys[1])
+      expect(keys[0]).not.toBe(longSessionID.slice(4))
+      expect(keys[0]).not.toBe(otherLongSessionID.slice(4))
     }),
   )
 

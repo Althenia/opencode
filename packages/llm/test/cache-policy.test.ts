@@ -199,6 +199,64 @@ describe("applyCachePolicy", () => {
     }),
   )
 
+  it.effect("skips an empty trailing system block and marks the previous non-empty block", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: anthropicModel,
+          system: [
+            { type: "text", text: "Stable system prefix" },
+            { type: "text", text: "" },
+          ],
+          prompt: "hi",
+          cache: { system: true },
+        }),
+      )
+
+      const body = prepared.body as { system: Array<{ text: string; cache_control?: unknown }> }
+      expect(body.system[0]?.cache_control).toEqual({ type: "ephemeral" })
+      expect(body.system[1]?.cache_control).toBeUndefined()
+    }),
+  )
+
+  it.effect("skips an empty trailing user text part and marks the previous non-empty part", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: anthropicModel,
+          messages: [
+            new Message({
+              role: "user",
+              content: [
+                { type: "text", text: "Stable user prefix" },
+                { type: "text", text: "" },
+              ],
+            }),
+          ],
+          cache: { messages: "latest-user-message" },
+        }),
+      )
+
+      const body = prepared.body as { messages: Array<{ content: Array<{ text?: string; cache_control?: unknown }> }> }
+      expect(body.messages[0]?.content[0]?.cache_control).toEqual({ type: "ephemeral" })
+      expect(body.messages[0]?.content[1]?.cache_control).toBeUndefined()
+    }),
+  )
+
+  it.effect("does not add a cache marker when a message contains only empty text", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: anthropicModel,
+          messages: [Message.user("")],
+          cache: { messages: "latest-user-message" },
+        }),
+      )
+
+      expect(JSON.stringify(prepared.body)).not.toContain("cache_control")
+    }),
+  )
+
   it.effect("ttlSeconds in the policy flows through to wire markers", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare(

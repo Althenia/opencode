@@ -20,6 +20,7 @@ const USER_AGENT = `opencode/${InstallationVersion}`
 type PrepareInput = {
   readonly user: SessionV1.User
   readonly sessionID: string
+  readonly cacheKey?: string
   readonly parentSessionID?: string
   readonly model: Provider.Model
   readonly agent: Agent.Info
@@ -82,10 +83,11 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       ? input.model.variants[input.user.model.variant]
       : {}
   const base = input.small
-    ? ProviderTransform.smallOptions(input.model, input.sessionID, input.provider.options)
+    ? ProviderTransform.smallOptions(input.model, input.sessionID, input.provider.options, input.cacheKey)
     : ProviderTransform.options({
         model: input.model,
         sessionID: input.sessionID,
+        cacheKey: input.cacheKey,
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
