@@ -2030,6 +2030,71 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("serializes promoted queued input identically on later turns", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Start working" }), resume: false })
+
+      requests.length = 0
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "call-cache", name: "echo", input: { text: "continue" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+          LLMEvent.finish({ reason: "stop" }),
+        ],
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+          LLMEvent.finish({ reason: "stop" }),
+        ],
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+          LLMEvent.finish({ reason: "stop" }),
+        ],
+      ]
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+
+      const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Stable queued prompt" }),
+        delivery: "queue",
+      })
+      yield* Deferred.succeed(streamGate, undefined)
+      yield* Fiber.join(first)
+      streamGate = undefined
+      streamStarted = undefined
+
+      expect(requests).toHaveLength(3)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Later turn" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(4)
+
+      const queuedContent = (request: LLMRequest) =>
+        request.messages.find(
+          (message) =>
+            message.role === "user" &&
+            message.content.some((part) => part.type === "text" && part.text === "Stable queued prompt"),
+        )?.content
+      const firstConsumption = queuedContent(requests[2]!)
+      const laterHistory = queuedContent(requests[3]!)
+
+      expect(firstConsumption).toBeDefined()
+      expect(laterHistory).toEqual(firstConsumption)
+      expect(JSON.stringify(firstConsumption)).not.toContain("<system-reminder>")
+    }),
+  )
+
   it.effect("preserves durable queued input for a later wake after interruption", () =>
     Effect.gen(function* () {
       yield* setup

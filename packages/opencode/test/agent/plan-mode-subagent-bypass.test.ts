@@ -26,7 +26,7 @@ function testAgent(input: {
 // exercises the actual helper that task.ts uses to build the subagent's
 // session permission, so any regression in that helper trips this test.
 
-it.instance("subagent permissions take precedence over parent agent restrictions", () =>
+it.instance("parent agent deny rules remain hard ceilings for subagents", () =>
   Effect.gen(function* () {
     const planAgent = yield* Agent.use.get("plan")
     const generalAgent = yield* Agent.use.get("general")
@@ -41,6 +41,7 @@ it.instance("subagent permissions take precedence over parent agent restrictions
     const parentSessionPermission: PermissionV1.Ruleset = []
 
     const subagentSessionPermission = deriveSubagentSessionPermission({
+      parentAgentPermission: planAgent!.permission,
       parentSessionPermission,
       subagent: generalAgent!,
     })
@@ -49,8 +50,10 @@ it.instance("subagent permissions take precedence over parent agent restrictions
     //   ruleset: Permission.merge(agent.permission, session.permission ?? [])
     const effective = Permission.merge(generalAgent!.permission, subagentSessionPermission)
 
-    expect(Permission.evaluate("edit", "/some/file.ts", effective).action).not.toBe("deny")
-    expect(Permission.disabled(["edit", "write", "apply_patch"], effective)).toEqual(new Set())
+    expect(Permission.evaluate("edit", "/some/file.ts", effective).action).toBe("deny")
+    expect(Permission.disabled(["edit", "write", "apply_patch"], effective)).toEqual(
+      new Set(["edit", "write", "apply_patch"]),
+    )
   }),
 )
 
@@ -61,6 +64,7 @@ it.instance("subagent's own read-only restriction remains effective", () =>
 
     const parentSessionPermission: PermissionV1.Ruleset = []
     const subagentSessionPermission = deriveSubagentSessionPermission({
+      parentAgentPermission: [],
       parentSessionPermission,
       subagent: explore!,
     })
@@ -71,7 +75,7 @@ it.instance("subagent's own read-only restriction remains effective", () =>
 )
 
 it.instance(
-  "custom subagent can explicitly enable edits denied to its parent agent",
+  "custom subagent cannot override edits denied to its parent agent",
   () =>
     Effect.gen(function* () {
       const planAgent = yield* Agent.use.get("plan")
@@ -81,14 +85,17 @@ it.instance(
 
       const parentSessionPermission: PermissionV1.Ruleset = []
       const subagentSessionPermission = deriveSubagentSessionPermission({
+        parentAgentPermission: planAgent!.permission,
         parentSessionPermission,
         subagent: my!,
       })
       const effective = Permission.merge(my!.permission, subagentSessionPermission)
 
       expect(Permission.evaluate("edit", "/some/file.ts", planAgent!.permission).action).toBe("deny")
-      expect(Permission.evaluate("edit", "/some/file.ts", effective).action).toBe("allow")
-      expect(Permission.disabled(["edit", "write", "apply_patch"], effective)).toEqual(new Set())
+      expect(Permission.evaluate("edit", "/some/file.ts", effective).action).toBe("deny")
+      expect(Permission.disabled(["edit", "write", "apply_patch"], effective)).toEqual(
+        new Set(["edit", "write", "apply_patch"]),
+      )
     }),
   {
     config: {
@@ -125,6 +132,7 @@ it.effect("subagent self permissions are preserved", () =>
     const effective = Permission.merge(
       executor.permission,
       deriveSubagentSessionPermission({
+        parentAgentPermission: [],
         parentSessionPermission: [],
         subagent: executor,
       }),
@@ -135,6 +143,28 @@ it.effect("subagent self permissions are preserved", () =>
     expect(Permission.evaluate("task", "worker", effective).action).toBe("allow")
     expect(Permission.evaluate("task", "other", effective).action).toBe("deny")
     expect(Permission.disabled(["edit", "write", "apply_patch"], effective)).toEqual(new Set())
+  }),
+)
+
+it.effect("parent allow rules do not expand child permissions", () =>
+  Effect.sync(() => {
+    const reviewer = testAgent({
+      name: "reviewer",
+      mode: "subagent",
+      permission: {
+        edit: "deny",
+      },
+    })
+    const effective = Permission.merge(
+      reviewer.permission,
+      deriveSubagentSessionPermission({
+        parentAgentPermission: Permission.fromConfig({ edit: "allow" }),
+        parentSessionPermission: [],
+        subagent: reviewer,
+      }),
+    )
+
+    expect(Permission.evaluate("edit", "/some/file.ts", effective).action).toBe("deny")
   }),
 )
 
@@ -150,6 +180,7 @@ it.effect("subagent inherits parent session deny rules as hard runtime ceilings"
     const effective = Permission.merge(
       executor.permission,
       deriveSubagentSessionPermission({
+        parentAgentPermission: [],
         parentSessionPermission: Permission.fromConfig({ bash: "deny" }),
         subagent: executor,
       }),

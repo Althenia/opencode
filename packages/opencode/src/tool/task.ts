@@ -139,6 +139,8 @@ export const TaskTool = Tool.define(
         })
       }
 
+      const caller = yield* agent.get(ctx.agent)
+      if (!caller) return yield* Effect.fail(new Error(`Unknown calling agent: ${ctx.agent}`))
       const next = yield* agent.get(params.subagent_type)
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
@@ -148,6 +150,7 @@ export const TaskTool = Tool.define(
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
       const childPermission = deriveSubagentSessionPermission({
+        parentAgentPermission: caller.permission,
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
       })
@@ -164,23 +167,49 @@ export const TaskTool = Tool.define(
           action: "deny" as const,
         })) ?? []),
       ]
-      const nextSession =
-        session ??
-        (yield* sessions.create({
-          parentID: ctx.sessionID,
-          title: params.description + ` (@${next.name} subagent)`,
-          agent: next.name,
-          permission: [
-            ...childPermission,
-            ...childToolDenies.filter(
-              (deny) =>
-                !childPermission.some(
-                  (rule) =>
-                    rule.permission === deny.permission && rule.pattern === deny.pattern && rule.action === deny.action,
-                ),
+      const permission = [
+        ...childPermission,
+        ...childToolDenies.filter(
+          (deny) =>
+            !childPermission.some(
+              (rule) =>
+                rule.permission === deny.permission && rule.pattern === deny.pattern && rule.action === deny.action,
             ),
-          ],
-        }))
+        ),
+      ]
+      const nextSession = yield* Effect.gen(function* () {
+        if (!session) {
+          return yield* sessions.create({
+            parentID: ctx.sessionID,
+            title: params.description + ` (@${next.name} subagent)`,
+            agent: next.name,
+            permission,
+          })
+        }
+        if (session.parentID !== ctx.sessionID) {
+          return yield* Effect.fail(new Error(`Task session ${session.id} does not belong to parent ${ctx.sessionID}`))
+        }
+        if (session.agent !== undefined && session.agent !== next.name) {
+          return yield* Effect.fail(
+            new Error(`Task session ${session.id} belongs to agent ${session.agent}, not ${next.name}`),
+          )
+        }
+        const existing = [...(session.permission ?? [])]
+        const ceilings = permission.filter(
+          (rule) =>
+            rule.action === "deny" &&
+            !existing.some(
+              (current) =>
+                current.permission === rule.permission &&
+                current.pattern === rule.pattern &&
+                current.action === rule.action,
+            ),
+        )
+        if (ceilings.length === 0) return session
+        const updated = [...existing, ...ceilings]
+        yield* sessions.setPermission({ sessionID: session.id, permission: updated })
+        return { ...session, permission: updated }
+      })
 
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
         Effect.provideService(Database.Service, database),

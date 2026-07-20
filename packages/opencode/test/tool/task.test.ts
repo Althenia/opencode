@@ -255,6 +255,151 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance(
+    "resumed task sessions acquire newly restrictive parent ceilings",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const child = yield* sessions.create({
+          parentID: chat.id,
+          title: "Existing permissive child",
+          agent: "writer",
+          permission: [],
+        })
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        yield* def.execute(
+          {
+            description: "resume restricted task",
+            prompt: "continue without escaping restrictions",
+            subagent_type: "writer",
+            task_id: child.id,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "locked",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect((yield* sessions.get(child.id)).permission).toEqual(
+          expect.arrayContaining([
+            { permission: "edit", pattern: "*", action: "deny" },
+            { permission: "bash", pattern: "*", action: "deny" },
+          ]),
+        )
+      }),
+    {
+      config: {
+        agent: {
+          locked: {
+            description: "Restricted primary",
+            mode: "primary",
+            permission: {
+              edit: "deny",
+              bash: "deny",
+            },
+          },
+          writer: {
+            description: "Permissive writer",
+            mode: "subagent",
+            permission: {
+              edit: "allow",
+              bash: "allow",
+              task: "allow",
+            },
+          },
+        },
+      },
+    },
+  )
+
+  it.instance("rejects task_id reuse from a different parent session", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed("Current parent")
+      const foreignParent = yield* sessions.create({ title: "Foreign parent" })
+      const foreignChild = yield* sessions.create({
+        parentID: foreignParent.id,
+        title: "Foreign child",
+        agent: "general",
+      })
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let prompted = false
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "reuse foreign task",
+            prompt: "continue",
+            subagent_type: "general",
+            task_id: foreignChild.id,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt: () => (prompted = true) }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(prompted).toBe(false)
+    }),
+  )
+
+  it.instance("rejects task_id reuse with a different subagent type", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const child = yield* sessions.create({
+        parentID: chat.id,
+        title: "Explore child",
+        agent: "explore",
+      })
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let prompted = false
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "change task identity",
+            prompt: "continue",
+            subagent_type: "general",
+            task_id: child.id,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt: () => (prompted = true) }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(prompted).toBe(false)
+    }),
+  )
+
   it.instance("execute asks by default and skips checks when bypassed", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
@@ -460,6 +605,66 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance(
+    "inherits calling agent deny ceilings in the child session",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            description: "inspect permissions",
+            prompt: "verify inherited restrictions",
+            subagent_type: "writer",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "locked",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect((yield* sessions.get(result.metadata.sessionId)).permission).toEqual(
+          expect.arrayContaining([
+            { permission: "edit", pattern: "*", action: "deny" },
+            { permission: "bash", pattern: "*", action: "deny" },
+            { permission: "todowrite", pattern: "*", action: "deny" },
+          ]),
+        )
+      }),
+    {
+      config: {
+        agent: {
+          locked: {
+            description: "Restricted primary",
+            mode: "primary",
+            permission: {
+              edit: "deny",
+              bash: "deny",
+            },
+          },
+          writer: {
+            description: "Permissive writer",
+            mode: "subagent",
+            permission: {
+              edit: "allow",
+              bash: "allow",
+              task: "allow",
+            },
+          },
+        },
+      },
+    },
+  )
+
   it.instance("prevents subagents from launching subagents by default", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
@@ -499,6 +704,50 @@ describe("tool.task", () => {
       expect(asked).toBe(false)
       expect(yield* sessions.children(child.id)).toHaveLength(0)
     }),
+  )
+
+  it.instance(
+    "global task allow cannot bypass the default subagent depth limit",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const child = yield* sessions.create({ parentID: chat.id, title: "child" })
+        const nestedAssistant = yield* sessions.updateMessage({
+          ...assistant,
+          id: MessageID.ascending(),
+          parentID: MessageID.ascending(),
+          sessionID: child.id,
+        })
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let asked = false
+
+        const exit = yield* def
+          .execute(
+            {
+              description: "inspect recursion",
+              prompt: "try to delegate again",
+              subagent_type: "general",
+            },
+            {
+              sessionID: child.id,
+              messageID: nestedAssistant.id,
+              agent: "general",
+              abort: new AbortController().signal,
+              extra: { promptOps: stubOps() },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.sync(() => (asked = true)),
+            },
+          )
+          .pipe(Effect.exit)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(asked).toBe(false)
+        expect(yield* sessions.children(child.id)).toHaveLength(0)
+      }),
+    { config: { permission: { task: "allow" } } },
   )
 
   it.instance(
@@ -572,23 +821,25 @@ describe("tool.task", () => {
         const child = yield* sessions.get(result.metadata.sessionId)
         expect(child.parentID).toBe(chat.id)
         expect(child.agent).toBe("reviewer")
-        expect(child.permission).toEqual([
-          {
-            permission: "todowrite",
-            pattern: "*",
-            action: "deny",
-          },
-          {
-            permission: "bash",
-            pattern: "*",
-            action: "deny",
-          },
-          {
-            permission: "read",
-            pattern: "*",
-            action: "deny",
-          },
-        ])
+        expect(child.permission).toEqual(
+          expect.arrayContaining([
+            {
+              permission: "todowrite",
+              pattern: "*",
+              action: "deny",
+            },
+            {
+              permission: "bash",
+              pattern: "*",
+              action: "deny",
+            },
+            {
+              permission: "read",
+              pattern: "*",
+              action: "deny",
+            },
+          ]),
+        )
         expect(seen?.tools).toBeUndefined()
       }),
     {
