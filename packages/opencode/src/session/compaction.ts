@@ -23,6 +23,8 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
 import { Instruction } from "./instruction"
+import { SystemPrompt } from "./system"
+import { assembleCompactionConstraints } from "@opencode-ai/core/session/compaction-constraints"
 
 export const Event = SessionCompactionEvent
 
@@ -166,6 +168,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const instruction = yield* Instruction.Service
+    const systemPrompt = yield* SystemPrompt.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
@@ -332,6 +335,17 @@ const layer = Layer.effect(
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
         : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
       const cfg = yield* config.get()
+      const sourceAgent = yield* agents.get(userMessage.agent)
+      const [instructions, skills] = yield* Effect.all(
+        [instruction.system().pipe(Effect.orDie), systemPrompt.skills(sourceAgent)],
+        { concurrency: "unbounded" },
+      )
+      const constraints = assembleCompactionConstraints([
+        sourceAgent.prompt,
+        userMessage.system,
+        ...instructions,
+        skills,
+      ])
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
       const prior = completedCompactions(history)
       const hidden = new Set(prior.flatMap((item) => [item.userIndex, item.assistantIndex]))
@@ -392,7 +406,7 @@ const layer = Layer.effect(
         agent,
         sessionID: input.sessionID,
         tools: {},
-        system: yield* instruction.system().pipe(Effect.orDie),
+        system: [...constraints],
         messages: [
           ...modelMessages,
           {
@@ -559,6 +573,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Instruction.node,
+    SystemPrompt.node,
   ],
 })
 

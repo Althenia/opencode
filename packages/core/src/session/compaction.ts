@@ -1,6 +1,6 @@
 export * as SessionCompaction from "./compaction"
 
-import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@opencode-ai/llm"
+import { LLM, LLMError, LLMEvent, Message, SystemPart, type LLMRequest, type Model } from "@opencode-ai/llm"
 import { DateTime, Effect, Stream } from "effect"
 import type { Config } from "../config"
 import type { EventV2 } from "../event"
@@ -8,6 +8,7 @@ import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { Token } from "../util/token"
+import { assembleCompactionConstraints } from "./compaction-constraints"
 
 const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
@@ -182,7 +183,8 @@ export const make = (dependencies: Dependencies) => {
       context: [previousSummary?.type === "compaction" ? previousSummary.recent : "", selected.head].filter(Boolean),
     })
     const summaryOutput = Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)
-    if (Token.estimate(summaryPrompt) > context - summaryOutput) return false
+    const constraints = assembleCompactionConstraints(input.request.system.map((part) => part.text))
+    if (estimate({ system: constraints, messages: [summaryPrompt] }) > context - summaryOutput) return false
     const messageID = SessionMessage.ID.create()
     yield* dependencies.events.publish(SessionEvent.Compaction.Started, {
       sessionID: input.sessionID,
@@ -197,6 +199,7 @@ export const make = (dependencies: Dependencies) => {
       .stream(
         LLM.request({
           model: input.model,
+          system: constraints.map(SystemPart.make),
           messages: [Message.user(summaryPrompt)],
           tools: [],
           generation: { maxTokens: summaryOutput },

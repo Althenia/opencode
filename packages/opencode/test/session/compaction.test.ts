@@ -22,6 +22,7 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 
 import { Provider } from "@/provider/provider"
+import { Agent } from "@/agent/agent"
 import * as SessionProcessorModule from "../../src/session/processor"
 import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
@@ -34,6 +35,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Instruction } from "../../src/session/instruction"
+import { SystemPrompt } from "../../src/session/system"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -255,6 +257,8 @@ type CompactionProcessOptions = {
   result?: "continue" | "compact"
   capture?: (input: LLM.StreamInput) => void
   instructions?: string[]
+  agentPrompt?: string
+  skills?: string
   llm?: Layer.Layer<LLM.Service>
   plugin?: Layer.Layer<Plugin.Service>
   provider?: ReturnType<typeof wide>
@@ -266,8 +270,28 @@ function withCompaction(options?: CompactionProcessOptions) {
 }
 
 function compactionProcessLayer(options?: CompactionProcessOptions) {
+  const agent = (name: string): Agent.Info => ({
+    name,
+    mode: "primary",
+    options: {},
+    permission: [],
+    prompt: name === "build" ? options?.agentPrompt : undefined,
+  })
   const replacements: LayerNode.Replacements = [
     [Provider.node, (options?.provider ?? wide()).layer],
+    [
+      Agent.node,
+      Layer.succeed(
+        Agent.Service,
+        Agent.Service.of({
+          get: (name) => Effect.succeed(agent(name)),
+          list: () => Effect.succeed([agent("build"), agent("compaction")]),
+          defaultInfo: () => Effect.succeed(agent("build")),
+          defaultAgent: () => Effect.succeed("build"),
+          generate: () => Effect.die("agent generation is not used by compaction tests"),
+        }),
+      ),
+    ],
     [
       Instruction.node,
       Layer.succeed(
@@ -278,6 +302,17 @@ function compactionProcessLayer(options?: CompactionProcessOptions) {
           system: () => Effect.succeed(options?.instructions ?? []),
           find: () => Effect.succeed(undefined),
           resolve: () => Effect.succeed([]),
+        }),
+      ),
+    ],
+    [
+      SystemPrompt.node,
+      Layer.succeed(
+        SystemPrompt.Service,
+        SystemPrompt.Service.of({
+          environment: () => Effect.die("volatile environment must not enter compaction constraints"),
+          skills: () => Effect.succeed(options?.skills),
+          mcp: () => Effect.die("MCP instructions must not enter compaction constraints"),
         }),
       ),
     ],
@@ -803,7 +838,42 @@ describe("session.compaction.process", () => {
   )
 
   itCompaction.instance(
-    "passes active bounded instructions to the compaction model",
+    "passes bounded durable constraints to the compaction model",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      const msg = yield* createUserMessage(session.id, "hello")
+      yield* ssn.updateMessage({ ...msg, system: "Keep the public API stable" })
+      const msgs = yield* ssn.messages({ sessionID: session.id })
+      capturedCompactionSystems.length = 0
+
+      yield* SessionCompaction.use.process({
+        parentID: msg.id,
+        messages: msgs,
+        sessionID: session.id,
+        auto: false,
+      })
+
+      expect(capturedCompactionSystems[0]).toEqual([
+        "Follow repository TDD rules",
+        "Keep the public API stable",
+        "Instructions from: /repo/AGENTS.md\nKeep tests green",
+        "Available skills: systematic-debugging",
+      ])
+    }).pipe(
+      withCompaction({
+        agentPrompt: "Follow repository TDD rules",
+        instructions: ["Instructions from: /repo/AGENTS.md\nKeep tests green"],
+        skills: "Available skills: systematic-debugging",
+        capture: (input) => {
+          capturedCompactionSystems.push([...input.system])
+        },
+      }),
+    ),
+  )
+
+  itCompaction.instance(
+    "bounds oversized compaction constraints without partial content",
     Effect.gen(function* () {
       const ssn = yield* SessionNs.Service
       const session = yield* ssn.create({})
@@ -818,10 +888,14 @@ describe("session.compaction.process", () => {
         auto: false,
       })
 
-      expect(capturedCompactionSystems[0]).toEqual(["Instructions from: /repo/AGENTS.md\nKeep tests green"])
+      const system = capturedCompactionSystems[0] ?? []
+      expect(Buffer.byteLength(system.join(""), "utf8")).toBeLessThanOrEqual(32 * 1024)
+      expect(system.join("\n")).not.toContain("x".repeat(1_000))
+      expect(system.at(-1)).toMatch(/Omitted 1 compaction constraint block.*sha256=[0-9a-f]{64}/)
     }).pipe(
       withCompaction({
         instructions: ["Instructions from: /repo/AGENTS.md\nKeep tests green"],
+        skills: "x".repeat(64 * 1024),
         capture: (input) => {
           capturedCompactionSystems.push([...input.system])
         },
