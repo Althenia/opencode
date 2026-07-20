@@ -334,6 +334,23 @@ describe("CatalogV2", () => {
     }),
   )
 
+  it.effect("small model keeps configured models with an unknown release date eligible", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const providerID = ProviderV2.ID.make("configured")
+      const modelID = ModelV2.ID.make("configured-mini")
+      yield* catalog.transform((catalog) => {
+        catalog.provider.update(providerID, () => {})
+        catalog.model.update(providerID, modelID, (model) => {
+          model.capabilities.input = ["text"]
+          model.capabilities.output = ["text"]
+        })
+      })
+
+      expect((yield* catalog.model.small(providerID))?.id).toBe(modelID)
+    }),
+  )
+
   it.effect("removes providers denied by policy after loading", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

@@ -302,7 +302,7 @@ export class CreateObservationRequest extends Schema.Class<CreateObservationRequ
   workload: SelfImprovementEvaluation.Workload,
   workloadRevision: SelfImprovementLifecycle.Revision,
   errorClass: Schema.NonEmptyString,
-  orderedToolSymbolDigest: SelfImprovement.Digest,
+  orderedToolSymbolIDs: Schema.Array(Schema.NonEmptyString).check(Schema.isUnique()),
   outcomeClass: SelfImprovementLearning.ObservationOutcomeClass,
   taskIDDigest: SelfImprovement.Digest,
 }) {}

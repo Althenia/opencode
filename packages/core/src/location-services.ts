@@ -32,6 +32,27 @@ import { SkillGuidance } from "./skill/guidance"
 import { Snapshot } from "./snapshot"
 import { SystemContextBuiltIns } from "./system-context/builtins"
 import { SystemContextRegistry } from "./system-context/registry"
+import { SelfImprovementApprovalStore } from "./self-improvement/approval-store"
+import { SelfImprovementAdmission } from "./self-improvement/admission"
+import { SelfImprovementArtifactStore } from "./self-improvement/artifact-store"
+import { SelfImprovementAutomation } from "./self-improvement/automation"
+import { SelfImprovementAuditStore } from "./self-improvement/audit-store"
+import { SelfImprovementContextReconciler } from "./self-improvement/context-reconciler"
+import { SelfImprovementContextStore } from "./self-improvement/context-store"
+import { SelfImprovementEvaluationStore } from "./self-improvement/evaluation-store"
+import { SelfImprovementGeneration } from "./self-improvement/generation"
+import { SelfImprovementGenerationStore } from "./self-improvement/generation-store"
+import { SelfImprovementIdempotencyStore } from "./self-improvement/idempotency-store"
+import { SelfImprovementLearningStore } from "./self-improvement/learning-store"
+import { Routing } from "./self-improvement/routing"
+import { SelfImprovementRetention } from "./self-improvement/retention"
+import { SelfImprovementLifecycleCoordinator } from "./self-improvement/lifecycle-coordinator"
+import { SelfImprovementLifecycleWorkflow } from "./self-improvement/lifecycle-workflow"
+import { SelfImprovementMutationStore } from "./self-improvement/mutation-store"
+import { SelfImprovementPrivateArtifactCommand } from "./self-improvement/private-artifact-command"
+import { SelfImprovementPrivateEvidenceCommand } from "./self-improvement/private-evidence-command"
+import { SelfImprovementPrivateQuery } from "./self-improvement/private-query"
+import { SelfImprovementTransitionStore } from "./self-improvement/transition-store"
 import { BuiltInTools } from "./tool/builtins"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
 import { ToolRegistry } from "./tool/registry"
@@ -59,6 +80,24 @@ export const locationServices = LayerNode.group([
   Pty.node,
   SkillV2.node,
   SystemContextRegistry.node,
+  SelfImprovementArtifactStore.node,
+  SelfImprovementApprovalStore.node,
+  SelfImprovementAuditStore.node,
+  SelfImprovementEvaluationStore.node,
+  SelfImprovementRetention.node,
+  SelfImprovementContextStore.node,
+  SelfImprovementIdempotencyStore.node,
+  SelfImprovementLearningStore.node,
+  SelfImprovementMutationStore.node,
+  SelfImprovementTransitionStore.node,
+  SelfImprovementPrivateQuery.node,
+  SelfImprovementPrivateArtifactCommand.node,
+  SelfImprovementPrivateEvidenceCommand.node,
+  SelfImprovementAdmission.node,
+  SelfImprovementContextReconciler.materializerNode,
+  SelfImprovementContextReconciler.node,
+  SelfImprovementLifecycleCoordinator.node,
+  SelfImprovementLifecycleWorkflow.node,
   SystemContextBuiltIns.node,
   LocationMutation.node,
   FileMutation.node,
@@ -73,9 +112,13 @@ export const locationServices = LayerNode.group([
   QuestionV2.node,
   ReadToolFileSystem.node,
   BuiltInTools.node,
+  Routing.node,
   SessionRunnerModel.node,
   Snapshot.node,
   SessionRunnerLLM.node,
+  SelfImprovementGenerationStore.node,
+  SelfImprovementGeneration.node,
+  SelfImprovementAutomation.node,
 ])
 
 export type LocationServices = LayerNode.Output<typeof locationServices>

@@ -94,3 +94,53 @@ test("stores location-scoped immutable stage transitions in timestamp and ID ord
     setup.pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })), Effect.scoped),
   )
 })
+
+test("reads the current stage for a location and version in a transaction", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const db = yield* makeDb
+      yield* db.run(sql`
+        CREATE TABLE self_improvement_artifact (id TEXT PRIMARY KEY, location_id TEXT NOT NULL)
+      `)
+      yield* db.run(sql`
+        CREATE TABLE self_improvement_artifact_version (id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL)
+      `)
+      yield* db.run(sql`
+        CREATE TABLE self_improvement_stage_transition (
+          id TEXT PRIMARY KEY,
+          version_id TEXT NOT NULL,
+          previous_stage TEXT,
+          next_stage TEXT NOT NULL,
+          event TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          timestamp INTEGER NOT NULL,
+          evaluation_run_id TEXT,
+          approval_id TEXT,
+          rollback_id TEXT,
+          context_outbox_id TEXT,
+          idempotency_record_id TEXT,
+          idempotency_digest TEXT NOT NULL
+        )
+      `)
+      yield* db.run(sql`INSERT INTO self_improvement_artifact (id, location_id) VALUES ('si_art_1', ${locationID})`)
+      yield* db.run(
+        sql`INSERT INTO self_improvement_artifact_version (id, artifact_id) VALUES (${versionID}, 'si_art_1')`,
+      )
+
+      yield* SelfImprovementTransitionStore.Service.use((store) =>
+        Effect.gen(function* () {
+          yield* store.append({ locationID, transition: transition("si_trn_1", 1) })
+          yield* store.append({ locationID, transition: transition("si_trn_2", 2) })
+          expect(yield* db.transaction((tx) => store.currentStage({ locationID, versionID }, tx))).toBe("experimental")
+          expect(
+            yield* db.transaction((tx) => store.currentStage({ locationID: otherLocationID, versionID }, tx)),
+          ).toBeUndefined()
+        }),
+      ).pipe(
+        Effect.provide(SelfImprovementTransitionStore.layer),
+        Effect.provide(Layer.succeed(Database.Service, { db })),
+      )
+    }).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })), Effect.scoped),
+  )
+})

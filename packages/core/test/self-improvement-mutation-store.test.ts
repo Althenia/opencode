@@ -152,7 +152,7 @@ test("mutates only live artifacts at the expected location and revision", async 
             ])
 
             const tombstoned = yield* db.transaction((tx) =>
-              store.tombstoneAndClearSlots(
+              store.tombstone(
                 {
                   locationID,
                   artifactID,
@@ -166,7 +166,43 @@ test("mutates only live artifacts at the expected location and revision", async 
                 tx,
               ),
             )
-            expect(tombstoned).toEqual({ revision: revision2 })
+            expect(tombstoned).toEqual({
+              revision: revision2,
+              slots: [
+                {
+                  artifactID,
+                  artifactRevision: revision1,
+                  slot: "active",
+                  updatedAt: SelfImprovementLifecycle.TimestampMillis.make(2),
+                  versionID,
+                },
+                {
+                  artifactID,
+                  artifactRevision: revision1,
+                  slot: "canary",
+                  updatedAt: SelfImprovementLifecycle.TimestampMillis.make(2),
+                  versionID: canaryVersionID,
+                },
+                {
+                  artifactID,
+                  artifactRevision: revision1,
+                  slot: "shadow",
+                  updatedAt: SelfImprovementLifecycle.TimestampMillis.make(2),
+                  versionID: shadowVersionID,
+                },
+              ],
+            })
+            expect(yield* store.listSlots({ locationID, artifactID })).toEqual(tombstoned?.slots ?? [])
+            expect(
+              yield* db.transaction((tx) =>
+                store.clearTombstonedSlots({ locationID, artifactID, expectedRevision: revision1 }, tx),
+              ),
+            ).toBe(false)
+            expect(
+              yield* db.transaction((tx) =>
+                store.clearTombstonedSlots({ locationID, artifactID, expectedRevision: revision2 }, tx),
+              ),
+            ).toBe(true)
             expect(yield* store.listSlots({ locationID, artifactID })).toEqual([])
             expect(
               yield* store.upsertSlot({
@@ -177,6 +213,104 @@ test("mutates only live artifacts at the expected location and revision", async 
                 expectedArtifactRevision: revision2,
                 updatedAt: SelfImprovementLifecycle.TimestampMillis.make(4),
               }),
+            ).toBe(false)
+          }),
+        ).pipe(
+          Effect.provide(SelfImprovementMutationStore.layer),
+          Effect.provide(Layer.succeed(Database.Service, { db })),
+        ),
+      ),
+      Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })),
+      Effect.scoped,
+    ),
+  )
+})
+
+test("validates an artifact revision inside a transaction without incrementing it", async () => {
+  await Effect.runPromise(
+    setup.pipe(
+      Effect.flatMap((db) =>
+        SelfImprovementMutationStore.Service.use((store) =>
+          Effect.gen(function* () {
+            expect(
+              yield* db.transaction((tx) =>
+                store.validateRevision({ locationID, artifactID, expectedRevision: revision0, status: "live" }, tx),
+              ),
+            ).toBe(true)
+            expect(
+              yield* db.transaction((tx) =>
+                store.validateRevision({ locationID, artifactID, expectedRevision: revision1 }, tx),
+              ),
+            ).toBe(false)
+            expect(
+              yield* db.get<{ revision: number }>(sql`
+                SELECT revision FROM self_improvement_artifact WHERE id = ${artifactID}
+              `),
+            ).toEqual({ revision: revision0 })
+          }),
+        ).pipe(
+          Effect.provide(SelfImprovementMutationStore.layer),
+          Effect.provide(Layer.succeed(Database.Service, { db })),
+        ),
+      ),
+      Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })),
+      Effect.scoped,
+    ),
+  )
+})
+
+test("removes an exact slot only for a live artifact at the expected revision", async () => {
+  await Effect.runPromise(
+    setup.pipe(
+      Effect.flatMap((db) =>
+        SelfImprovementMutationStore.Service.use((store) =>
+          Effect.gen(function* () {
+            yield* store.upsertSlot({
+              locationID,
+              artifactID,
+              versionID: shadowVersionID,
+              slot: "shadow",
+              expectedArtifactRevision: revision0,
+              updatedAt: SelfImprovementLifecycle.TimestampMillis.make(1),
+            })
+            expect(
+              yield* db.transaction((tx) =>
+                store.removeSlot(
+                  {
+                    locationID,
+                    artifactID,
+                    slot: "shadow",
+                    expectedArtifactRevision: revision1,
+                  },
+                  tx,
+                ),
+              ),
+            ).toBe(false)
+            expect(
+              yield* db.transaction((tx) =>
+                store.removeSlot(
+                  {
+                    locationID,
+                    artifactID,
+                    slot: "shadow",
+                    expectedArtifactRevision: revision0,
+                  },
+                  tx,
+                ),
+              ),
+            ).toBe(true)
+            expect(
+              yield* db.transaction((tx) =>
+                store.removeSlot(
+                  {
+                    locationID,
+                    artifactID,
+                    slot: "shadow",
+                    expectedArtifactRevision: revision0,
+                  },
+                  tx,
+                ),
+              ),
             ).toBe(false)
           }),
         ).pipe(

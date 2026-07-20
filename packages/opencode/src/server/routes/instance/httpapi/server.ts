@@ -107,6 +107,8 @@ import { sessionLocationLayer } from "@opencode-ai/server/middleware/session-loc
 import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
 import { schemaErrorLayer as v2SchemaErrorLayer } from "@opencode-ai/server/middleware/schema-error"
 import { workspaceHandlers } from "./handlers/workspace"
+import { selfImprovementHandlers } from "./handlers/self-improvement"
+import { PrivateSelfImprovementApi } from "./groups/self-improvement"
 import { instanceContextLayer } from "./middleware/instance-context"
 import { workspaceRoutingLayer } from "./middleware/workspace-routing"
 import { disposeMiddleware } from "./lifecycle"
@@ -170,6 +172,9 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     tuiHandlers,
     workspaceHandlers,
   ]),
+)
+const privateSelfImprovementApiRoutes = HttpApiBuilder.layer(PrivateSelfImprovementApi).pipe(
+  Layer.provide(selfImprovementHandlers),
 )
 
 const instanceRoutes = instanceApiRoutes.pipe(
@@ -273,12 +278,18 @@ export function createRoutes(
   corsOptions?: CorsOptions,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
   const locationServiceMapV2 = buildLocationServiceMap()
+  const privateSelfImprovementRoutes = privateSelfImprovementApiRoutes.pipe(
+    Layer.provide([httpApiAuthLayer, workspaceRoutingLive, instanceContextLayer, schemaErrorLayer]),
+    Layer.provide(locationLayer),
+    Layer.provide(locationServiceMapV2),
+  )
 
   return Layer.mergeAll(
     rootApiRoutes,
     eventApiRoutes,
     ptyConnectApiRoutes,
     instanceRoutes,
+    privateSelfImprovementRoutes,
     serverRoutes,
     docRoute,
     uiRoute,

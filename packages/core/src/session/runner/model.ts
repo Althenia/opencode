@@ -75,12 +75,17 @@ export type Error =
 
 export interface Interface {
   readonly resolve: (session: SessionSchema.Info) => Effect.Effect<Model, Error>
+  readonly materialize: (
+    session: SessionSchema.Info,
+    route: NonNullable<SessionSchema.Info["model"]>,
+  ) => Effect.Effect<Model, Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SessionRunnerModel") {}
 
 /** Test or embedding seam for supplying a model resolver directly. */
-export const layerWith = (resolve: Interface["resolve"]) => Layer.succeed(Service, Service.of({ resolve }))
+export const layerWith = (resolve: Interface["resolve"]) =>
+  Layer.succeed(Service, Service.of({ resolve, materialize: (_session, _route) => resolve(_session) }))
 
 const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (credential?.type === "key") return Auth.value(credential.key)
@@ -197,7 +202,26 @@ export const locationLayer = Layer.effect(
     const catalog = yield* Catalog.Service
     const integrations = yield* Integration.Service
     const plugins = yield* PluginV2.Service
+    const materialize = Effect.fn("SessionRunnerModel.materialize")(function* (
+      session,
+      route: NonNullable<SessionSchema.Info["model"]>,
+    ) {
+      yield* plugins.wait(PluginV2.ID.make("variant"))
+      const selected = yield* catalog.model.get(route.providerID, route.id)
+      const provider = selected ? yield* catalog.provider.get(selected.providerID) : undefined
+      if (!selected?.enabled || provider?.disabled)
+        return yield* new ModelUnavailableError({ providerID: route.providerID, modelID: route.id })
+      const connection = yield* integrations.connection.active(
+        provider?.integrationID ?? Integration.ID.make(selected.providerID),
+      )
+      return yield* resolve(
+        { ...session, model: route },
+        selected,
+        connection ? yield* integrations.connection.resolve(connection) : undefined,
+      )
+    })
     return Service.of({
+      materialize,
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         yield* plugins.wait(PluginV2.ID.make("variant"))
         const defaultModel = session.model ? undefined : yield* catalog.model.default()
@@ -206,21 +230,17 @@ export const locationLayer = Layer.effect(
           : defaultModel && supported(defaultModel)
             ? defaultModel
             : (yield* catalog.model.available()).find(supported)
-        const provider = selected ? yield* catalog.provider.get(selected.providerID) : undefined
-        if (session.model && (!selected?.enabled || provider?.disabled))
+        if (session.model && !selected?.enabled)
           return yield* new ModelUnavailableError({
             providerID: session.model.providerID,
             modelID: session.model.id,
           })
         if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
-        const connection = yield* integrations.connection.active(
-          provider?.integrationID ?? Integration.ID.make(selected.providerID),
-        )
-        return yield* resolve(
-          session,
-          selected,
-          connection ? yield* integrations.connection.resolve(connection) : undefined,
-        )
+        return yield* materialize(session, {
+          providerID: selected.providerID,
+          id: selected.id,
+          ...(session.model?.variant === undefined ? {} : { variant: session.model.variant }),
+        })
       }),
     })
   }),

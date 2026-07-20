@@ -213,6 +213,7 @@ const intent = {
   actorID: "coordinator",
   evaluationRunID: runID,
   approvalID: approval.id,
+  approvalBinding: binding,
   idempotencyRecordID: transition.idempotencyRecordID,
   idempotencyDigest: digest,
 }
@@ -376,7 +377,7 @@ const operationContracts = [
         workload: "typescript",
         workloadRevision: 1,
         errorClass: "type-error",
-        orderedToolSymbolDigest: digest,
+        orderedToolSymbolIDs: ["tool-a", "symbol-b"],
         outcomeClass: "failure",
         taskIDDigest: digest,
       },

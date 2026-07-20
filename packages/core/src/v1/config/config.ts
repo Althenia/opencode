@@ -185,6 +185,7 @@ export const Info = Schema.Struct({
       policies: Schema.optional(Schema.mutable(Schema.Array(ConfigExperimental.Policy))).annotate({
         description: "Policy statements applied to supported resources, such as provider access",
       }),
+      self_improvement: Schema.optional(Schema.Unknown),
     }),
   ),
 }).annotate({ identifier: "Config" })

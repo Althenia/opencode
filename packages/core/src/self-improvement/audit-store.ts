@@ -1,10 +1,11 @@
 export * as SelfImprovementAuditStore from "./audit-store"
 
-import { and, asc, eq, sql } from "drizzle-orm"
+import { and, asc, eq, lte, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { SelfImprovementLearning, SelfImprovementLifecycle } from "@opencode-ai/schema"
 import type { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { Database } from "../database/database"
+import { makeLocationNode } from "../effect/app-node"
 import { SelfImprovementAuditEntryTable } from "./audit.sql"
 
 type DatabaseClient = EffectDrizzleSqlite.EffectSQLiteDatabase
@@ -35,6 +36,7 @@ export interface Interface {
   readonly list: (input: {
     readonly locationID: SelfImprovementLifecycle.LocationID
     readonly eventType?: string
+    readonly expiresAtOrBefore?: SelfImprovementLifecycle.TimestampMillis
   }) => Effect.Effect<ReadonlyArray<SelfImprovementLearning.AuditEntry>>
 }
 
@@ -113,17 +115,19 @@ export const layer = Layer.effect(
     const list = Effect.fn("SelfImprovementAuditStore.list")(function* (input: {
       readonly locationID: SelfImprovementLifecycle.LocationID
       readonly eventType?: string
+      readonly expiresAtOrBefore?: SelfImprovementLifecycle.TimestampMillis
     }) {
       const rows = yield* db
         .select()
         .from(SelfImprovementAuditEntryTable)
         .where(
-          input.eventType === undefined
-            ? eq(SelfImprovementAuditEntryTable.location_id, input.locationID)
-            : and(
-                eq(SelfImprovementAuditEntryTable.location_id, input.locationID),
-                eq(SelfImprovementAuditEntryTable.event_type, input.eventType),
-              ),
+          and(
+            eq(SelfImprovementAuditEntryTable.location_id, input.locationID),
+            ...(input.eventType === undefined ? [] : [eq(SelfImprovementAuditEntryTable.event_type, input.eventType)]),
+            ...(input.expiresAtOrBefore === undefined
+              ? []
+              : [lte(SelfImprovementAuditEntryTable.retention_expires_at, input.expiresAtOrBefore)]),
+          ),
         )
         .orderBy(asc(SelfImprovementAuditEntryTable.timestamp), asc(SelfImprovementAuditEntryTable.id))
         .all()
@@ -134,3 +138,5 @@ export const layer = Layer.effect(
     return Service.of({ append, list })
   }),
 )
+
+export const node = makeLocationNode({ service: Service, layer, deps: [Database.node] })

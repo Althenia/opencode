@@ -205,21 +205,108 @@ export class ContextDesiredState extends Schema.Class<ContextDesiredState>(
     desiredRevision: SelfImprovementLifecycle.Revision,
   }).check(Schema.makeFilter((value) => value.desired.state === "absent" || value.desired.stage === value.rolloutSlot)),
 ) {}
+const TerminalRemoval = Schema.Struct({
+  outboxID: SelfImprovementLifecycle.ContextOutboxID,
+  rolloutSlot: Schema.Literals(["shadow", "canary", "active"]).pipe(optional),
+  versionDigest: SelfImprovement.Digest.pipe(optional),
+  slotRevision: SelfImprovementLifecycle.Revision.pipe(optional),
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      (value.rolloutSlot === undefined && value.versionDigest === undefined && value.slotRevision === undefined) ||
+      (value.rolloutSlot !== undefined && value.versionDigest !== undefined && value.slotRevision !== undefined),
+  ),
+)
+
+export const TerminalGroup = Schema.Struct({
+  removalOutboxIDs: Schema.Array(SelfImprovementLifecycle.ContextOutboxID).check(Schema.isUnique()),
+  archiveTransitions: Schema.Array(SelfImprovementLifecycle.StageTransition),
+  removals: Schema.Array(TerminalRemoval).pipe(optional),
+})
+  .annotate({ identifier: "SelfImprovementLearning.TerminalGroup" })
+  .check(
+    Schema.makeFilter((value) => {
+      const removalIDs = new Set(value.removalOutboxIDs)
+      const removals = value.removals?.map((removal) => removal.outboxID)
+      return (
+        removalIDs.size > 0 &&
+        value.archiveTransitions.length > 0 &&
+        new Set(value.archiveTransitions.map((transition) => transition.id)).size === value.archiveTransitions.length &&
+        value.archiveTransitions.every(
+          (transition) =>
+            transition.event === "version-archived" &&
+            transition.nextStage === "archived" &&
+            transition.contextOutboxID !== undefined &&
+            removalIDs.has(transition.contextOutboxID),
+        ) &&
+        (removals === undefined ||
+          (removals.length === removalIDs.size &&
+            new Set(removals).size === removalIDs.size &&
+            removals.every((id) => removalIDs.has(id))))
+      )
+    }),
+  )
+export type TerminalGroup = typeof TerminalGroup.Type
+
 export class PendingTransitionIntent extends Schema.Class<PendingTransitionIntent>(
   "SelfImprovementLearning.PendingTransitionIntent",
-)({
-  versionID: SelfImprovementLifecycle.ArtifactVersionID,
-  previousStage: SelfImprovementLifecycle.ArtifactStage,
-  nextStage: SelfImprovementLifecycle.ArtifactStage,
-  event: SelfImprovementLifecycle.LifecycleEvent,
-  reason: SelfImprovementLifecycle.LifecycleReason,
-  actorID: SelfImprovementLifecycle.PrincipalID,
-  evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.pipe(optional),
-  approvalID: SelfImprovementLifecycle.ApprovalID.pipe(optional),
-  rollbackID: SelfImprovementLifecycle.RollbackID.pipe(optional),
-  idempotencyRecordID: SelfImprovementLifecycle.IdempotencyRecordID,
-  idempotencyDigest: SelfImprovement.Digest,
-}) {}
+)(
+  Schema.Struct({
+    versionID: SelfImprovementLifecycle.ArtifactVersionID,
+    previousStage: SelfImprovementLifecycle.ArtifactStage,
+    nextStage: SelfImprovementLifecycle.ArtifactStage,
+    event: SelfImprovementLifecycle.LifecycleEvent,
+    reason: SelfImprovementLifecycle.LifecycleReason,
+    actorID: SelfImprovementLifecycle.PrincipalID,
+    evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.pipe(optional),
+    approvalID: SelfImprovementLifecycle.ApprovalID.pipe(optional),
+    approvalBinding: SelfImprovementLifecycle.ApprovalBinding.pipe(optional),
+    rollbackID: SelfImprovementLifecycle.RollbackID.pipe(optional),
+    rollback: SelfImprovementLifecycle.Rollback.pipe(optional),
+    reward: RewardEvent.pipe(optional),
+    supersededVersionID: SelfImprovementLifecycle.ArtifactVersionID.pipe(optional),
+    terminalGroup: TerminalGroup.pipe(optional),
+    idempotencyRecordID: SelfImprovementLifecycle.IdempotencyRecordID,
+    idempotencyDigest: SelfImprovement.Digest,
+  }).check(
+    Schema.makeFilter((value) => {
+      const approvalValid =
+        (value.approvalID === undefined && value.approvalBinding === undefined) ||
+        (value.approvalID !== undefined &&
+          value.approvalBinding !== undefined &&
+          value.approvalBinding.versionID === value.versionID)
+      const rollbackValid =
+        (value.rollbackID === undefined && value.rollback === undefined) ||
+        (value.rollbackID !== undefined &&
+          value.rollback !== undefined &&
+          value.rollbackID === value.rollback.id &&
+          value.rollback.candidateVersionID === value.versionID)
+      const rewardValid =
+        value.reward === undefined ||
+        (value.rollback !== undefined &&
+          value.rollback.rewardEventID === value.reward.id &&
+          value.reward.outcomeClass === "canary-regression" &&
+          value.reward.numericReward === -1) ||
+        (value.event === "canary-passed" &&
+          value.nextStage === "active" &&
+          value.reward.outcomeClass === "passing-evidence" &&
+          value.reward.numericReward === 1)
+      const terminalValid =
+        value.terminalGroup === undefined ||
+        (value.event === "artifact-tombstoned" &&
+          value.nextStage === "archived" &&
+          value.terminalGroup.archiveTransitions.every(
+            (transition) => transition.event === "version-archived" && transition.nextStage === "archived",
+          ))
+      const supersessionValid =
+        value.supersededVersionID === undefined ||
+        (value.event === "canary-passed" &&
+          value.nextStage === "active" &&
+          value.supersededVersionID !== value.versionID)
+      return approvalValid && rollbackValid && rewardValid && terminalValid && supersessionValid
+    }),
+  ),
+) {}
 export class ContextOutbox extends Schema.Class<ContextOutbox>("SelfImprovementLearning.ContextOutbox")(
   Schema.Struct({
     id: SelfImprovementLifecycle.ContextOutboxID,
@@ -258,6 +345,12 @@ export class ContextSelectionEvidence extends Schema.Class<ContextSelectionEvide
     ),
   ),
 ) {}
+export const RetentionDeletionCount = Schema.Struct({
+  category: Schema.NonEmptyString,
+  count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+})
+export type RetentionDeletionCount = typeof RetentionDeletionCount.Type
+
 export class AuditPayload extends Schema.Class<AuditPayload>("SelfImprovementLearning.AuditPayload")({
   artifactID: SelfImprovementLifecycle.ArtifactID.pipe(optional),
   versionID: SelfImprovementLifecycle.ArtifactVersionID.pipe(optional),
@@ -267,6 +360,13 @@ export class AuditPayload extends Schema.Class<AuditPayload>("SelfImprovementLea
   contextOutboxID: SelfImprovementLifecycle.ContextOutboxID.pipe(optional),
   linkedDigests: Schema.Array(SelfImprovement.Digest).check(Schema.isUnique()),
   rejectedFieldNames: Schema.Array(Schema.NonEmptyString).check(Schema.isUnique()),
+  retentionDeletionCounts: Schema.Array(RetentionDeletionCount)
+    .pipe(optional)
+    .check(
+      Schema.makeFilter(
+        (value) => value === undefined || new Set(value.map((item) => item.category)).size === value.length,
+      ),
+    ),
 }) {}
 export class ObservationRetention extends Schema.TaggedClass<ObservationRetention>(
   "SelfImprovementLearning.ObservationRetention",

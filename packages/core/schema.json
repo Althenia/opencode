@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "551892a8-897f-4988-b9e9-6fb0dd516594",
-  "prevIds": ["cf61fb0a-b30b-4b79-a246-e53a13dab3da"],
+  "id": "ba067229-e19d-47c2-a62a-3e76b0272611",
+  "prevIds": ["0ff46586-d354-4d35-ae30-ce75fd8805fd"],
   "ddl": [
     {
       "name": "workspace",
@@ -10,6 +10,18 @@
     },
     {
       "name": "data_migration",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_approval_request",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_approval",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_rollback",
       "entityType": "tables"
     },
     {
@@ -25,7 +37,75 @@
       "entityType": "tables"
     },
     {
+      "name": "self_improvement_context_desired_state",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_context_outbox",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_context_selection_evidence",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_evaluation_baseline",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_evaluation_decision",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_evaluation_finding",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_evaluation_run",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_evaluation_sample",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_evaluation_suite_revision",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_generation_lease",
+      "entityType": "tables"
+    },
+    {
       "name": "self_improvement_idempotency",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_observation",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_bandit_state",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_generation_strategy_arm",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_model_route_arm",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_pull_event",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_reward_event",
+      "entityType": "tables"
+    },
+    {
+      "name": "self_improvement_routing_decision",
       "entityType": "tables"
     },
     {
@@ -207,6 +287,356 @@
       "name": "time_completed",
       "entityType": "columns",
       "table": "data_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_digest",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_revision",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evaluation_run_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "shadow_evidence_digest",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "creator_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requested_at",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "shadow_evidence_expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_digest",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_revision",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evaluation_run_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "shadow_evidence_digest",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "decision",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "approver_id",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "decided_at",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "shadow_evidence_expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "consumed_at",
+      "entityType": "columns",
+      "table": "self_improvement_approval"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "artifact_id",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "candidate_version_id",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "retained_active_version_id",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "canary_run_id",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reward_event_id",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "timestamp",
+      "entityType": "columns",
+      "table": "self_improvement_rollback"
     },
     {
       "type": "text",
@@ -610,6 +1040,826 @@
     },
     {
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "artifact_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rollout_slot",
+      "entityType": "columns",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "desired_state",
+      "entityType": "columns",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_digest",
+      "entityType": "columns",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "desired_revision",
+      "entityType": "columns",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "artifact_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expected_artifact_revision",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expected_stage",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "desired_state_revision",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "intent_json",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "next_retry_at",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cas_result_digest",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "artifact_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_digest",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "stage",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "context_epoch",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_digest",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cohort_result",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outbox_id",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload_revision",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_revision",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "baseline_json",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "decision_json",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_decision"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_decision"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "finding_order",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "finding_json",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_digest",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cutoff_sample_set_digest",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "decided_at",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_json",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sample_id_digest",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id_digest",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_digest",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sample_json",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_suite_revision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_id",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_suite_revision"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_suite_revision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "suite_json",
+      "entityType": "columns",
+      "table": "self_improvement_evaluation_suite_revision"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pattern_digest",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "owner_id",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_token_digest",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_number",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "acquired_at",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model_request_digest",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model_output_digest",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model_output_bytes",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pull_event_id",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "originating_task_id_digest",
+      "entityType": "columns",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -717,6 +1967,736 @@
       "name": "expires_at",
       "entityType": "columns",
       "table": "self_improvement_idempotency"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pattern_digest",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "identity_digest",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload_revision",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error_class",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ordered_tool_symbol_digest",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome_class",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id_digest",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "producer_id",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "occurred_at",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "action_domain",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "bucket_digest",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "derivation_revision",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "allowlist_revision",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "arm_id",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pull_total",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rewarded_pull_total",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cumulative_reward",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mean_reward",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "active",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "latest_pull_event_id",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "latest_reward_event_id",
+      "entityType": "columns",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_generation_strategy_arm"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_generation_strategy_arm"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "strategy_id",
+      "entityType": "columns",
+      "table": "self_improvement_generation_strategy_arm"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "allowlist_revision",
+      "entityType": "columns",
+      "table": "self_improvement_generation_strategy_arm"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "active",
+      "entityType": "columns",
+      "table": "self_improvement_generation_strategy_arm"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_model_route_arm"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_model_route_arm"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "route_json",
+      "entityType": "columns",
+      "table": "self_improvement_model_route_arm"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "allowlist_revision",
+      "entityType": "columns",
+      "table": "self_improvement_model_route_arm"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "active",
+      "entityType": "columns",
+      "table": "self_improvement_model_route_arm"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "action_domain",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "bucket_digest",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "derivation_revision",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "allowlist_revision",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ordered_eligible_arm_ids_json",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "selected_arm_id",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "proposal_digest",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_digest",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version_id",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "timestamp",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pull_event_id",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome_class",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "real",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "numeric_reward",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evidence_digest",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "timestamp",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "location_id",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_digest",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workload_revision",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "role_digest",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "precedence_source",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "policy_snapshot_digest",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "catalog_snapshot_digest",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "variant_snapshot_digest",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ordered_eligible_arms_json",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "selected_route_json",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason_code",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pull_event_id",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "timestamp",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "self_improvement_routing_decision"
     },
     {
       "type": "text",
@@ -2300,6 +4280,61 @@
       "table": "workspace"
     },
     {
+      "columns": ["version_id"],
+      "tableTo": "self_improvement_artifact_version",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_approval_request_version_id_self_improvement_artifact_version_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "columns": ["request_id"],
+      "tableTo": "self_improvement_approval_request",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_approval_request_id_self_improvement_approval_request_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_approval"
+    },
+    {
+      "columns": ["artifact_id"],
+      "tableTo": "self_improvement_artifact",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_rollback_artifact_id_self_improvement_artifact_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "columns": ["candidate_version_id"],
+      "tableTo": "self_improvement_artifact_version",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_rollback_candidate_version_id_self_improvement_artifact_version_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "columns": ["retained_active_version_id"],
+      "tableTo": "self_improvement_artifact_version",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_rollback_retained_active_version_id_self_improvement_artifact_version_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_rollback"
+    },
+    {
       "columns": ["artifact_id"],
       "tableTo": "self_improvement_artifact",
       "columnsTo": ["id"],
@@ -2309,6 +4344,72 @@
       "name": "fk_self_improvement_artifact_version_artifact_id_self_improvement_artifact_id_fk",
       "entityType": "fks",
       "table": "self_improvement_artifact_version"
+    },
+    {
+      "columns": ["artifact_id"],
+      "tableTo": "self_improvement_artifact",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_context_desired_state_artifact_id_self_improvement_artifact_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "columns": ["version_id"],
+      "tableTo": "self_improvement_artifact_version",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_context_desired_state_version_id_self_improvement_artifact_version_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "columns": ["artifact_id"],
+      "tableTo": "self_improvement_artifact",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_context_outbox_artifact_id_self_improvement_artifact_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "columns": ["artifact_id"],
+      "tableTo": "self_improvement_artifact",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_context_selection_evidence_artifact_id_self_improvement_artifact_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "columns": ["version_id"],
+      "tableTo": "self_improvement_artifact_version",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_context_selection_evidence_version_id_self_improvement_artifact_version_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "columns": ["outbox_id"],
+      "tableTo": "self_improvement_context_outbox",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_self_improvement_context_selection_evidence_outbox_id_self_improvement_context_outbox_id_fk",
+      "entityType": "fks",
+      "table": "self_improvement_context_selection_evidence"
     },
     {
       "columns": ["artifact_id"],
@@ -2487,6 +4588,13 @@
       "table": "session_share"
     },
     {
+      "columns": ["location_id", "artifact_id", "rollout_slot"],
+      "nameExplicit": false,
+      "name": "self_improvement_context_desired_state_pk",
+      "entityType": "pks",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
       "columns": ["location_id", "artifact_id", "slot"],
       "nameExplicit": false,
       "name": "self_improvement_artifact_slot_pk",
@@ -2531,6 +4639,27 @@
     {
       "columns": ["id"],
       "nameExplicit": false,
+      "name": "self_improvement_approval_request_pk",
+      "table": "self_improvement_approval_request",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_approval_pk",
+      "table": "self_improvement_approval",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_rollback_pk",
+      "table": "self_improvement_rollback",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
       "name": "self_improvement_artifact_pk",
       "table": "self_improvement_artifact",
       "entityType": "pks"
@@ -2552,8 +4681,106 @@
     {
       "columns": ["id"],
       "nameExplicit": false,
+      "name": "self_improvement_context_outbox_pk",
+      "table": "self_improvement_context_outbox",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_context_selection_evidence_pk",
+      "table": "self_improvement_context_selection_evidence",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_evaluation_baseline_pk",
+      "table": "self_improvement_evaluation_baseline",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["run_id"],
+      "nameExplicit": false,
+      "name": "self_improvement_evaluation_decision_pk",
+      "table": "self_improvement_evaluation_decision",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_evaluation_finding_pk",
+      "table": "self_improvement_evaluation_finding",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_evaluation_run_pk",
+      "table": "self_improvement_evaluation_run",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_evaluation_sample_pk",
+      "table": "self_improvement_evaluation_sample",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_generation_lease_pk",
+      "table": "self_improvement_generation_lease",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
       "name": "self_improvement_idempotency_pk",
       "table": "self_improvement_idempotency",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_observation_pk",
+      "table": "self_improvement_observation",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_generation_strategy_arm_pk",
+      "table": "self_improvement_generation_strategy_arm",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_model_route_arm_pk",
+      "table": "self_improvement_model_route_arm",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_pull_event_pk",
+      "table": "self_improvement_pull_event",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_reward_event_pk",
+      "table": "self_improvement_reward_event",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "self_improvement_routing_decision_pk",
+      "table": "self_improvement_routing_decision",
       "entityType": "pks"
     },
     {
@@ -2667,6 +4894,92 @@
       "name": "session_share_pk",
       "table": "session_share",
       "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "version_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_approval_request_location_version_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "columns": [
+        {
+          "value": "request_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_approval_request_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_approval"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "version_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_approval_location_version_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_approval"
+    },
+    {
+      "columns": [
+        {
+          "value": "canary_run_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_rollback_canary_run_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_rollback"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "artifact_id",
+          "isExpression": false
+        },
+        {
+          "value": "timestamp",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_rollback_location_artifact_timestamp_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_rollback"
     },
     {
       "columns": [
@@ -2803,6 +5116,348 @@
     {
       "columns": [
         {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "retention_expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_audit_entry_location_expiry_id_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_audit_entry"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "artifact_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_context_desired_state_location_artifact_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "next_retry_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_context_outbox_pending_retry_id_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "columns": [
+        {
+          "value": "artifact_id",
+          "isExpression": false
+        },
+        {
+          "value": "expected_stage",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"self_improvement_context_outbox\".\"status\" IN ('pending', 'applying')",
+      "origin": "manual",
+      "name": "self_improvement_context_outbox_pending_slot_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_context_selection_evidence_location_created_id_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "workload",
+          "isExpression": false
+        },
+        {
+          "value": "workload_revision",
+          "isExpression": false
+        },
+        {
+          "value": "suite_id",
+          "isExpression": false
+        },
+        {
+          "value": "suite_revision",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_baseline_tuple_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_baseline"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_decision_expiry_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_decision"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "finding_order",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_finding_order_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_finding_expiry_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_finding"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "state",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_run_location_state_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_run"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "sample_id_digest",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_sample_identity_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "task_id_digest",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_sample_task_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_sample_expiry_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_sample"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "suite_id",
+          "isExpression": false
+        },
+        {
+          "value": "revision",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_evaluation_suite_revision_tuple_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_evaluation_suite_revision"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "pattern_digest",
+          "isExpression": false
+        },
+        {
+          "value": "attempt_number",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_generation_lease_location_pattern_attempt_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "pattern_digest",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"self_improvement_generation_lease\".\"outcome\" = 'pending'",
+      "origin": "manual",
+      "name": "self_improvement_generation_lease_pending_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "pattern_digest",
+          "isExpression": false
+        },
+        {
+          "value": "acquired_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_generation_lease_location_pattern_acquired_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_generation_lease"
+    },
+    {
+      "columns": [
+        {
           "value": "principal_id",
           "isExpression": false
         },
@@ -2847,6 +5502,208 @@
       "name": "self_improvement_idempotency_location_expires_id_idx",
       "entityType": "indexes",
       "table": "self_improvement_idempotency"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "identity_digest",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_observation_location_identity_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_observation"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "pattern_digest",
+          "isExpression": false
+        },
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_observation_location_pattern_occurred_id_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_observation"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "action_domain",
+          "isExpression": false
+        },
+        {
+          "value": "bucket_digest",
+          "isExpression": false
+        },
+        {
+          "value": "derivation_revision",
+          "isExpression": false
+        },
+        {
+          "value": "allowlist_revision",
+          "isExpression": false
+        },
+        {
+          "value": "arm_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_bandit_state_key_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_bandit_state"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "strategy_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_generation_strategy_arm_location_strategy_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_generation_strategy_arm"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "route_json",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_model_route_arm_location_route_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_model_route_arm"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "action_domain",
+          "isExpression": false
+        },
+        {
+          "value": "bucket_digest",
+          "isExpression": false
+        },
+        {
+          "value": "timestamp",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_pull_event_location_bucket_timestamp_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "columns": [
+        {
+          "value": "pull_event_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_reward_event_pull_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "timestamp",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_reward_event_location_timestamp_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "columns": [
+        {
+          "value": "location_id",
+          "isExpression": false
+        },
+        {
+          "value": "timestamp",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "self_improvement_routing_decision_location_timestamp_idx",
+      "entityType": "indexes",
+      "table": "self_improvement_routing_decision"
     },
     {
       "columns": [
@@ -3231,6 +6088,24 @@
       "table": "todo"
     },
     {
+      "value": "\"shadow_evidence_expires_at\" = \"requested_at\" + 15552000000",
+      "name": "self_improvement_approval_request_evidence_expiry",
+      "entityType": "checks",
+      "table": "self_improvement_approval_request"
+    },
+    {
+      "value": "(\"decision\" = 'rejected' AND \"expires_at\" IS NULL AND \"consumed_at\" IS NULL) OR (\"decision\" = 'approved' AND \"expires_at\" = \"decided_at\" + 86400000)",
+      "name": "self_improvement_approval_decision_expiry",
+      "entityType": "checks",
+      "table": "self_improvement_approval"
+    },
+    {
+      "value": "\"reason\" = 'canary-regression'",
+      "name": "self_improvement_rollback_canary_reason",
+      "entityType": "checks",
+      "table": "self_improvement_rollback"
+    },
+    {
       "value": "(\"status\" = 'live' AND \"tombstone_actor_id\" IS NULL AND \"tombstone_reason\" IS NULL AND \"tombstone_at\" IS NULL) OR (\"status\" = 'tombstoned' AND \"tombstone_actor_id\" IS NOT NULL AND \"tombstone_reason\" IS NOT NULL AND \"tombstone_at\" IS NOT NULL)",
       "name": "self_improvement_artifact_tombstone_state",
       "entityType": "checks",
@@ -3241,6 +6116,48 @@
       "name": "self_improvement_artifact_version_generated_metadata",
       "entityType": "checks",
       "table": "self_improvement_artifact_version"
+    },
+    {
+      "value": "(\"retention_tag\" = 'observation-30d' AND \"retention_expires_at\" = \"retention_created_at\" + 2592000000) OR (\"retention_tag\" = 'evidence-180d' AND \"retention_expires_at\" = \"retention_created_at\" + 15552000000) OR (\"retention_tag\" = 'governed-metadata' AND \"retention_expires_at\" IS NULL)",
+      "name": "self_improvement_audit_entry_retention",
+      "entityType": "checks",
+      "table": "self_improvement_audit_entry"
+    },
+    {
+      "value": "(\"desired_state\" = 'absent' AND \"version_id\" IS NULL AND \"version_digest\" IS NULL) OR (\"desired_state\" = 'present' AND \"version_id\" IS NOT NULL AND \"version_digest\" IS NOT NULL)",
+      "name": "self_improvement_context_desired_state_target",
+      "entityType": "checks",
+      "table": "self_improvement_context_desired_state"
+    },
+    {
+      "value": "\"attempts\" >= 0",
+      "name": "self_improvement_context_outbox_attempts",
+      "entityType": "checks",
+      "table": "self_improvement_context_outbox"
+    },
+    {
+      "value": "\"expires_at\" = \"created_at\" + 180 * 86400000",
+      "name": "self_improvement_context_selection_evidence_expiry",
+      "entityType": "checks",
+      "table": "self_improvement_context_selection_evidence"
+    },
+    {
+      "value": "\"expires_at\" = \"timestamp\" + 180 * 86400000",
+      "name": "self_improvement_pull_event_retention",
+      "entityType": "checks",
+      "table": "self_improvement_pull_event"
+    },
+    {
+      "value": "\"expires_at\" = \"timestamp\" + 180 * 86400000",
+      "name": "self_improvement_reward_event_retention",
+      "entityType": "checks",
+      "table": "self_improvement_reward_event"
+    },
+    {
+      "value": "\"expires_at\" = \"timestamp\" + 180 * 86400000",
+      "name": "self_improvement_routing_decision_retention",
+      "entityType": "checks",
+      "table": "self_improvement_routing_decision"
     },
     {
       "value": "\"slot\" IN ('active', 'shadow', 'canary')",

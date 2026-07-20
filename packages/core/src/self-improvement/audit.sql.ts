@@ -1,4 +1,5 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { sql } from "drizzle-orm"
 import { SelfImprovementLifecycle } from "@opencode-ai/schema"
 
 export const SelfImprovementAuditEntryTable = sqliteTable(
@@ -21,6 +22,15 @@ export const SelfImprovementAuditEntryTable = sqliteTable(
       table.event_type,
       table.timestamp,
       table.id,
+    ),
+    index("self_improvement_audit_entry_location_expiry_id_idx").on(
+      table.location_id,
+      table.retention_expires_at,
+      table.id,
+    ),
+    check(
+      "self_improvement_audit_entry_retention",
+      sql`(${table.retention_tag} = 'observation-30d' AND ${table.retention_expires_at} = ${table.retention_created_at} + 2592000000) OR (${table.retention_tag} = 'evidence-180d' AND ${table.retention_expires_at} = ${table.retention_created_at} + 15552000000) OR (${table.retention_tag} = 'governed-metadata' AND ${table.retention_expires_at} IS NULL)`,
     ),
   ],
 )

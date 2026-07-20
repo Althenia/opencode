@@ -2,9 +2,15 @@ export * as SelfImprovementIdempotencyStore from "./idempotency-store"
 
 import { and, asc, eq, lte } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
-import { SelfImprovementApi, SelfImprovementLearning, SelfImprovementLifecycle } from "@opencode-ai/schema"
+import {
+  SelfImprovement,
+  SelfImprovementApi,
+  SelfImprovementLearning,
+  SelfImprovementLifecycle,
+} from "@opencode-ai/schema"
 import type { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { Database } from "../database/database"
+import { makeLocationNode } from "../effect/app-node"
 import { SelfImprovementIdempotencyTable } from "./idempotency.sql"
 
 type DatabaseClient = EffectDrizzleSqlite.EffectSQLiteDatabase
@@ -37,6 +43,14 @@ export interface Interface {
     readonly locationID: SelfImprovementLifecycle.LocationID
     readonly identity: SelfImprovementLearning.IdempotencyIdentity
   }) => Effect.Effect<SelfImprovementApi.IdempotencyRecord | undefined>
+  readonly valid: (
+    input: {
+      readonly locationID: SelfImprovementLifecycle.LocationID
+      readonly recordID: SelfImprovementLifecycle.IdempotencyRecordID
+      readonly requestDigest: SelfImprovement.Digest
+    },
+    tx: Transaction,
+  ) => Effect.Effect<boolean>
   readonly listExpired: (input: {
     readonly locationID: SelfImprovementLifecycle.LocationID
     readonly now: SelfImprovementLifecycle.TimestampMillis
@@ -120,6 +134,29 @@ export const layer = Layer.effect(
       return row === undefined ? undefined : fromRow(row)
     })
 
+    const valid = Effect.fn("SelfImprovementIdempotencyStore.valid")(function* (
+      input: {
+        readonly locationID: SelfImprovementLifecycle.LocationID
+        readonly recordID: SelfImprovementLifecycle.IdempotencyRecordID
+        readonly requestDigest: SelfImprovement.Digest
+      },
+      tx: Transaction,
+    ) {
+      const row = yield* tx
+        .select({ id: SelfImprovementIdempotencyTable.id })
+        .from(SelfImprovementIdempotencyTable)
+        .where(
+          and(
+            eq(SelfImprovementIdempotencyTable.id, input.recordID),
+            eq(SelfImprovementIdempotencyTable.location_id, input.locationID),
+            eq(SelfImprovementIdempotencyTable.request_digest, input.requestDigest),
+          ),
+        )
+        .get()
+        .pipe(Effect.orDie)
+      return row !== undefined
+    })
+
     const listExpired = Effect.fn("SelfImprovementIdempotencyStore.listExpired")(function* (input: {
       readonly locationID: SelfImprovementLifecycle.LocationID
       readonly now: SelfImprovementLifecycle.TimestampMillis
@@ -139,6 +176,8 @@ export const layer = Layer.effect(
       return rows.map(fromRow)
     })
 
-    return Service.of({ put, get, listExpired })
+    return Service.of({ put, get, valid, listExpired })
   }),
 )
+
+export const node = makeLocationNode({ service: Service, layer, deps: [Database.node] })

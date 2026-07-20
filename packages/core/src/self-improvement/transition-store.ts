@@ -1,10 +1,11 @@
 export * as SelfImprovementTransitionStore from "./transition-store"
 
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, desc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { SelfImprovementLifecycle } from "@opencode-ai/schema"
 import type { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { Database } from "../database/database"
+import { makeLocationNode } from "../effect/app-node"
 import { SelfImprovementArtifactTable, SelfImprovementArtifactVersionTable } from "./artifact.sql"
 import { SelfImprovementStageTransitionTable } from "./transition.sql"
 
@@ -34,6 +35,13 @@ export interface Interface {
     readonly locationID: SelfImprovementLifecycle.LocationID
     readonly versionID: SelfImprovementLifecycle.ArtifactVersionID
   }) => Effect.Effect<ReadonlyArray<SelfImprovementLifecycle.StageTransition>>
+  readonly currentStage: (
+    input: {
+      readonly locationID: SelfImprovementLifecycle.LocationID
+      readonly versionID: SelfImprovementLifecycle.ArtifactVersionID
+    },
+    tx?: Transaction,
+  ) => Effect.Effect<SelfImprovementLifecycle.ArtifactStage | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SelfImprovementTransitionStore") {}
@@ -143,6 +151,37 @@ export const layer = Layer.effect(
       return rows.map((row) => fromRow(row.transition))
     })
 
-    return Service.of({ append, listByVersion })
+    const currentStage = Effect.fn("SelfImprovementTransitionStore.currentStage")(function* (
+      input: {
+        readonly locationID: SelfImprovementLifecycle.LocationID
+        readonly versionID: SelfImprovementLifecycle.ArtifactVersionID
+      },
+      tx?: Transaction,
+    ) {
+      const client = tx ?? db
+      const transition = yield* client
+        .select({ stage: SelfImprovementStageTransitionTable.next_stage })
+        .from(SelfImprovementStageTransitionTable)
+        .innerJoin(
+          SelfImprovementArtifactVersionTable,
+          eq(SelfImprovementStageTransitionTable.version_id, SelfImprovementArtifactVersionTable.id),
+        )
+        .innerJoin(
+          SelfImprovementArtifactTable,
+          and(
+            eq(SelfImprovementArtifactVersionTable.artifact_id, SelfImprovementArtifactTable.id),
+            eq(SelfImprovementArtifactTable.location_id, input.locationID),
+          ),
+        )
+        .where(eq(SelfImprovementStageTransitionTable.version_id, input.versionID))
+        .orderBy(desc(SelfImprovementStageTransitionTable.timestamp), desc(SelfImprovementStageTransitionTable.id))
+        .get()
+        .pipe(Effect.orDie)
+      return transition?.stage
+    })
+
+    return Service.of({ append, listByVersion, currentStage })
   }),
 )
+
+export const node = makeLocationNode({ service: Service, layer, deps: [Database.node] })

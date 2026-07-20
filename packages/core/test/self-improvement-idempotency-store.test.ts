@@ -81,6 +81,19 @@ const setup = Effect.gen(function* () {
       ).toBeUndefined()
       expect(yield* store.get({ locationID, identity: expired.identity })).toEqual(expired)
       expect(
+        yield* db.transaction((tx) =>
+          store.valid({ locationID, recordID: expired.id, requestDigest: expired.requestDigest }, tx),
+        ),
+      ).toBe(true)
+      expect(
+        yield* db.transaction((tx) =>
+          store.valid(
+            { locationID, recordID: expired.id, requestDigest: SelfImprovement.Digest.make("3".repeat(64)) },
+            tx,
+          ),
+        ),
+      ).toBe(false)
+      expect(
         yield* store.listExpired({ locationID, now: SelfImprovementLifecycle.TimestampMillis.make(retention + 10) }),
       ).toEqual([expired])
     }),

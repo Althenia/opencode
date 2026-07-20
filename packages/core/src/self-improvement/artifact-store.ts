@@ -5,7 +5,9 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { SelfImprovement, SelfImprovementLifecycle } from "@opencode-ai/schema"
 import type { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { Database } from "../database/database"
+import { makeLocationNode } from "../effect/app-node"
 import { SelfImprovementArtifactTable, SelfImprovementArtifactVersionTable } from "./artifact.sql"
+import { SelfImprovementContextDesiredStateTable } from "./context.sql"
 
 type DatabaseClient = EffectDrizzleSqlite.EffectSQLiteDatabase
 export type Transaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
@@ -34,14 +36,34 @@ export interface Interface {
     },
     tx?: Transaction,
   ) => Effect.Effect<void, InvalidInput | Conflict>
-  readonly getArtifact: (input: {
-    readonly locationID: SelfImprovementLifecycle.LocationID
-    readonly artifactID: SelfImprovementLifecycle.ArtifactID
-  }) => Effect.Effect<SelfImprovementLifecycle.Artifact | undefined>
-  readonly getVersion: (input: {
-    readonly locationID: SelfImprovementLifecycle.LocationID
-    readonly versionID: SelfImprovementLifecycle.ArtifactVersionID
-  }) => Effect.Effect<SelfImprovementLifecycle.ArtifactVersion | undefined>
+  readonly getArtifact: (
+    input: {
+      readonly locationID: SelfImprovementLifecycle.LocationID
+      readonly artifactID: SelfImprovementLifecycle.ArtifactID
+    },
+    tx?: Transaction,
+  ) => Effect.Effect<SelfImprovementLifecycle.Artifact | undefined>
+  readonly getArtifactByKey: (
+    input: { readonly key: SelfImprovementLifecycle.ArtifactKey },
+    tx?: Transaction,
+  ) => Effect.Effect<SelfImprovementLifecycle.Artifact | undefined>
+  readonly getActiveArtifactVersionByKey: (
+    input: { readonly key: SelfImprovementLifecycle.ArtifactKey },
+    tx?: Transaction,
+  ) => Effect.Effect<
+    | {
+        readonly artifact: SelfImprovementLifecycle.Artifact
+        readonly version: SelfImprovementLifecycle.ArtifactVersion
+      }
+    | undefined
+  >
+  readonly getVersion: (
+    input: {
+      readonly locationID: SelfImprovementLifecycle.LocationID
+      readonly versionID: SelfImprovementLifecycle.ArtifactVersionID
+    },
+    tx?: Transaction,
+  ) => Effect.Effect<SelfImprovementLifecycle.ArtifactVersion | undefined>
   readonly appendVersion: (
     input: {
       readonly locationID: SelfImprovementLifecycle.LocationID
@@ -51,10 +73,13 @@ export interface Interface {
     },
     tx?: Transaction,
   ) => Effect.Effect<boolean, InvalidInput | Conflict>
-  readonly listVersions: (input: {
-    readonly locationID: SelfImprovementLifecycle.LocationID
-    readonly artifactID: SelfImprovementLifecycle.ArtifactID
-  }) => Effect.Effect<ReadonlyArray<SelfImprovementLifecycle.ArtifactVersion>>
+  readonly listVersions: (
+    input: {
+      readonly locationID: SelfImprovementLifecycle.LocationID
+      readonly artifactID: SelfImprovementLifecycle.ArtifactID
+    },
+    tx?: Transaction,
+  ) => Effect.Effect<ReadonlyArray<SelfImprovementLifecycle.ArtifactVersion>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SelfImprovementArtifactStore") {}
@@ -133,7 +158,9 @@ const versionValues = (version: SelfImprovementLifecycle.ArtifactVersion) => ({
   proposal_digest: version.proposalDigest,
   input_snapshot_digest: version.inputSnapshotDigest,
   version_digest: version.versionDigest,
-  capability_manifest_json: encodeCapabilityManifest(version.capabilityManifest),
+  capability_manifest_json: encodeCapabilityManifest(
+    new SelfImprovementLifecycle.CapabilityManifest(canonicalManifest(version.capabilityManifest)),
+  ),
   capability_manifest_digest: version.capabilityManifestDigest,
   creator_id: version.creatorID,
   created_at: version.createdAt,
@@ -203,11 +230,14 @@ export const layer = Layer.effect(
       return yield* db.transaction(insert).pipe(Effect.catchTag("SqlError", Effect.die))
     })
 
-    const getArtifact = Effect.fn("SelfImprovementArtifactStore.getArtifact")(function* (input: {
-      readonly locationID: SelfImprovementLifecycle.LocationID
-      readonly artifactID: SelfImprovementLifecycle.ArtifactID
-    }) {
-      const row = yield* db
+    const getArtifact = Effect.fn("SelfImprovementArtifactStore.getArtifact")(function* (
+      input: {
+        readonly locationID: SelfImprovementLifecycle.LocationID
+        readonly artifactID: SelfImprovementLifecycle.ArtifactID
+      },
+      tx?: Transaction,
+    ) {
+      const row = yield* (tx ?? db)
         .select()
         .from(SelfImprovementArtifactTable)
         .where(
@@ -221,11 +251,70 @@ export const layer = Layer.effect(
       return row === undefined ? undefined : fromArtifactRow(row)
     })
 
-    const getVersion = Effect.fn("SelfImprovementArtifactStore.getVersion")(function* (input: {
-      readonly locationID: SelfImprovementLifecycle.LocationID
-      readonly versionID: SelfImprovementLifecycle.ArtifactVersionID
-    }) {
-      const row = yield* db
+    const getArtifactByKey = Effect.fn("SelfImprovementArtifactStore.getArtifactByKey")(function* (
+      input: { readonly key: SelfImprovementLifecycle.ArtifactKey },
+      tx?: Transaction,
+    ) {
+      const row = yield* (tx ?? db)
+        .select()
+        .from(SelfImprovementArtifactTable)
+        .where(
+          and(
+            eq(SelfImprovementArtifactTable.location_id, input.key.locationID),
+            eq(SelfImprovementArtifactTable.kind, input.key.kind),
+            eq(SelfImprovementArtifactTable.name, input.key.name),
+          ),
+        )
+        .get()
+        .pipe(Effect.orDie)
+      return row === undefined ? undefined : fromArtifactRow(row)
+    })
+
+    const getActiveArtifactVersionByKey = Effect.fn("SelfImprovementArtifactStore.getActiveArtifactVersionByKey")(
+      function* (input: { readonly key: SelfImprovementLifecycle.ArtifactKey }, tx?: Transaction) {
+        const row = yield* (tx ?? db)
+          .select({ artifact: SelfImprovementArtifactTable, version: SelfImprovementArtifactVersionTable })
+          .from(SelfImprovementArtifactTable)
+          .innerJoin(
+            SelfImprovementContextDesiredStateTable,
+            and(
+              eq(SelfImprovementContextDesiredStateTable.location_id, SelfImprovementArtifactTable.location_id),
+              eq(SelfImprovementContextDesiredStateTable.artifact_id, SelfImprovementArtifactTable.id),
+              eq(SelfImprovementContextDesiredStateTable.rollout_slot, "active"),
+            ),
+          )
+          .innerJoin(
+            SelfImprovementArtifactVersionTable,
+            and(
+              eq(SelfImprovementArtifactVersionTable.id, SelfImprovementContextDesiredStateTable.version_id),
+              eq(SelfImprovementArtifactVersionTable.artifact_id, SelfImprovementArtifactTable.id),
+            ),
+          )
+          .where(
+            and(
+              eq(SelfImprovementArtifactTable.location_id, input.key.locationID),
+              eq(SelfImprovementArtifactTable.kind, input.key.kind),
+              eq(SelfImprovementArtifactTable.name, input.key.name),
+              eq(SelfImprovementArtifactTable.status, "live"),
+              eq(SelfImprovementContextDesiredStateTable.desired_state, "present"),
+            ),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        return row === undefined
+          ? undefined
+          : { artifact: fromArtifactRow(row.artifact), version: fromVersionRow(row.version) }
+      },
+    )
+
+    const getVersion = Effect.fn("SelfImprovementArtifactStore.getVersion")(function* (
+      input: {
+        readonly locationID: SelfImprovementLifecycle.LocationID
+        readonly versionID: SelfImprovementLifecycle.ArtifactVersionID
+      },
+      tx?: Transaction,
+    ) {
+      const row = yield* (tx ?? db)
         .select({ version: SelfImprovementArtifactVersionTable })
         .from(SelfImprovementArtifactVersionTable)
         .innerJoin(
@@ -304,11 +393,14 @@ export const layer = Layer.effect(
       return yield* db.transaction(append).pipe(Effect.catchTag("SqlError", Effect.die))
     })
 
-    const listVersions = Effect.fn("SelfImprovementArtifactStore.listVersions")(function* (input: {
-      readonly locationID: SelfImprovementLifecycle.LocationID
-      readonly artifactID: SelfImprovementLifecycle.ArtifactID
-    }) {
-      const rows = yield* db
+    const listVersions = Effect.fn("SelfImprovementArtifactStore.listVersions")(function* (
+      input: {
+        readonly locationID: SelfImprovementLifecycle.LocationID
+        readonly artifactID: SelfImprovementLifecycle.ArtifactID
+      },
+      tx?: Transaction,
+    ) {
+      const rows = yield* (tx ?? db)
         .select({ version: SelfImprovementArtifactVersionTable })
         .from(SelfImprovementArtifactVersionTable)
         .innerJoin(
@@ -325,6 +417,34 @@ export const layer = Layer.effect(
       return rows.map((row) => fromVersionRow(row.version))
     })
 
-    return Service.of({ create, getArtifact, getVersion, appendVersion, listVersions })
+    return Service.of({
+      create,
+      getArtifact,
+      getArtifactByKey,
+      getActiveArtifactVersionByKey,
+      getVersion,
+      appendVersion,
+      listVersions,
+    })
   }),
 )
+
+export const node = makeLocationNode({ service: Service, layer, deps: [Database.node] })
+
+function canonicalManifest(manifest: SelfImprovementLifecycle.CapabilityManifest) {
+  return {
+    toolIDs: [...manifest.toolIDs].sort(),
+    filesystemScopeIDs: [...manifest.filesystemScopeIDs].sort(),
+    networkOriginIDs: [...manifest.networkOriginIDs].sort(),
+    modelRoutes: [...manifest.modelRoutes].sort((left, right) => compare(JSON.stringify(left), JSON.stringify(right))),
+    childAgentTargets: [...manifest.childAgentTargets].sort(),
+    artifactReferences: [...manifest.artifactReferences].sort((left, right) =>
+      compare(JSON.stringify(left), JSON.stringify(right)),
+    ),
+    denies: [...manifest.denies].sort((left, right) => compare(JSON.stringify(left), JSON.stringify(right))),
+  }
+}
+
+function compare(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0
+}

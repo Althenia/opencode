@@ -312,10 +312,123 @@ test("context records preserve desired revision, exact transition intent, outbox
     actorID: "coordinator",
     evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.create(),
     approvalID: SelfImprovementLifecycle.ApprovalID.create(),
+    approvalBinding: {
+      versionID,
+      versionDigest: digest,
+      suiteID: SelfImprovementLifecycle.SuiteID.create(),
+      suiteRevision: 1,
+      evaluationRunID: SelfImprovementLifecycle.EvaluationRunID.create(),
+      shadowEvidenceDigest: "b".repeat(64),
+    },
+    rollbackID: SelfImprovementLifecycle.RollbackID.create(),
+    rollback: {
+      id: SelfImprovementLifecycle.RollbackID.create(),
+      locationID,
+      artifactID,
+      candidateVersionID: versionID,
+      retainedActiveVersionID: SelfImprovementLifecycle.ArtifactVersionID.create(),
+      canaryRunID: SelfImprovementLifecycle.EvaluationRunID.create(),
+      reason: "canary-regression",
+      rewardEventID: SelfImprovementLifecycle.RewardEventID.create(),
+      timestamp: 2,
+    },
+    reward: {
+      id: SelfImprovementLifecycle.RewardEventID.create(),
+      locationID,
+      pullEventID: SelfImprovementLifecycle.PullEventID.create(),
+      outcomeClass: "canary-regression",
+      numericReward: -1,
+      evidenceDigest: "c".repeat(64),
+      timestamp: 2,
+    },
     idempotencyRecordID: SelfImprovementLifecycle.IdempotencyRecordID.create(),
     idempotencyDigest: "f".repeat(64),
   }
+  intent.rollbackID = intent.rollback.id
+  intent.rollback.rewardEventID = intent.reward.id
   expect(decode(SelfImprovementLearning.PendingTransitionIntent, intent)).toEqual(intent)
+  expect(() =>
+    decode(SelfImprovementLearning.PendingTransitionIntent, {
+      ...intent,
+      approvalBinding: { ...intent.approvalBinding, versionID: SelfImprovementLifecycle.ArtifactVersionID.create() },
+    }),
+  ).toThrow()
+  expect(() =>
+    decode(SelfImprovementLearning.PendingTransitionIntent, {
+      ...intent,
+      reward: { ...intent.reward, numericReward: 1 },
+    }),
+  ).toThrow()
+  const terminalGroup = {
+    removalOutboxIDs: [SelfImprovementLifecycle.ContextOutboxID.create()],
+    archiveTransitions: [
+      {
+        id: SelfImprovementLifecycle.StageTransitionID.create(),
+        versionID,
+        previousStage: "shadow",
+        nextStage: "archived",
+        event: "version-archived",
+        reason: "artifact-tombstoned",
+        actorID: intent.actorID,
+        timestamp: 3,
+        contextOutboxID: SelfImprovementLifecycle.ContextOutboxID.create(),
+        idempotencyRecordID: SelfImprovementLifecycle.IdempotencyRecordID.create(),
+        idempotencyDigest: "a".repeat(64),
+      },
+    ],
+    removals: [
+      {
+        outboxID: SelfImprovementLifecycle.ContextOutboxID.create(),
+        rolloutSlot: "shadow",
+        versionDigest: "b".repeat(64),
+        slotRevision: 2,
+      },
+    ],
+  }
+  terminalGroup.archiveTransitions[0].contextOutboxID = terminalGroup.removalOutboxIDs[0]
+  terminalGroup.removals[0].outboxID = terminalGroup.removalOutboxIDs[0]
+  const terminalIntent = {
+    ...intent,
+    nextStage: "archived",
+    event: "artifact-tombstoned",
+    reason: "artifact-tombstoned",
+    terminalGroup,
+  }
+  expect(decode(SelfImprovementLearning.PendingTransitionIntent, terminalIntent)).toEqual(terminalIntent)
+  const manyVersionTerminalGroup = {
+    ...terminalGroup,
+    archiveTransitions: [
+      ...terminalGroup.archiveTransitions,
+      ...["shadow", "canary", "active"].map((previousStage) => ({
+        ...terminalGroup.archiveTransitions[0],
+        id: SelfImprovementLifecycle.StageTransitionID.create(),
+        versionID: SelfImprovementLifecycle.ArtifactVersionID.create(),
+        previousStage,
+      })),
+    ],
+  }
+  expect(
+    decode(SelfImprovementLearning.PendingTransitionIntent, {
+      ...terminalIntent,
+      terminalGroup: manyVersionTerminalGroup,
+    }),
+  ).toEqual({ ...terminalIntent, terminalGroup: manyVersionTerminalGroup })
+  expect(() => decode(SelfImprovementLearning.PendingTransitionIntent, { ...intent, terminalGroup })).toThrow()
+  expect(() =>
+    decode(SelfImprovementLearning.PendingTransitionIntent, {
+      ...terminalIntent,
+      terminalGroup: { ...terminalGroup, removalOutboxIDs: [] },
+    }),
+  ).toThrow()
+  expect(() =>
+    decode(SelfImprovementLearning.PendingTransitionIntent, {
+      ...terminalIntent,
+      terminalGroup: {
+        ...terminalGroup,
+        archiveTransitions: [{ ...terminalGroup.archiveTransitions[0], contextOutboxID: undefined }],
+      },
+    }),
+  ).toThrow()
   for (const field of [
     "versionID",
     "previousStage",
@@ -412,11 +525,27 @@ test("audit and idempotency records keep Location identity, redacted links, and 
     artifactID: SelfImprovementLifecycle.ArtifactID.create(),
     linkedDigests: [digest],
     rejectedFieldNames: ["transcript"],
+    retentionDeletionCounts: [{ category: "observations", count: 2 }],
   }
   expect(decode(SelfImprovementLearning.AuditPayload, payload)).toEqual(payload)
   expect(() => decode(SelfImprovementLearning.AuditPayload, { ...payload, linkedDigests: [digest, digest] })).toThrow()
   expect(() =>
     decode(SelfImprovementLearning.AuditPayload, { ...payload, rejectedFieldNames: ["transcript", "transcript"] }),
+  ).toThrow()
+  expect(() =>
+    decode(SelfImprovementLearning.AuditPayload, {
+      ...payload,
+      retentionDeletionCounts: [
+        { category: "observations", count: 1 },
+        { category: "observations", count: 2 },
+      ],
+    }),
+  ).toThrow()
+  expect(() =>
+    decode(SelfImprovementLearning.AuditPayload, {
+      ...payload,
+      retentionDeletionCounts: [{ category: "observations", count: -1 }],
+    }),
   ).toThrow()
 
   const audit = {

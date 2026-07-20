@@ -34,6 +34,7 @@ import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
+import { Routing } from "../../self-improvement/routing"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
@@ -99,6 +100,7 @@ const layer = Layer.effect(
     const agents = yield* AgentV2.Service
     const tools = yield* ToolRegistry.Service
     const models = yield* SessionRunnerModel.Service
+    const routing = yield* Routing.Service
     const store = yield* SessionStore.Service
     const location = yield* Location.Service
     const systemContext = yield* SystemContextRegistry.Service
@@ -197,7 +199,8 @@ const layer = Layer.effect(
       }
       const system =
         initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
-      const model = yield* models.resolve(session)
+      const selected = yield* routing.resolve({ session, roleRoute: agent.info?.model })
+      const model = yield* models.materialize(session, selected.route)
       const goalContext = yield* GoalContext.load(db, session.id)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
@@ -421,6 +424,7 @@ export const node = makeLocationNode({
     llmClient,
     AgentV2.node,
     ToolRegistry.node,
+    Routing.node,
     SessionRunnerModel.node,
     SessionStore.node,
     Location.node,

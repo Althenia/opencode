@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Cause, Effect, Exit, Schema, Scope } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { SelfImprovement, SelfImprovementLifecycle } from "@opencode-ai/schema"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
 import { testEffect } from "../lib/effect"
@@ -109,6 +110,74 @@ describe("SystemContextRegistry", () => {
 
       yield* Scope.close(scope, Exit.void)
       expect(yield* SystemContext.initialize(yield* registry.load())).toEqual({ baseline: "", snapshot: {} })
+    }),
+  )
+
+  it.effect("rejects stale contribution revisions without replacing the visible context", () =>
+    Effect.gen(function* () {
+      const registry = yield* SystemContextRegistry.Service
+      const key = SystemContext.Key.make("test/contribution")
+      const first = {
+        revision: SelfImprovementLifecycle.Revision.make(1),
+        digest: SelfImprovement.Digest.make("a".repeat(64)),
+        context: yield* entry("test/contribution", "first").load,
+      }
+
+      expect(
+        yield* registry.compareAndSet({
+          key,
+          expectedRevision: SelfImprovementLifecycle.Revision.make(0),
+          next: first,
+        }),
+      ).toEqual({
+        applied: true,
+        current: first,
+      })
+      expect(
+        yield* registry.compareAndSet({
+          key,
+          expectedRevision: SelfImprovementLifecycle.Revision.make(0),
+          next: {
+            ...first,
+            revision: SelfImprovementLifecycle.Revision.make(2),
+            digest: SelfImprovement.Digest.make("b".repeat(64)),
+          },
+        }),
+      ).toEqual({ applied: false, current: first })
+      expect((yield* SystemContext.initialize(yield* registry.load())).baseline).toBe("first")
+    }),
+  )
+
+  it.effect("rejects keys shared between scoped entries and contributions", () =>
+    Effect.gen(function* () {
+      const registry = yield* SystemContextRegistry.Service
+      const key = SystemContext.Key.make("test/collision")
+      const contribution = {
+        revision: SelfImprovementLifecycle.Revision.make(1),
+        digest: SelfImprovement.Digest.make("c".repeat(64)),
+        context: yield* entry("test/collision", "contribution").load,
+      }
+
+      yield* registry.register(entry("test/collision", "scoped"))
+      expect(
+        yield* registry.compareAndSet({
+          key,
+          expectedRevision: SelfImprovementLifecycle.Revision.make(0),
+          next: contribution,
+        }),
+      ).toEqual({ applied: false, current: undefined })
+
+      expect(
+        yield* registry.compareAndSet({
+          key: SystemContext.Key.make("test/contribution-collision"),
+          expectedRevision: SelfImprovementLifecycle.Revision.make(0),
+          next: { ...contribution, context: yield* entry("test/contribution-collision", "contribution").load },
+        }),
+      ).toMatchObject({ applied: true })
+
+      const exit = yield* registry.register(entry("test/contribution-collision", "scoped")).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("Duplicate system context entry key")
     }),
   )
 })

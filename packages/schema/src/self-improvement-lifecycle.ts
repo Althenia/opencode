@@ -187,6 +187,7 @@ export const LifecycleEvents = [
   "approval-consumed",
   "canary-passed",
   "canary-regressed",
+  "version-superseded",
   "retention-archive",
   "ephemeral-expired",
   "artifact-tombstoned",
