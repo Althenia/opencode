@@ -14,9 +14,9 @@ export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outpu
   const reserved =
     input.cfg.compaction?.reserved ??
     Math.min(COMPACTION_BUFFER, ProviderTransform.maxOutputTokens(input.model, input.outputTokenMax))
-  return input.model.limit.input
-    ? Math.max(0, input.model.limit.input - reserved)
-    : Math.max(0, context - ProviderTransform.maxOutputTokens(input.model, input.outputTokenMax))
+  const contextBudget = Math.max(0, context - ProviderTransform.maxOutputTokens(input.model, input.outputTokenMax))
+  if (!input.model.limit.input) return contextBudget
+  return Math.min(contextBudget, Math.max(0, input.model.limit.input - reserved))
 }
 
 export function isOverflow(input: {
