@@ -40,6 +40,7 @@ import { SelfImprovementAuditStore } from "./self-improvement/audit-store"
 import { SelfImprovementContextReconciler } from "./self-improvement/context-reconciler"
 import { SelfImprovementContextStore } from "./self-improvement/context-store"
 import { SelfImprovementEvaluationStore } from "./self-improvement/evaluation-store"
+import { SelfImprovementIngressStore } from "./self-improvement/ingress-store"
 import { SelfImprovementGeneration } from "./self-improvement/generation"
 import { SelfImprovementGenerationStore } from "./self-improvement/generation-store"
 import { SelfImprovementIdempotencyStore } from "./self-improvement/idempotency-store"
@@ -84,6 +85,7 @@ export const locationServices = LayerNode.group([
   SelfImprovementApprovalStore.node,
   SelfImprovementAuditStore.node,
   SelfImprovementEvaluationStore.node,
+  SelfImprovementIngressStore.node,
   SelfImprovementRetention.node,
   SelfImprovementContextStore.node,
   SelfImprovementIdempotencyStore.node,

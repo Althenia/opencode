@@ -10,6 +10,7 @@ import {
   SelfImprovementLifecycle,
 } from "@opencode-ai/schema"
 import { Database } from "../database/database"
+import { makeLocationNode } from "../effect/app-node"
 import { SelfImprovementAuthorization } from "./authorization"
 import { SelfImprovementEvaluationStore } from "./evaluation-store"
 import { SelfImprovementObservationTable } from "./ingress.sql"
@@ -263,3 +264,9 @@ export const layer = Layer.effect(
     return Service.of({ recordObservation, createMetricRun, appendMetricSample })
   }),
 )
+
+export const node = makeLocationNode({
+  service: Service,
+  layer: layer.pipe(Layer.provide(SelfImprovementKeyring.layer), Layer.provide(evaluationEvidenceLayer)),
+  deps: [Database.node, SelfImprovementEvaluationStore.node],
+})

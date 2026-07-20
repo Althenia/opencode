@@ -10,7 +10,6 @@ import {
 } from "@opencode-ai/schema"
 import { makeLocationNode, tags } from "../effect/app-node"
 import { Database } from "../database/database"
-import { LayerNode } from "../effect/layer-node"
 import { SelfImprovementArtifactStore } from "./artifact-store"
 import { SelfImprovementApprovalStore } from "./approval-store"
 import { SelfImprovementAuditStore } from "./audit-store"
@@ -410,7 +409,7 @@ export const node = makeLocationNode({
   service: Service,
   layer,
   deps: [
-    LayerNode.unbound(SelfImprovementIngressStore.Service, tags.values.location),
+    SelfImprovementIngressStore.node,
     Database.node,
     SelfImprovementApprovalStore.node,
     SelfImprovementEvaluationStore.node,
