@@ -112,6 +112,34 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.diagnostics",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.diagnostics(ctx.params.sessionID).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+              Effect.catchTag("Session.MessageDecodeError", (error) => {
+                const ref = `err_${crypto.randomUUID().slice(0, 8)}`
+                return Effect.logError("failed to decode session message for cache diagnostics").pipe(
+                  Effect.annotateLogs({ ref, sessionID: error.sessionID, messageID: error.messageID }),
+                  Effect.andThen(
+                    Effect.fail(
+                      new UnknownError({ message: "Unexpected server error. Check server logs for details.", ref }),
+                    ),
+                  ),
+                )
+              }),
+            ),
+          }
+        }),
+      )
+      .handle(
         "session.remove",
         Effect.fn(function* (ctx) {
           yield* session.remove(ctx.params.sessionID).pipe(
@@ -399,6 +427,11 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   }),
                 ),
               ),
+              Effect.catchTag(
+                "ShellSandbox.Unavailable",
+                (error) => new ServiceUnavailableError({ message: error.message, service: "shell-sandbox" }),
+              ),
+              Effect.catchTag("Shell.SpawnError", (error) => new InvalidRequestError({ message: error.message })),
             )
           return HttpApiSchema.NoContent.make()
         }),

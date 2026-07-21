@@ -23,6 +23,7 @@ import type {
   SessionMessageAssistantText,
   SessionMessageAssistantTool,
   SessionInfo,
+  SessionDiagnosticsOutput,
   SessionPendingInfo,
   ShellInfo,
   SkillInfo,
@@ -69,6 +70,7 @@ type Store = {
     // session ID in that family, including the key itself once its info arrives.
     family: Record<string, string[]>
     active: Record<string, DataSessionStatus>
+    diagnostics: Record<string, SessionDiagnosticsOutput>
     message: Record<string, SessionMessageInfo[]>
     pending: Record<string, SessionPendingInfo[]>
     input: Record<string, string[]>
@@ -129,6 +131,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         info: {},
         family: {},
         active: {},
+        diagnostics: {},
         message: {},
         pending: {},
         input: {},
@@ -272,6 +275,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       sync.invalidate(`session:${sessionID}`)
       sync.invalidate(`session.pending:${sessionID}`)
       sync.invalidate(`session.message:${sessionID}`)
+      sync.invalidate(`session.diagnostics:${sessionID}`)
       sync.invalidate(`session.permission:${sessionID}`)
       sync.invalidate(`session.form:${sessionID}:`)
       setStore(
@@ -280,6 +284,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           delete draft.info[sessionID]
           delete draft.active[sessionID]
           delete draft.message[sessionID]
+          delete draft.diagnostics[sessionID]
           delete draft.pending[sessionID]
           delete draft.input[sessionID]
           delete draft.permission[sessionID]
@@ -521,9 +526,16 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             currentAssistant.finish = event.data.finish
             currentAssistant.cost = event.data.cost
             currentAssistant.tokens = event.data.tokens
+            if (event.data.cacheMechanism)
+              currentAssistant.diagnostics = {
+                cacheMechanism: event.data.cacheMechanism,
+                contextLimit: event.data.contextLimit,
+              }
             if (event.data.snapshot)
               currentAssistant.snapshot = { ...currentAssistant.snapshot, end: event.data.snapshot }
           })
+          result.session.diagnostics.invalidate(event.data.sessionID)
+          void result.session.diagnostics.sync(event.data.sessionID).catch(() => undefined)
           break
         }
         case "session.step.failed":
@@ -538,7 +550,14 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               currentAssistant.cost = event.data.cost
               currentAssistant.tokens = event.data.tokens
             }
+            if (event.data.cacheMechanism)
+              currentAssistant.diagnostics = {
+                cacheMechanism: event.data.cacheMechanism,
+                contextLimit: event.data.contextLimit,
+              }
           })
+          result.session.diagnostics.invalidate(event.data.sessionID)
+          void result.session.diagnostics.sync(event.data.sessionID).catch(() => undefined)
           break
         case "session.text.started":
           message.update(event.data.sessionID, (draft, index) => {
@@ -727,10 +746,14 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         case "session.revert.staged":
           if (store.session.info[event.data.sessionID])
             setStore("session", "info", event.data.sessionID, "revert", event.data.revert)
+          result.session.diagnostics.invalidate(event.data.sessionID)
+          void result.session.diagnostics.sync(event.data.sessionID).catch(() => undefined)
           break
         case "session.revert.cleared":
           if (store.session.info[event.data.sessionID])
             setStore("session", "info", event.data.sessionID, "revert", undefined)
+          result.session.diagnostics.invalidate(event.data.sessionID)
+          void result.session.diagnostics.sync(event.data.sessionID).catch(() => undefined)
           break
         case "session.revert.committed":
           if (store.session.info[event.data.sessionID]) {
@@ -747,6 +770,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             if (position === -1) return
             for (const item of draft.splice(position)) index.delete(item.id)
           })
+          result.session.diagnostics.invalidate(event.data.sessionID)
+          void result.session.diagnostics.sync(event.data.sessionID).catch(() => undefined)
           break
         case "session.compaction.delta":
           message.update(event.data.sessionID, (draft) => {
@@ -777,6 +802,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               time: { created: event.created },
             })
           })
+          result.session.diagnostics.invalidate(event.data.sessionID)
+          void result.session.diagnostics.sync(event.data.sessionID).catch(() => undefined)
           break
         case "session.compaction.failed":
           removePending(event.data.sessionID, event.data.inputID)
@@ -948,6 +975,19 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         },
         invalidate(sessionID: string) {
           sync.invalidate(`session:${sessionID}`)
+        },
+        diagnostics: {
+          get(sessionID: string) {
+            return store.session.diagnostics[sessionID]
+          },
+          sync(sessionID: string) {
+            return sync.run(`session.diagnostics:${sessionID}`, async () => {
+              setStore("session", "diagnostics", sessionID, await client.api.session.diagnostics({ sessionID }))
+            })
+          },
+          invalidate(sessionID: string) {
+            sync.invalidate(`session.diagnostics:${sessionID}`)
+          },
         },
         message: {
           list(sessionID: string) {

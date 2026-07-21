@@ -190,6 +190,22 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.get("session.diagnostics", "/api/session/:sessionID/diagnostics", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Session.CacheDiagnostics.pipe(Schema.optional) }),
+        error: [SessionNotFoundError, UnknownError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.diagnostics",
+            summary: "Get session cache diagnostics",
+            description:
+              "Retrieve normalized context occupancy and provider cache usage for the latest assistant step after the last completed compaction.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.delete("session.remove", "/api/session/:sessionID", {
         params: { sessionID: Session.ID },
         success: HttpApiSchema.NoContent,
@@ -385,7 +401,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           command: Schema.String,
         }),
         success: HttpApiSchema.NoContent,
-        error: SessionNotFoundError,
+        error: [InvalidRequestError, ServiceUnavailableError, SessionNotFoundError],
       })
         .middleware(sessionLocationMiddleware)
         .annotateMerge(

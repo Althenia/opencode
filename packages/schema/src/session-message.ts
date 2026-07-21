@@ -5,7 +5,7 @@ import { optional } from "./schema.js"
 import { ToolContent } from "./llm.js"
 import { Model } from "./model.js"
 import { Prompt } from "./prompt.js"
-import { DateTimeUtcFromMillis, PositiveInt, RelativePath, statics } from "./schema.js"
+import { DateTimeUtcFromMillis, NonNegativeInt, PositiveInt, RelativePath, statics } from "./schema.js"
 import { ascending } from "./identifier.js"
 import { Event } from "./event.js"
 import { Shell as ShellSchema } from "./shell.js"
@@ -16,6 +16,7 @@ import { Skill as SkillSchema } from "./skill.js"
 import { Money } from "./money.js"
 import { Snapshot } from "./snapshot.js"
 import { TokenUsage } from "./token-usage.js"
+import { SessionCacheDiagnostics } from "./session-cache-diagnostics.js"
 
 export const ID = Schema.String.check(Schema.isStartsWith("msg_")).pipe(
   Schema.brand("Session.Message.ID"),
@@ -198,6 +199,10 @@ export const Assistant = Schema.Struct({
   finish: FinishReason.pipe(optional),
   cost: Money.USD.pipe(optional),
   tokens: TokenUsage.Info.pipe(optional),
+  diagnostics: Schema.Struct({
+    contextLimit: NonNegativeInt.pipe(optional),
+    cacheMechanism: SessionCacheDiagnostics.Mechanism,
+  }).pipe(optional),
   error: SessionError.Error.pipe(optional),
   retry: AssistantRetry.pipe(optional),
   time: Schema.Struct({

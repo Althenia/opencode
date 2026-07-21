@@ -27,6 +27,7 @@ import { StepFailedError } from "../error"
 import { toSessionError } from "../to-session-error"
 import { SessionRunnerRetry } from "./retry"
 import { SessionUsage } from "../usage"
+import { SessionCacheDiagnostics } from "../cache-diagnostics"
 
 const layer = Layer.effect(
   Service,
@@ -225,6 +226,8 @@ const layer = Layer.effect(
               assistantMessageID: yield* publisher.startAssistant(),
               finish: settlement.finish,
               ...stepUsage(settlement),
+              contextLimit: resolved.model.route.defaults.limits?.context,
+              cacheMechanism: SessionCacheDiagnostics.mechanism(resolved.ref, settlement.tokens),
               ...end,
             }),
           )

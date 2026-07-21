@@ -2,7 +2,7 @@ import { Shell } from "@opencode-ai/core/shell"
 import { Location } from "@opencode-ai/core/location"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
-import { ShellNotFoundError } from "@opencode-ai/protocol/errors"
+import { InvalidRequestError, ServiceUnavailableError, ShellNotFoundError } from "@opencode-ai/protocol/errors"
 import { Api } from "../api"
 import { response } from "../location"
 
@@ -21,7 +21,18 @@ export const ShellHandler = HttpApiBuilder.group(Api, "server.shell", (handlers)
         Effect.fn(function* (ctx) {
           const shell = yield* Shell.Service
           const location = yield* Location.Service
-          return yield* response(shell.create({ ...ctx.payload, cwd: ctx.payload.cwd || location.directory }))
+          return yield* response(
+            shell
+              .prepare({ ...ctx.payload, cwd: ctx.payload.cwd || location.directory })
+              .pipe(
+                Effect.flatMap(shell.create),
+                Effect.catchTag(
+                  "ShellSandbox.Unavailable",
+                  (error) => new ServiceUnavailableError({ message: error.message, service: "shell-sandbox" }),
+                ),
+                Effect.catchTag("Shell.SpawnError", (error) => new InvalidRequestError({ message: error.message })),
+              ),
+          )
         }),
       )
       .handle(

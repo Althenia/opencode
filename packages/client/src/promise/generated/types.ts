@@ -35,6 +35,15 @@ export type FileDiffInfo = {
 
 export type SessionActive = { type: "running" }
 
+export type SessionCacheMechanism =
+  | "openai-prompt-cache"
+  | "openrouter-sticky-prefix"
+  | "anthropic-cache-control"
+  | "bedrock-cache-point"
+  | "gemini-implicit-prefix"
+  | "provider-reported"
+  | "none"
+
 export type PromptBase64 = string
 
 export type PromptFileSource = { type: "inline" } | { type: "uri"; uri: string }
@@ -697,24 +706,6 @@ export type SessionStepStarted = {
   data: { sessionID: string; assistantMessageID: string; agent: string; model: ModelRef; snapshot?: string }
 }
 
-export type SessionStepEnded = {
-  id: string
-  created: number
-  metadata?: { [x: string]: any }
-  type: "session.step.ended"
-  durable: { aggregateID: string; seq: number; version: 1 }
-  location?: LocationRef
-  data: {
-    sessionID: string
-    assistantMessageID: string
-    finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
-    cost: MoneyUSD
-    tokens: TokenUsageInfo
-    snapshot?: string
-    files?: Array<string>
-  }
-}
-
 export type SessionTextStarted = {
   id: string
   created: number
@@ -1211,6 +1202,34 @@ export type V2EventServerConnected = {
 
 export type SessionRevert = { messageID: string; partID?: string; snapshot?: string; files?: Array<FileDiffInfo> }
 
+export type SessionCacheDiagnostics = {
+  model: ModelRef
+  context: { total: number; limit?: number; remaining?: number; percent?: number }
+  tokens: { uncachedInput: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number }
+  cache: { eligible: number; hitRatio?: number; mechanism: SessionCacheMechanism }
+  estimatedCost: MoneyUSD
+}
+
+export type SessionStepEnded = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.step.ended"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    assistantMessageID: string
+    finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
+    cost: MoneyUSD
+    tokens: TokenUsageInfo
+    contextLimit?: number
+    cacheMechanism?: SessionCacheMechanism
+    snapshot?: string
+    files?: Array<string>
+  }
+}
+
 export type PromptFileAttachment = {
   data: PromptBase64
   mime: string
@@ -1276,6 +1295,8 @@ export type SessionStepFailed = {
     error: SessionStructuredError
     cost?: MoneyUSD
     tokens?: TokenUsageInfo
+    contextLimit?: number
+    cacheMechanism?: SessionCacheMechanism
     snapshot?: string
     files?: Array<string>
   }
@@ -1773,22 +1794,6 @@ export type ReferenceSource = ReferenceLocalSource | ReferenceGitSource
 
 export type PermissionV2Ruleset = Array<PermissionV2Rule>
 
-export type SessionInfo = {
-  id: string
-  parentID?: string
-  fork?: { sessionID: string; messageID?: string }
-  projectID: string
-  agent?: string
-  model?: ModelRef
-  cost: MoneyUSD
-  tokens: TokenUsageInfo
-  time: { created: number; updated: number; archived?: number }
-  title: string
-  location: LocationRef
-  subpath?: string
-  revert?: SessionRevert
-}
-
 export type SessionRevertStaged = {
   id: string
   created: number
@@ -2004,7 +2009,22 @@ export type AgentInfo = {
   permissions: PermissionV2Ruleset
 }
 
-export type SessionsResponse = { data: Array<SessionInfo>; cursor: { previous?: string | null; next?: string | null } }
+export type SessionInfo = {
+  id: string
+  parentID?: string
+  fork?: { sessionID: string; messageID?: string }
+  projectID: string
+  agent?: string
+  model?: ModelRef
+  permissionCeiling?: PermissionV2Ruleset
+  cost: MoneyUSD
+  tokens: TokenUsageInfo
+  time: { created: number; updated: number; archived?: number }
+  title: string
+  location: LocationRef
+  subpath?: string
+  revert?: SessionRevert
+}
 
 export type SessionPendingUser = {
   admittedSeq: number
@@ -2078,6 +2098,8 @@ export type FilePart = {
 
 export type FormFields1 = [FormField1, ...Array<FormField1>]
 
+export type SessionsResponse = { data: Array<SessionInfo>; cursor: { previous?: string | null; next?: string | null } }
+
 export type SessionPendingInfo = SessionPendingUser | SessionPendingSynthetic | SessionPendingCompaction
 
 export type SessionPendingMessage = SessionPendingUserMessage | SessionPendingSyntheticMessage
@@ -2094,6 +2116,7 @@ export type SessionMessageAssistant = {
   finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
   cost?: MoneyUSD
   tokens?: TokenUsageInfo
+  diagnostics?: { contextLimit?: number; cacheMechanism: SessionCacheMechanism }
   error?: SessionStructuredError
   retry?: SessionMessageAssistantRetry
 }
@@ -2397,6 +2420,14 @@ export type SessionNotFoundError = {
 export const isSessionNotFoundError = (value: unknown): value is SessionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionNotFoundError"
 
+export type UnknownError = {
+  readonly _tag: "UnknownError"
+  readonly message: string
+  readonly ref?: string | undefined
+}
+export const isUnknownError = (value: unknown): value is UnknownError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
+
 export type MessageNotFoundError = {
   readonly _tag: "MessageNotFoundError"
   readonly sessionID: string
@@ -2453,14 +2484,6 @@ export type SessionBusyError = {
 }
 export const isSessionBusyError = (value: unknown): value is SessionBusyError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionBusyError"
-
-export type UnknownError = {
-  readonly _tag: "UnknownError"
-  readonly message: string
-  readonly ref?: string | undefined
-}
-export const isUnknownError = (value: unknown): value is UnknownError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
 
 export type InstructionEntryValueTooLargeError = {
   readonly _tag: "InstructionEntryValueTooLargeError"
@@ -2717,6 +2740,10 @@ export type SessionActiveOutput = { data: { [x: string]: SessionActive } }["data
 export type SessionGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionGetOutput = { data: SessionInfo }["data"]
+
+export type SessionDiagnosticsInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionDiagnosticsOutput = { data?: SessionCacheDiagnostics | null }["data"]
 
 export type SessionRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 

@@ -9,6 +9,7 @@ import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
 import { Location } from "./location"
 import { SessionMessage } from "./session/message"
+import { SessionCacheDiagnostics } from "./session/cache-diagnostics"
 import { SessionPermissionCeiling } from "./session/permission-ceiling"
 import { Base64, FileAttachment, Prompt } from "@opencode-ai/schema/prompt"
 import { PromptInput } from "@opencode-ai/schema/prompt-input"
@@ -249,6 +250,9 @@ export interface Interface {
     sessionID: SessionSchema.ID
     prompt: string
   }) => Effect.Effect<string, NotFoundError | SessionGenerate.Error>
+  readonly diagnostics: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<Session.CacheDiagnostics | undefined, NotFoundError | MessageDecodeError>
   readonly command: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
@@ -426,6 +430,10 @@ const layer = Layer.effect(
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
         return session
+      }),
+      diagnostics: Effect.fn("V2Session.diagnostics")(function* (sessionID) {
+        const session = yield* result.get(sessionID)
+        return SessionCacheDiagnostics.fromMessages(yield* store.context(sessionID), session.revert?.messageID)
       }),
       remove: Effect.fn("V2Session.remove")(function* (sessionID) {
         yield* result.get(sessionID)

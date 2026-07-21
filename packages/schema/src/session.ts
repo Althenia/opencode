@@ -13,6 +13,7 @@ import { Money } from "./money.js"
 import { Permission } from "./permission.js"
 import { TokenUsage } from "./token-usage.js"
 import { Revert } from "./session-revert.js"
+import { SessionCacheDiagnostics } from "./session-cache-diagnostics.js"
 
 export const ID = SessionID
 export type ID = SessionID
@@ -20,6 +21,12 @@ export type ID = SessionID
 export const Event = SessionEvent
 
 export { Revert }
+
+export const CacheMechanism = SessionCacheDiagnostics.Mechanism
+export type CacheMechanism = SessionCacheDiagnostics.Mechanism
+
+export const CacheDiagnostics = SessionCacheDiagnostics.Info
+export type CacheDiagnostics = SessionCacheDiagnostics.Info
 
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({

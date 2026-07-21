@@ -3,7 +3,7 @@ import { Location } from "@opencode-ai/schema/location"
 import { NonNegativeInt } from "@opencode-ai/schema/schema"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
-import { ShellNotFoundError } from "../errors.js"
+import { InvalidRequestError, ServiceUnavailableError, ShellNotFoundError } from "../errors.js"
 import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 const TimeoutInput = Schema.Struct({
@@ -30,6 +30,7 @@ export const ShellGroup = HttpApiGroup.make("server.shell")
       query: LocationQuery,
       payload: Shell.CreateInput,
       success: Location.response(Shell.Info),
+      error: [InvalidRequestError, ServiceUnavailableError],
     })
       .annotateMerge(locationQueryOpenApi)
       .annotateMerge(

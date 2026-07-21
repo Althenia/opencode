@@ -74,6 +74,7 @@ export function createSessionRows(sessionID: Accessor<string>) {
       if (status !== "connected") return
       setRows(reconcile(reduce()))
       void data.session.pending.sync(id).catch(() => undefined)
+      void data.session.diagnostics.sync(id).catch(() => undefined)
       void data.session.message.sync(id).then(
         () => {
           if (sessionID() !== id) return

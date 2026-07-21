@@ -16,6 +16,8 @@ import type {
   SessionActiveOutput,
   SessionGetInput,
   SessionGetOutput,
+  SessionDiagnosticsInput,
+  SessionDiagnosticsOutput,
   SessionRemoveInput,
   SessionRemoveOutput,
   SessionForkInput,
@@ -476,6 +478,17 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      diagnostics: (input: SessionDiagnosticsInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionDiagnosticsOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/diagnostics`,
+            successStatus: 200,
+            declaredStatuses: [404, 500, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       remove: (input: SessionRemoveInput, requestOptions?: RequestOptions) =>
         request<SessionRemoveOutput>(
           {
@@ -627,7 +640,7 @@ export function make(options: ClientOptions) {
             path: `/api/session/${encodeURIComponent(input.sessionID)}/shell`,
             body: { id: input["id"], command: input["command"] },
             successStatus: 204,
-            declaredStatuses: [404, 400, 401],
+            declaredStatuses: [400, 503, 404, 401],
             empty: true,
           },
           requestOptions,
@@ -1523,7 +1536,7 @@ export function make(options: ClientOptions) {
               metadata: input["metadata"],
             },
             successStatus: 200,
-            declaredStatuses: [401, 400],
+            declaredStatuses: [400, 503, 401],
             empty: false,
           },
           requestOptions,

@@ -52,8 +52,8 @@ import { readLocalAttachment } from "./local-attachment"
 import { useData } from "../../context/data"
 import { useLocation } from "../../context/location"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
-import { contextUsage } from "../../util/session"
 import { abbreviateHome } from "../../runtime"
+import { formatCacheDiagnostics } from "../../util/cache-diagnostics"
 
 registerOpencodeSpinner()
 
@@ -306,17 +306,9 @@ export function Prompt(props: PromptProps) {
     if (!session) return
     const cost = data.session.cost(props.sessionID)
     const formattedCost = cost > 0 ? money.format(cost) : undefined
-    const context = contextUsage(
-      data.session.message.list(props.sessionID),
-      data.location.model.list(session.location),
-      session.revert?.messageID,
-    )
+    const diagnostics = data.session.diagnostics.get(props.sessionID)
     return {
-      context: context
-        ? context.percent === undefined
-          ? Locale.number(context.tokens)
-          : `${Locale.number(context.tokens)} (${context.percent}%)`
-        : undefined,
+      ...(diagnostics ? formatCacheDiagnostics(diagnostics) : { context: undefined, cache: undefined }),
       cost: formattedCost,
     }
   })
@@ -337,7 +329,7 @@ export function Prompt(props: PromptProps) {
   // When empty, the cluster falls back to the hotkey hints.
   const statusItems = createMemo(() => {
     const stats = usage()
-    return [stats?.context, stats?.cost].filter(Boolean)
+    return [stats?.context, stats?.cache, stats?.cost].filter(Boolean)
   })
 
   const [store, setStore] = createStore<{

@@ -2693,6 +2693,85 @@ test("re-registering an existing session is idempotent", async () => {
   }
 })
 
+test("loads and refreshes normalized session diagnostics", async () => {
+  const events = createEventStream()
+  let hitRatio = 0.5
+  let diagnosticRequests = 0
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/session/ses_test")
+      return json({
+        data: {
+          id: "ses_test",
+          projectID: "proj_test",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 0, updated: 0 },
+          title: "Test session",
+          location: { directory },
+        },
+      })
+    if (url.pathname === "/api/session/ses_test/diagnostics") {
+      diagnosticRequests++
+      return json({
+        data: {
+          model: { id: "model", providerID: "openai" },
+          context: { total: 1_030, limit: 2_000, remaining: 970, percent: 52 },
+          tokens: { uncachedInput: 100, output: 20, reasoning: 10, cacheRead: 900, cacheWrite: 0 },
+          cache: { eligible: 1_000, hitRatio, mechanism: "openai-prompt-cache" },
+          estimatedCost: 0,
+        },
+      })
+    }
+    return undefined
+  }, events)
+  let data!: ReturnType<typeof useData>
+
+  function Probe() {
+    data = useData()
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <ClientProvider api={createApi(calls.fetch)}>
+        <ProjectProvider>
+          <DataProvider>
+            <Probe />
+          </DataProvider>
+        </ProjectProvider>
+      </ClientProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    await data.session.sync("ses_test")
+    await data.session.diagnostics.sync("ses_test")
+    expect(data.session.diagnostics.get("ses_test")?.cache.hitRatio).toBe(0.5)
+
+    hitRatio = 0.9
+    emitEvent(events, {
+      id: "evt_diagnostics",
+      created: 1,
+      type: "session.step.ended",
+      durable: durable("ses_test", 1),
+      data: {
+        sessionID: "ses_test",
+        assistantMessageID: "msg_assistant",
+        finish: "stop",
+        cost: 0,
+        tokens: { input: 100, output: 20, reasoning: 10, cache: { read: 900, write: 0 } },
+        contextLimit: 2_000,
+        cacheMechanism: "openai-prompt-cache",
+      },
+    })
+
+    await wait(() => data.session.diagnostics.get("ses_test")?.cache.hitRatio === 0.9)
+    expect(diagnosticRequests).toBe(2)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("stops at the last non-repeating ancestor on a parent cycle", async () => {
   const { data, app } = await mountData({ x: "y", y: "x" })
   try {

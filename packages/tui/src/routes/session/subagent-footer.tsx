@@ -5,8 +5,8 @@ import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import { Locale } from "../../util/locale"
 import { useTerminalDimensions } from "@opentui/solid"
+import { formatCacheDiagnostics } from "../../util/cache-diagnostics"
 import { Keymap } from "../../context/keymap"
-import { contextUsage } from "../../util/session"
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -30,18 +30,10 @@ export function SubagentFooter() {
     if (!current) return
     const cost = current.cost
     const formattedCost = cost > 0 ? money.format(cost) : undefined
-    const context = contextUsage(
-      data.session.message.list(route.sessionID),
-      data.location.model.list(current.location),
-      current.revert?.messageID,
-    )
+    const diagnostics = data.session.diagnostics.get(route.sessionID)
 
     return {
-      context: context
-        ? context.percent === undefined
-          ? Locale.number(context.tokens)
-          : `${Locale.number(context.tokens)} (${context.percent}%)`
-        : undefined,
+      ...(diagnostics ? formatCacheDiagnostics(diagnostics) : { context: undefined, cache: undefined }),
       cost: formattedCost,
     }
   })
@@ -73,7 +65,7 @@ export function SubagentFooter() {
             <Show when={usage()}>
               {(item) => (
                 <text fg={themeV2.text.subdued} wrapMode="none">
-                  {[item().context, item().cost].filter(Boolean).join(" · ")}
+                  {[item().context, item().cache, item().cost].filter(Boolean).join(" · ")}
                 </text>
               )}
             </Show>

@@ -977,6 +977,46 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("reports normalized cache diagnostics without treating cache hits as free context", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      currentModel = Model.make({
+        id: "diagnostic-model",
+        provider: "openai",
+        route: OpenAIChat.route.with({ limits: { context: 2_000, output: 200 } }),
+      })
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.textStart({ id: "diagnostic-text" }),
+        LLMEvent.textDelta({ id: "diagnostic-text", text: "Done" }),
+        LLMEvent.textEnd({ id: "diagnostic-text" }),
+        LLMEvent.stepFinish({
+          index: 0,
+          reason: "stop",
+          usage: {
+            inputTokens: 1_000,
+            nonCachedInputTokens: 100,
+            cacheReadInputTokens: 900,
+            outputTokens: 30,
+            reasoningTokens: 10,
+          },
+        }),
+        LLMEvent.finish({ reason: "stop" }),
+      ]
+      yield* admit(session, "Measure cache")
+      yield* session.resume(sessionID)
+
+      const diagnostics = yield* session.diagnostics(sessionID)
+      expect(diagnostics).toMatchObject({
+        context: { total: 1_030, limit: 2_000, remaining: 970, percent: 52 },
+        tokens: { uncachedInput: 100, output: 20, reasoning: 10, cacheRead: 900, cacheWrite: 0 },
+        cache: { eligible: 1_000, hitRatio: 0.9, mechanism: "openai-prompt-cache" },
+      })
+      yield* replaySessionProjection(sessionID)
+      expect(yield* session.diagnostics(sessionID)).toEqual(diagnostics)
+    }),
+  )
+
   it.effect("starts a real runner step after default prompt recording", () =>
     Effect.gen(function* () {
       const session = yield* setup

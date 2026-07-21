@@ -14,6 +14,7 @@ import type {
   ProviderV2Info,
   ReferenceInfo,
   SessionInfo,
+  SessionDiagnosticsOutput,
   SessionMessageInfo,
   SessionPendingInfo,
   ShellInfo,
@@ -48,6 +49,11 @@ export interface Data {
     }
     sync(sessionID: string): Promise<void>
     invalidate(sessionID: string): void
+    readonly diagnostics: {
+      get(sessionID: string): SessionDiagnosticsOutput
+      sync(sessionID: string): Promise<void>
+      invalidate(sessionID: string): void
+    }
     readonly message: {
       list(sessionID: string): SessionMessageInfo[]
       get(sessionID: string, messageID: string): SessionMessageInfo | undefined
