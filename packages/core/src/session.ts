@@ -11,6 +11,7 @@ import { Location } from "./location"
 import { SessionMessage } from "./session/message"
 import { SessionCacheDiagnostics } from "./session/cache-diagnostics"
 import { SessionPermissionCeiling } from "./session/permission-ceiling"
+import { SessionAutonomy } from "./session/autonomy"
 import { Base64, FileAttachment, Prompt } from "@opencode-ai/schema/prompt"
 import { PromptInput } from "@opencode-ai/schema/prompt-input"
 import { EventV2 } from "./event"
@@ -111,6 +112,16 @@ type ForkInput = {
   sessionID: SessionSchema.ID
   messageID?: SessionMessage.ID
 }
+
+type AutonomyInput =
+  | { sessionID: SessionSchema.ID; mode: "normal" | "yolo" }
+  | {
+      sessionID: SessionSchema.ID
+      mode: "goal"
+      goal: string
+      maxIterations?: number
+      maxNoProgress?: number
+    }
 
 export class OperationUnavailableError extends Schema.TaggedErrorClass<OperationUnavailableError>()(
   "Session.OperationUnavailableError",
@@ -253,6 +264,10 @@ export interface Interface {
   readonly diagnostics: (
     sessionID: SessionSchema.ID,
   ) => Effect.Effect<Session.CacheDiagnostics | undefined, NotFoundError | MessageDecodeError>
+  readonly autonomy: {
+    readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionAutonomy.State, NotFoundError>
+    readonly set: (input: AutonomyInput) => Effect.Effect<SessionAutonomy.State, NotFoundError>
+  }
   readonly command: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
@@ -318,6 +333,7 @@ const layer = Layer.effect(
     const projects = yield* ProjectV2.Service
     const global = yield* Global.Service
     const execution = yield* SessionExecution.Service
+    const autonomy = yield* SessionAutonomy.Service
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const fs = yield* FSUtil.Service
@@ -435,6 +451,30 @@ const layer = Layer.effect(
         const session = yield* result.get(sessionID)
         return SessionCacheDiagnostics.fromMessages(yield* store.context(sessionID), session.revert?.messageID)
       }),
+      autonomy: {
+        get: Effect.fn("V2Session.autonomy.get")(function* (sessionID) {
+          yield* result.get(sessionID)
+          return yield* autonomy.get(sessionID).pipe(
+            Effect.catchTag("SessionAutonomy.NotFound", () => Effect.fail(new NotFoundError({ sessionID }))),
+          )
+        }),
+        set: Effect.fn("V2Session.autonomy.set")(function* (input) {
+          yield* result.get(input.sessionID)
+          return yield* (input.mode === "goal"
+            ? autonomy.setGoal({
+                sessionID: input.sessionID,
+                text: input.goal,
+                maxIterations: input.maxIterations,
+                maxNoProgress: input.maxNoProgress,
+              })
+            : autonomy.setMode({ sessionID: input.sessionID, mode: input.mode })
+          ).pipe(
+            Effect.catchTag("SessionAutonomy.NotFound", () =>
+              Effect.fail(new NotFoundError({ sessionID: input.sessionID })),
+            ),
+          )
+        }),
+      },
       remove: Effect.fn("V2Session.remove")(function* (sessionID) {
         yield* result.get(sessionID)
         yield* execution.interrupt(sessionID)
@@ -1059,6 +1099,7 @@ export const node = makeGlobalNode({
     EventV2.node,
     ProjectV2.node,
     SessionExecution.node,
+    SessionAutonomy.node,
     SessionStore.node,
     LocationServiceMap.node,
     SessionProjector.node,

@@ -134,6 +134,7 @@ export function createFetch(override?: FetchHandler, events?: ReturnType<typeof 
           generatedSlots: [],
         },
       })
+    if (/^\/api\/session\/[^/]+\/autonomy$/.test(url.pathname)) return json({ data: { mode: "normal" } })
     if (/^\/api\/session\/[^/]+\/form$/.test(url.pathname)) return json({ data: [] })
     if (
       ["/api/agent", "/api/model", "/api/provider", "/api/integration", "/api/command", "/api/skill"].includes(

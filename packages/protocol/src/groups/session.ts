@@ -111,6 +111,35 @@ const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
   }),
 )
 
+export const SessionAutonomyMode = Schema.Literals(["normal", "yolo", "goal"]).annotate({
+  identifier: "SessionAutonomyMode",
+})
+export const SessionAutonomyGoalStatus = Schema.Literals(["active", "completed", "stopped", "exhausted"]).annotate({
+  identifier: "SessionAutonomyGoalStatus",
+})
+export const SessionAutonomyGoal = Schema.Struct({
+  text: Schema.String,
+  status: SessionAutonomyGoalStatus,
+  iteration: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  maxIterations: PositiveInt,
+  noProgress: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  maxNoProgress: PositiveInt,
+  lastProgressDigest: Schema.String.pipe(Schema.optional),
+}).annotate({ identifier: "SessionAutonomyGoal" })
+export const SessionAutonomyState = Schema.Struct({
+  mode: SessionAutonomyMode,
+  goal: SessionAutonomyGoal.pipe(Schema.optional),
+}).annotate({ identifier: "SessionAutonomyState" })
+export const SessionAutonomySet = Schema.Union([
+  Schema.Struct({ mode: Schema.Literals(["normal", "yolo"]) }),
+  Schema.Struct({
+    mode: Schema.Literal("goal"),
+    goal: Schema.Trim.pipe(Schema.check(Schema.isNonEmpty())),
+    maxIterations: PositiveInt.pipe(Schema.optional),
+    maxNoProgress: PositiveInt.pipe(Schema.optional),
+  }),
+]).annotate({ identifier: "SessionAutonomySet" })
+
 const SessionsQueryCursor = SessionsCursor.annotate({
   description: "Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response.",
 })
@@ -202,6 +231,37 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             summary: "Get session cache diagnostics",
             description:
               "Retrieve normalized context occupancy and provider cache usage for the latest assistant step after the last completed compaction.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.autonomy.get", "/api/session/:sessionID/autonomy", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: SessionAutonomyState }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.autonomy.get",
+            summary: "Get session autonomy",
+            description: "Retrieve the durable Normal, YOLO, or Goal execution mode for a session.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.put("session.autonomy.set", "/api/session/:sessionID/autonomy", {
+        params: { sessionID: Session.ID },
+        payload: SessionAutonomySet,
+        success: Schema.Struct({ data: SessionAutonomyState }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.autonomy.set",
+            summary: "Set session autonomy",
+            description: "Switch a session to Normal or YOLO mode, or activate a bounded autonomous Goal.",
           }),
         ),
     )

@@ -37,4 +37,31 @@ const promiseRemove: Promise<void> = promiseClient.session.instructions.entry.re
   key: "review-notes",
 })
 
-void [effectList, effectPut, effectRemove, promiseList, promisePut, promiseRemove]
+const effectAutonomyGet: Effect.Effect<
+  { readonly mode: "normal" | "yolo" | "goal"; readonly goal?: { readonly text: string } },
+  unknown
+> = effectApi.session.autonomy.get({ sessionID })
+const effectAutonomySet: Effect.Effect<
+  { readonly mode: "normal" | "yolo" | "goal" },
+  unknown
+> = effectApi.session.autonomy.set({
+  sessionID,
+  payload: { mode: "goal", goal: "Finish the migration" },
+})
+const promiseAutonomyGet: Promise<{ readonly mode: "normal" | "yolo" | "goal" }> =
+  promiseClient.session.autonomy.get({ sessionID: "ses_test" })
+const promiseAutonomySet: Promise<{ readonly mode: "normal" | "yolo" | "goal" }> =
+  promiseClient.session.autonomy.set({ sessionID: "ses_test", payload: { mode: "yolo" } })
+
+void [
+  effectList,
+  effectPut,
+  effectRemove,
+  promiseList,
+  promisePut,
+  promiseRemove,
+  effectAutonomyGet,
+  effectAutonomySet,
+  promiseAutonomyGet,
+  promiseAutonomySet,
+]

@@ -140,6 +140,42 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.autonomy.get",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.autonomy.get(ctx.params.sessionID).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
+        "session.autonomy.set",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.autonomy
+              .set({ sessionID: ctx.params.sessionID, ...ctx.payload })
+              .pipe(
+                Effect.catchTag("Session.NotFoundError", (error) =>
+                  Effect.fail(
+                    new SessionNotFoundError({
+                      sessionID: error.sessionID,
+                      message: `Session not found: ${error.sessionID}`,
+                    }),
+                  ),
+                ),
+              ),
+          }
+        }),
+      )
+      .handle(
         "session.remove",
         Effect.fn(function* (ctx) {
           yield* session.remove(ctx.params.sessionID).pipe(

@@ -44,6 +44,10 @@ export type SessionCacheMechanism =
   | "provider-reported"
   | "none"
 
+export type SessionAutonomyMode = "normal" | "yolo" | "goal"
+
+export type SessionAutonomyGoalStatus = "active" | "completed" | "stopped" | "exhausted"
+
 export type PromptBase64 = string
 
 export type PromptFileSource = { type: "inline" } | { type: "uri"; uri: string }
@@ -1250,6 +1254,16 @@ export type SessionStepEnded = {
   }
 }
 
+export type SessionAutonomyGoal = {
+  text: string
+  status: SessionAutonomyGoalStatus
+  iteration: number
+  maxIterations: number
+  noProgress: number
+  maxNoProgress: number
+  lastProgressDigest?: string | undefined
+}
+
 export type PromptFileAttachment = {
   data: PromptBase64
   mime: string
@@ -1825,6 +1839,8 @@ export type SessionRevertStaged = {
   location?: LocationRef
   data: { sessionID: string; revert: SessionRevert }
 }
+
+export type SessionAutonomyState = { mode: SessionAutonomyMode; goal?: SessionAutonomyGoal | undefined }
 
 export type SessionPendingUserData = {
   text: string
@@ -2781,6 +2797,24 @@ export type SessionGetOutput = { data: SessionInfo }["data"]
 export type SessionDiagnosticsInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionDiagnosticsOutput = { data?: SessionCacheDiagnostics | null }["data"]
+
+export type SessionAutonomyGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionAutonomyGetOutput = { data: SessionAutonomyState }["data"]
+
+export type SessionAutonomySetInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly payload:
+    | { readonly mode: "normal" | "yolo" }
+    | {
+        readonly mode: "goal"
+        readonly goal: string
+        readonly maxIterations?: number | null
+        readonly maxNoProgress?: number | null
+      }
+}
+
+export type SessionAutonomySetOutput = { data: SessionAutonomyState }["data"]
 
 export type SessionRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 

@@ -34,6 +34,7 @@ import type {
   SessionMessageAssistantTool,
   SessionMessageUser,
   SessionInfo,
+  SessionAutonomyState,
 } from "@opencode-ai/client"
 import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
@@ -51,6 +52,7 @@ import { useEditorContext } from "../../context/editor"
 import { openEditor } from "../../editor"
 import { useDialog } from "../../ui/dialog"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
+import { DialogSessionGoal } from "../../component/dialog-session-goal"
 import { DialogMessage } from "./dialog-message"
 import { DialogFork } from "./dialog-fork"
 import { DialogTimeline } from "./dialog-timeline"
@@ -84,6 +86,7 @@ import { createSessionRows, messageBoundaryIDs, resolvePart, type PartRef, type 
 import { switchLabel } from "../../util/model"
 import { findMessageBoundary, messageNavigationSlack } from "./message-navigation"
 import { stringWidth } from "../../util/string-width"
+import { autonomyModeLabel } from "../../util/session-autonomy"
 
 addDefaultParsers(parsers.parsers)
 
@@ -193,6 +196,30 @@ export function Session() {
   const scrollAcceleration = createMemo(() => getScrollAcceleration(config))
   const toast = useToast()
   const client = useClient()
+  const [autonomy, setAutonomy] = createSignal<SessionAutonomyState>({ mode: "normal" })
+  const updateAutonomy = (input: { mode: "normal" | "yolo" } | { mode: "goal"; goal: string }) => {
+    void client.api.session.autonomy
+      .set({ sessionID: route.sessionID, payload: input })
+      .then((state) => {
+        setAutonomy(state)
+        toast.show({ message: `${autonomyModeLabel(state)} mode activated`, variant: "success", duration: 3000 })
+        dialog.clear()
+      })
+      .catch((error) =>
+        toast.show({ message: `Failed to change session mode: ${errorMessage(error)}`, variant: "error", duration: 5000 }),
+      )
+  }
+  createEffect(
+    on([() => route.sessionID, () => client.connection.status()], ([sessionID, status]) => {
+      if (status !== "connected") return
+      void client.api.session.autonomy
+        .get({ sessionID })
+        .then((state) => {
+          if (route.sessionID === sessionID) setAutonomy(state)
+        })
+        .catch(() => undefined)
+    }),
+  )
   const autoApproved = new Set<string>()
   createEffect(() => {
     if (local.permission.mode !== "auto") return
@@ -485,6 +512,27 @@ export function Session() {
           />
         ))
       },
+    },
+    {
+      title: `Set mode: Normal${autonomy().mode === "normal" ? " (active)" : ""}`,
+      id: "session.autonomy.normal",
+      group: "Session",
+      slash: { name: "normal" },
+      run: () => updateAutonomy({ mode: "normal" }),
+    },
+    {
+      title: `Set mode: YOLO${autonomy().mode === "yolo" ? " (active)" : ""}`,
+      id: "session.autonomy.yolo",
+      group: "Session",
+      slash: { name: "yolo" },
+      run: () => updateAutonomy({ mode: "yolo" }),
+    },
+    {
+      title: `Set autonomous goal${autonomy().mode === "goal" ? " (active)" : ""}`,
+      id: "session.autonomy.goal",
+      group: "Session",
+      slash: { name: "goal" },
+      run: () => DialogSessionGoal.show(dialog, route.sessionID, autonomy().goal?.text, setAutonomy),
     },
     {
       title: "Compact session",
@@ -1008,7 +1056,7 @@ export function Session() {
         <Show when={sidebarVisible()}>
           <Switch>
             <Match when={wide()}>
-              <Sidebar sessionID={route.sessionID} />
+              <Sidebar sessionID={route.sessionID} autonomy={autonomy()} />
             </Match>
             <Match when={!wide()}>
               <box
@@ -1020,7 +1068,7 @@ export function Session() {
                 alignItems="flex-end"
                 backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
               >
-                <Sidebar sessionID={route.sessionID} />
+                <Sidebar sessionID={route.sessionID} autonomy={autonomy()} />
               </box>
             </Match>
           </Switch>

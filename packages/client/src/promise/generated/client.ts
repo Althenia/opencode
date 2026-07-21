@@ -18,6 +18,10 @@ import type {
   SessionGetOutput,
   SessionDiagnosticsInput,
   SessionDiagnosticsOutput,
+  SessionAutonomyGetInput,
+  SessionAutonomyGetOutput,
+  SessionAutonomySetInput,
+  SessionAutonomySetOutput,
   SessionRemoveInput,
   SessionRemoveOutput,
   SessionForkInput,
@@ -491,6 +495,31 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      autonomy: {
+        get: (input: SessionAutonomyGetInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionAutonomyGetOutput }>(
+            {
+              method: "GET",
+              path: `/api/session/${encodeURIComponent(input.sessionID)}/autonomy`,
+              successStatus: 200,
+              declaredStatuses: [404, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        set: (input: SessionAutonomySetInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionAutonomySetOutput }>(
+            {
+              method: "PUT",
+              path: `/api/session/${encodeURIComponent(input.sessionID)}/autonomy`,
+              body: input["payload"],
+              successStatus: 200,
+              declaredStatuses: [404, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+      },
       remove: (input: SessionRemoveInput, requestOptions?: RequestOptions) =>
         request<SessionRemoveOutput>(
           {

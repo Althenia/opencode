@@ -25,6 +25,7 @@ import { MCPClient } from "@opencode-ai/core/mcp/client"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionAutonomy } from "@opencode-ai/core/session/autonomy"
 import { McpTool } from "@opencode-ai/core/tool/mcp"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
@@ -180,6 +181,9 @@ function resourceMcpLayer(
           }),
         ),
         Layer.succeed(Location.Service, Location.Service.of(location({ directory }))),
+        Layer.mock(SessionAutonomy.Service, {
+          get: () => Effect.succeed(SessionAutonomy.defaultState),
+        }),
         Layer.mock(EventV2.Service, {
           subscribe: () => Stream.never,
           publish: (definition, data) => {

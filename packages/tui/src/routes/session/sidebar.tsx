@@ -4,10 +4,12 @@ import { useTheme } from "../../context/theme"
 import { useConfig } from "../../config"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { PluginSlot } from "../../plugin/context"
+import type { SessionAutonomyState } from "@opencode-ai/client"
 
 import { getScrollAcceleration } from "../../util/scroll"
+import { autonomyModeLabel, autonomyProgressLabel } from "../../util/session-autonomy"
 
-export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
+export function Sidebar(props: { sessionID: string; autonomy: SessionAutonomyState; overlay?: boolean }) {
   const pluginRuntime = usePluginRuntime()
   const data = useData()
   const { themeV2 } = useTheme().contextual("elevated")
@@ -53,6 +55,21 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </Show>
               </box>
             </pluginRuntime.Slot>
+            <box paddingRight={1}>
+              <text fg={themeV2.text.subdued}>Mode</text>
+              <text fg={themeV2.text.default}>
+                <b>{autonomyModeLabel(props.autonomy)}</b>
+              </text>
+              <Show when={props.autonomy.mode === "goal" ? props.autonomy.goal : undefined}>
+                {(goal) => (
+                  <box>
+                    <text fg={themeV2.text.default}>{goal().text}</text>
+                    <text fg={themeV2.text.subdued}>{autonomyProgressLabel(props.autonomy)}</text>
+                    <text fg={themeV2.text.subdued}>Status: {goal().status}</text>
+                  </box>
+                )}
+              </Show>
+            </box>
             <PluginSlot name="sidebar.content" input={{ sessionID: props.sessionID }} />
           </box>
         </scrollbox>

@@ -4,6 +4,8 @@ import { Form } from "@opencode-ai/schema/form"
 import { Cache, Context, Deferred, Duration, Effect, Exit, Layer, Option, Schema } from "effect"
 import { makeLocationNode } from "./effect/app-node"
 import { EventV2 } from "./event"
+import { SessionAutonomy } from "./session/autonomy"
+import { SessionSchema } from "./session/schema"
 
 const RETENTION = Duration.minutes(10)
 
@@ -100,6 +102,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    const autonomy = yield* SessionAutonomy.Service
     const forms = yield* Cache.makeWith<ID, Entry>(
       () => Effect.die(new Error("Form cache must be used via set/getSuccess, never get")),
       {
@@ -152,6 +155,21 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const form = yield* create(input)
           const entry = yield* find(form.id).pipe(Effect.orDie)
+          const mode = Schema.is(SessionSchema.ID)(form.sessionID)
+            ? (
+                yield* autonomy
+                  .get(form.sessionID)
+                  .pipe(Effect.catchTag("SessionAutonomy.NotFound", () => Effect.succeed(SessionAutonomy.defaultState)))
+              ).mode
+            : "normal"
+          const answer = mode === "yolo" || mode === "goal" ? automaticAnswer(form) : undefined
+          if (answer) {
+            const next: TerminalState = { status: "answered", answer }
+            yield* events.publish(Event.Replied, { id: form.id, sessionID: form.sessionID, answer })
+            yield* Cache.set(forms, form.id, { ...entry, state: next })
+            yield* Deferred.succeed(entry.deferred, next)
+            return next
+          }
           return yield* restore(Deferred.await(entry.deferred)).pipe(
             Effect.onInterrupt(() => Effect.ignore(cancel(form.id))),
           )
@@ -221,7 +239,64 @@ export const layer = Layer.effect(
 
 export const locationLayer = layer
 
-export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node, SessionAutonomy.node] })
+
+function automaticAnswer(form: Info): Answer | undefined {
+  const answer: Record<string, Form.Value> = {}
+  for (const field of form.fields) {
+    if (field.type === "external") {
+      answer[field.key] = true
+      continue
+    }
+    if (!isActive(field, answer)) continue
+    const value = automaticValue(field)
+    if (value === undefined) {
+      if (field.required) return
+      continue
+    }
+    answer[field.key] = value
+  }
+  return validateAnswer(form, answer) ? undefined : answer
+}
+
+function automaticValue(field: InputField): Form.Value | undefined {
+  if (field.type === "boolean") return field.default ?? false
+  if (field.type === "number" || field.type === "integer") {
+    if (field.default !== undefined) return field.default
+    const bounded = field.minimum ?? (field.maximum !== undefined && field.maximum < 0 ? field.maximum : 0)
+    const value = field.type === "integer" ? Math.ceil(bounded) : bounded
+    return validateField(field, value) ? undefined : value
+  }
+  if (field.type === "multiselect") {
+    if (field.default !== undefined) return validateField(field, field.default) ? undefined : field.default
+    if (!field.required && (field.minItems ?? 0) === 0) return
+    const count = Math.max(field.minItems ?? 1, 1)
+    const value = field.options.slice(0, count).map((option) => option.value)
+    return validateField(field, value) ? undefined : value
+  }
+  if (field.default !== undefined) return validateField(field, field.default) ? undefined : field.default
+  const option = field.options?.[0]?.value
+  if (option !== undefined) return validateField(field, option) ? undefined : option
+  if (!field.required) return
+  const candidates = [
+    field.placeholder,
+    field.format === "email"
+      ? "user@example.com"
+      : field.format === "uri"
+        ? "https://example.com"
+        : field.format === "date"
+          ? "1970-01-01"
+          : field.format === "date-time"
+            ? "1970-01-01T00:00:00.000Z"
+            : "Continue",
+  ].filter((value): value is string => value !== undefined)
+  for (const candidate of candidates) {
+    const minimum = field.minLength ?? 0
+    const maximum = field.maxLength ?? Number.MAX_SAFE_INTEGER
+    const value = candidate.padEnd(minimum, "x").slice(0, maximum)
+    if (!validateField(field, value)) return value
+  }
+}
 
 function validateAnswer(form: Info, answer: Answer) {
   const fields = new Map(form.fields.map((field) => [field.key, field] as const))

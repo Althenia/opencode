@@ -5,9 +5,15 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Form } from "@opencode-ai/core/form"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
+import { SessionAutonomy } from "@opencode-ai/core/session/autonomy"
+import { Database } from "@opencode-ai/core/database/database"
+import { ProjectV2 } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { testEffect } from "./lib/effect"
 
-const forms = AppNodeBuilder.build(LayerNode.group([EventV2.node, Form.node]))
+const forms = AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionAutonomy.node, Form.node]))
 const it = testEffect(forms)
 
 const formID = Form.ID.create("frm_test")
@@ -19,6 +25,68 @@ const input = {
 } satisfies Form.CreateInput
 
 describe("Form", () => {
+  it.effect("auto answers deterministic forms in yolo mode", () =>
+    Effect.gen(function* () {
+      const service = yield* Form.Service
+      const autonomy = yield* SessionAutonomy.Service
+      const { db } = yield* Database.Service
+      const directory = AbsolutePath.make("/tmp/opencode-form-autonomy")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: ProjectV2.ID.global, worktree: directory, sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: input.sessionID,
+          project_id: ProjectV2.ID.global,
+          slug: "form-autonomy",
+          directory,
+          path: "",
+          title: "Form autonomy",
+          version: "test",
+        })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* autonomy.setMode({ sessionID: input.sessionID, mode: "yolo" })
+
+      const result = yield* service.ask({
+        sessionID: input.sessionID,
+        title: "Release settings",
+        fields: [
+          {
+            key: "branch",
+            type: "string",
+            required: true,
+            options: [{ value: "main", label: "Main" }],
+          },
+          { key: "attempts", type: "integer", required: true, minimum: 1 },
+          { key: "confirm", type: "boolean", required: true, default: true },
+          {
+            key: "features",
+            type: "multiselect",
+            required: true,
+            minItems: 1,
+            options: [
+              { value: "tests", label: "Tests" },
+              { value: "docs", label: "Docs" },
+            ],
+          },
+          { key: "setup", type: "external", url: "https://example.com/setup" },
+        ],
+      })
+
+      expect(result).toEqual({
+        status: "answered",
+        answer: { branch: "main", attempts: 1, confirm: true, features: ["tests"], setup: true },
+      })
+      expect(yield* service.list({ sessionID: input.sessionID })).toEqual([])
+    }),
+  )
+
   it.effect("returns a terminal cancelled state from ask", () =>
     Effect.gen(function* () {
       const service = yield* Form.Service
