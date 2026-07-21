@@ -474,7 +474,10 @@ test("stale dead registration is replaced after binding the selected port", asyn
 test("a failed service stays registered and owns the selected port until stopped", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-service-failed-"))
   const database = path.join(root, "database")
+  const port = await availablePort()
   await fs.mkdir(database)
+  await fs.mkdir(path.join(root, "config", "opencode"), { recursive: true })
+  await fs.writeFile(path.join(root, "config", "opencode", "service-local.json"), JSON.stringify({ port }))
   const env = {
     ...process.env,
     HOME: root,
@@ -491,6 +494,7 @@ test("a failed service stays registered and owns the selected port until stopped
 
   try {
     const info = await waitForInfo(registration)
+    expect(new URL(info.url).port).toBe(String(port))
     await waitForFailed(info)
     expect(owner.exitCode).toBe(null)
 

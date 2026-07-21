@@ -35,6 +35,35 @@ describe("CLI frontend import boundaries", () => {
     expect(mini).not.toContain("packages/tui/src/runtime.tsx")
   })
 
+  test("keeps the standalone TUI artifact free of non-TUI and desktop entrypoints", async () => {
+    const graph = await bundleInputs("packages/cli/src/tui.ts")
+
+    expect(graph).toContain("packages/cli/src/commands/handlers/tui.ts")
+    expect(graph.some((file) => file.startsWith("packages/tui/src/"))).toBe(true)
+    expect(graph.some((file) => file.startsWith("packages/server/src/"))).toBe(true)
+    expect(graph).not.toContain("packages/cli/src/commands/commands.ts")
+    expect(
+      graph.filter(
+        (file) =>
+          file.startsWith("packages/desktop/") ||
+          file.startsWith("packages/app/") ||
+          file.startsWith("packages/console/") ||
+          file.startsWith("packages/www/") ||
+          file.startsWith("packages/storybook/"),
+      ),
+    ).toEqual([])
+    expect(
+      graph.filter(
+        (file) =>
+          file.startsWith("packages/cli/src/commands/handlers/") &&
+          file !== "packages/cli/src/commands/handlers/tui.ts" &&
+          file !== "packages/cli/src/commands/handlers/tui-serve.ts" &&
+          file !== "packages/cli/src/commands/handlers/tui-shared.ts" &&
+          file !== "packages/cli/src/commands/handlers/serve-shared.ts",
+      ),
+    ).toEqual([])
+  })
+
   test("keeps TUI Mini independent from Core, Server, and CLI", async () => {
     const glob = new Bun.Glob("**/*.{ts,tsx}")
     const imports: string[] = []

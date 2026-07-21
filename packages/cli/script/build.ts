@@ -10,6 +10,9 @@ import { modelsData } from "./generate"
 
 const dir = path.resolve(import.meta.dirname, "..")
 const binary = "opencode2"
+const tuiOnly = process.argv.includes("--tui-only")
+const entrypoint = tuiOnly ? "./src/tui.ts" : "./src/index.ts"
+const artifact = tuiOnly ? "tui" : "cli"
 const outdir = path.resolve(
   dir,
   process.argv.find((arg) => arg.startsWith("--outdir="))?.slice("--outdir=".length) ?? "dist",
@@ -64,10 +67,10 @@ for (const item of targets) {
   ]
     .filter(Boolean)
     .join("-")
-  const name = target.replace(binary, "cli")
+  const name = target.replace(binary, artifact)
   console.log(`building ${name}`)
   const result = await Bun.build({
-    entrypoints: ["./src/index.ts"],
+    entrypoints: [entrypoint],
     tsconfig: "./tsconfig.json",
     plugins: [plugin],
     external: ["node-gyp"],

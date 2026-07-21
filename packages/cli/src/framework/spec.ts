@@ -4,6 +4,7 @@ type Options<Config extends Command.Command.Config, Commands extends ReadonlyArr
   readonly description?: string
   readonly params?: Config
   readonly commands?: Commands
+  readonly hidden?: boolean
 }
 
 export interface Node<
@@ -25,7 +26,8 @@ export function make<
   const Commands extends ReadonlyArray<Any> = [],
 >(name: Name, options: Options<Config, Commands> = {}) {
   const command = Command.make(name, options.params ?? ({} as Config))
-  const spec = options.description ? command.pipe(Command.withDescription(options.description)) : command
+  const described = options.description ? command.pipe(Command.withDescription(options.description)) : command
+  const spec = options.hidden ? described.pipe(Command.withHidden) : described
   return {
     name,
     spec,
