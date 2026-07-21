@@ -7,9 +7,10 @@ import { Script } from "@opencode-ai/script"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 import pkg from "../package.json"
 import { modelsData } from "./generate"
+import { BUN_BINARY } from "../src/binary"
 
 const dir = path.resolve(import.meta.dirname, "..")
-const binary = "opencode2"
+const binary = BUN_BINARY
 const tuiOnly = process.argv.includes("--tui-only")
 const entrypoint = tuiOnly ? "./src/tui.ts" : "./src/index.ts"
 const artifact = tuiOnly ? "tui" : "cli"

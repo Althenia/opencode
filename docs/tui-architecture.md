@@ -11,7 +11,7 @@ bun run build:tui
 bun run smoke:tui
 ```
 
-The build writes `dist/tui/tui-<platform>-<arch>/bin/opencode2`. The public command exposes only TUI arguments. A hidden `serve` command remains in the same binary because managed and `--standalone` modes start the V2 API server by executing the current binary with `serve --stdio --port 0`.
+The build writes `dist/tui/tui-<platform>-<arch>/bin/opencode`. The public command exposes only TUI arguments. A hidden `serve` command remains in the same binary because managed and `--standalone` modes start the V2 API server by executing the current binary with `serve --stdio --port 0`.
 
 `packages/cli/test/import-boundaries.test.ts` verifies that this entrypoint includes only the default TUI and hidden server handlers and does not include inputs from:
 

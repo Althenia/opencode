@@ -76,6 +76,100 @@ test("formats navigation keys as arrows", async () => {
   }
 })
 
+test("leader bindings dispatch from real terminal input", async () => {
+  const calls: string[] = []
+
+  function Harness() {
+    Keymap.createLayer(() => ({
+      commands: [{ id: "model.list", run: () => void calls.push("model") }],
+    }))
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <ConfigProvider config={createTuiResolvedConfig()}>
+      <Keymap.Provider>
+        <Harness />
+      </Keymap.Provider>
+    </ConfigProvider>
+  ), { kittyKeyboard: true })
+  app.renderer.start()
+  try {
+    app.mockInput.pressKey("x", { ctrl: true })
+    app.mockInput.pressKey("m")
+    await Bun.sleep(10)
+    expect(calls).toEqual(["model"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("custom leader bindings dispatch from real terminal input", async () => {
+  const calls: string[] = []
+
+  function Harness() {
+    Keymap.createLayer(() => ({
+      commands: [{ id: "model.list", run: () => void calls.push("model") }],
+    }))
+    return <box />
+  }
+
+  const app = await testRender(
+    () => (
+      <ConfigProvider config={createTuiResolvedConfig({ keybinds: { leader: "ctrl+o" } })}>
+        <Keymap.Provider>
+          <Harness />
+        </Keymap.Provider>
+      </ConfigProvider>
+    ),
+    { kittyKeyboard: true },
+  )
+  app.renderer.start()
+  try {
+    app.mockInput.pressKey("o", { ctrl: true })
+    app.mockInput.pressKey("m")
+    await Bun.sleep(10)
+    expect(calls).toEqual(["model"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("custom direct command binding replaces the default leader binding", async () => {
+  const calls: string[] = []
+
+  function Harness() {
+    Keymap.createLayer(() => ({
+      commands: [{ id: "model.list", run: () => void calls.push("model") }],
+    }))
+    return <box />
+  }
+
+  const app = await testRender(
+    () => (
+      <ConfigProvider config={createTuiResolvedConfig({ keybinds: { model_list: "ctrl+k" } })}>
+        <Keymap.Provider>
+          <Harness />
+        </Keymap.Provider>
+      </ConfigProvider>
+    ),
+    { kittyKeyboard: true },
+  )
+  app.renderer.start()
+  try {
+    app.mockInput.pressKey("x", { ctrl: true })
+    app.mockInput.pressKey("m")
+    await Bun.sleep(10)
+    expect(calls).toEqual([])
+
+    app.mockInput.pressKey("k", { ctrl: true })
+    await Bun.sleep(10)
+    expect(calls).toEqual(["model"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("global commands stay reachable when the mode changes", async () => {
   const calls: string[] = []
   let exercise = () => {}

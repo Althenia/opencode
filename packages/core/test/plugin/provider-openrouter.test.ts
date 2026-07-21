@@ -1,4 +1,7 @@
 import { AISDK } from "@opencode-ai/core/aisdk"
+import { Credential } from "@opencode-ai/core/credential"
+import { Integration } from "@opencode-ai/core/integration"
+import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
@@ -73,6 +76,70 @@ describe("OpenRouterPlugin", () => {
         options: { name: "custom" },
       })
       expect(result.sdk).toBeDefined()
+    }),
+  )
+
+  it.effect("sends a stored API key on the actual OpenRouter request", () =>
+    Effect.gen(function* () {
+      const aisdk = yield* AISDK.Service
+      const integrations = yield* Integration.Service
+      const integrationID = Integration.ID.make("openrouter")
+      yield* integrations.transform((editor) =>
+        editor.method.update({ integrationID, method: { type: "key", label: "API key" } }),
+      )
+      yield* integrations.connection.key({ integrationID, key: "stored-openrouter-key" })
+      const connection = yield* integrations.connection.active(integrationID)
+      if (!connection) throw new Error("Stored OpenRouter connection was not active")
+      const credential = yield* integrations.connection.resolve(connection)
+      expect(credential).toEqual(Credential.Key.make({ type: "key", key: "stored-openrouter-key" }))
+
+      let authorization: string | null | undefined
+      const request = Object.assign(
+        async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          authorization = new Headers(init?.headers).get("authorization")
+          return Response.json({
+            id: "generation-1",
+            object: "chat.completion",
+            created: 0,
+            model: "openai/gpt-4o-mini",
+            choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          })
+        },
+        { preconnect: fetch.preconnect },
+      )
+      yield* aisdk.hook.sdk((event) => {
+        if (event.package === "@openrouter/ai-sdk-provider") event.options.fetch = request
+      })
+      yield* addPlugin()
+
+      let runtime: ModelV2.Info | undefined
+      yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...ModelV2.Info.empty(ProviderV2.ID.openrouter, ModelV2.ID.make("openai/gpt-4o-mini")),
+          modelID: ModelV2.ID.make("openai/gpt-4o-mini"),
+          package: ProviderV2.aisdk("@openrouter/ai-sdk-provider"),
+          capabilities: { tools: true, input: ["text"], output: ["text"] },
+          limit: { context: 128_000, output: 16_384 },
+        }),
+        credential,
+        {
+          loadAISDK: (model) =>
+            Effect.gen(function* () {
+              runtime = model
+              return yield* aisdk.model(model)
+            }),
+        },
+      )
+      if (!runtime) throw new Error("OpenRouter runtime model was not resolved")
+      const language = yield* aisdk.language(runtime)
+      yield* Effect.tryPromise(() =>
+        language.doGenerate({
+          prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+        }),
+      )
+
+      expect(authorization).toBe("Bearer stored-openrouter-key")
     }),
   )
 

@@ -12,6 +12,7 @@ import { modelsData } from "./generate"
 import { collectNodeAssets, copyNodeAssets, hashNodeAssets, seaAssetMap } from "./node-assets"
 import { mainConfig } from "../vite.node.config"
 import { nodeExecArgv, nodeTarget, type NodeTarget } from "../src/node/target"
+import { NODE_BINARY, platformBinary } from "../src/binary"
 
 const NODE_VERSION = "26.4.0"
 const dir = path.resolve(import.meta.dirname, "..")
@@ -74,7 +75,7 @@ for (const target of targets) {
   if (bundleOnly) continue
 
   const name = `cli-node-${targetName(target)}`
-  const binary = target.platform === "win32" ? "opencode2-node.exe" : "opencode2-node"
+  const binary = platformBinary(NODE_BINARY, target.platform)
   const output = path.join(outdir, name, "bin", binary)
   if (!builder) throw new Error("Node SEA builder is unavailable")
   await mkdir(path.dirname(output), { recursive: true })

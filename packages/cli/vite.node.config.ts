@@ -4,6 +4,7 @@ import { createRequire } from "node:module"
 import { defineConfig, type Plugin, type UserConfig } from "vite"
 import solid from "vite-plugin-solid"
 import { nodeExecArgv, nodeTarget, type NodeTarget, photonWasmAsset } from "./src/node/target"
+import { NODE_BINARY } from "./src/binary"
 
 const dir = import.meta.dirname
 
@@ -190,7 +191,7 @@ export function mainConfig(input: NodeBuildInput): UserConfig {
     esbuild: { jsx: "automatic" },
     define: {
       OPENCODE_VERSION: JSON.stringify(input.version),
-      OPENCODE_CLI_NAME: JSON.stringify("opencode2-node"),
+      OPENCODE_CLI_NAME: JSON.stringify(NODE_BINARY),
       OPENCODE_MODELS_DEV: input.models,
       OPENCODE_CHANNEL: JSON.stringify(input.channel),
       OPENCODE_LIBC: input.target.platform === "linux" ? JSON.stringify("glibc") : "undefined",

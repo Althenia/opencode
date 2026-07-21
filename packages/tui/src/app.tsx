@@ -85,6 +85,7 @@ import { DialogVariant } from "./component/dialog-variant"
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./terminal-win32"
 import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
+import { writeHeapSnapshot } from "node:v8"
 
 const themePerformance = DevTools.register({ id: "theme-performance", title: "Theme performance" })
 
@@ -130,6 +131,7 @@ const appBindingCommands = [
   "diff.open",
   "app.debug",
   "app.console",
+  "app.heap_snapshot",
   "terminal.suspend",
   "terminal.title.toggle",
   "app.toggle.animations",
@@ -876,6 +878,20 @@ function App(props: { pair?: DialogPairCredentials; started: number }) {
         category: "System",
         run: () => {
           renderer.console.toggle()
+          dialog.clear()
+        },
+      },
+      {
+        name: "app.heap_snapshot",
+        title: "Write TUI heap snapshot",
+        category: "System",
+        run: () => {
+          try {
+            const file = writeHeapSnapshot()
+            toast.show({ variant: "info", message: `TUI heap snapshot written to ${file}`, duration: 5000 })
+          } catch (error) {
+            toast.error(error)
+          }
           dialog.clear()
         },
       },

@@ -21,8 +21,8 @@ the catalog entries shown in the picker rather than guessing a provider or model
 Select a model for one non-interactive run with `--model` or `-m`:
 
 ```bash
-opencode2 run --model openai/gpt-5.2 "Explain this repository"
-opencode2 run -m openai/gpt-5.2#high "Review the current changes"
+opencode run --model openai/gpt-5.2 "Explain this repository"
+opencode run -m openai/gpt-5.2#high "Review the current changes"
 ```
 
 Agents and commands can also select their own model. See [Agents](/agents) and [Commands](/commands).
@@ -205,7 +205,7 @@ Root, agent, and command `model` fields accept both forms. Use the IDs shown by 
 
 - The selector object uses `model`, while a provider catalog entry uses `modelID` for the upstream API identifier.
 - The root `model` currently sets the default provider and model only. Although its selection shape accepts a variant,
-  the V2 catalog default does not retain it; select a variant in the TUI, with `opencode2 run`, or on an agent or command.
+  the V2 catalog default does not retain it; select a variant in the TUI, with `opencode run`, or on an agent or command.
 - Model options are provider-specific. A setting accepted by one provider package may be ignored or rejected by another.
 - Catalog data, credentials, and config are location-scoped. A model available in one project may be unavailable in
   another.

@@ -10,6 +10,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { parse, type ParseError } from "jsonc-parser"
 import path from "node:path"
 import semver from "semver"
+import { NODE_BINARY } from "../binary"
 
 declare const OPENCODE_CLI_NAME: string | undefined
 
@@ -18,7 +19,7 @@ export type Action = "none" | "upgrade"
 type Method = "npm" | "pnpm" | "bun" | "yarn"
 
 const packageName =
-  typeof OPENCODE_CLI_NAME === "string" && OPENCODE_CLI_NAME === "opencode2-node"
+  typeof OPENCODE_CLI_NAME === "string" && OPENCODE_CLI_NAME === NODE_BINARY
     ? OPENCODE_CLI_NAME
     : "@opencode-ai/cli"
 

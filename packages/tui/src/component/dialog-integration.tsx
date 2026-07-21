@@ -30,7 +30,7 @@ const INTEGRATION_PRIORITY: Record<string, number> = {
 type ConnectMethod = Exclude<IntegrationInfo["methods"][number], { type: "env" }>
 type IntegrationAttempt = IntegrationOauthConnectOutput["data"]
 type CommandAttempt = IntegrationCommandConnectOutput["data"]
-type OnIntegrationConnected = (providerID?: string) => void
+export type OnIntegrationConnected = (providerID?: string) => void
 
 export function integrationOptions(list: IntegrationInfo[]) {
   return list.toSorted(
@@ -352,7 +352,7 @@ function KeyMethod(props: {
   )
 }
 
-async function beginOAuth(
+export async function beginOAuth(
   integration: IntegrationInfo,
   method: IntegrationOAuthMethod,
   dialog: ReturnType<typeof useDialog>,

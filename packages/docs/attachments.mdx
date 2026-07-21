@@ -48,10 +48,10 @@ total; the server also applies the per-attachment limit described below.
 
 ### CLI
 
-Pass `--file` or `-f` to `opencode2 run`. Repeat the flag for multiple files:
+Pass `--file` or `-f` to `opencode run`. Repeat the flag for multiple files:
 
 ```bash
-opencode2 run -f src/server.ts -f screenshot.png "Explain the failure"
+opencode run -f src/server.ts -f screenshot.png "Explain the failure"
 ```
 
 The run command accepts at most 100 file flags and reads at most 10 MiB per
@@ -64,7 +64,7 @@ The V2 prompt and command payloads accept a `files` array. Each item requires a
 `uri` and can include `name` and `description`:
 
 ```bash
-opencode2 api post /api/session/ses_example/prompt --data '{
+opencode api post /api/session/ses_example/prompt --data '{
   "text": "Review this file",
   "files": [
     {

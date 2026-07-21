@@ -3,6 +3,7 @@ import { $ } from "bun"
 import pkg from "../package.json"
 import { Script } from "@opencode-ai/script"
 import { fileURLToPath } from "url"
+import { BUN_BINARY, NODE_BINARY } from "../src/binary"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
@@ -72,12 +73,12 @@ async function publishDistribution(input: { root: string; name: string; binary: 
 await publishDistribution({
   root: "./dist",
   name: pkg.name,
-  binary: "opencode2",
+  binary: BUN_BINARY,
   packagePrefix: "@opencode-ai/cli-",
 })
 await publishDistribution({
   root: "./dist/node",
   name: "opencode-node",
-  binary: "opencode2-node",
+  binary: NODE_BINARY,
   packagePrefix: "@opencode-ai/cli-node-",
 })

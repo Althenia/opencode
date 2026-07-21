@@ -7,25 +7,44 @@ import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useTheme } from "../context/theme"
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import type { McpServer } from "@opencode-ai/client"
+import type { IntegrationInfo, IntegrationOAuthMethod, McpServer } from "@opencode-ai/client"
 import { useClipboard } from "../context/clipboard"
 import { useToast } from "../ui/toast"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { useConfig } from "../config"
 import { getScrollAcceleration } from "../util/scroll"
+import { beginOAuth } from "./dialog-integration"
 
 function statusError(status: McpServer["status"]) {
   if (status.status === "failed" || status.status === "needs_client_registration") return status.error
   return undefined
 }
 
-function Status(props: { enabled: boolean; loading: boolean }) {
+function Status(props: { status: McpServer["status"]["status"]; loading: boolean }) {
   const { themeV2 } = useTheme().contextual("elevated")
   if (props.loading) return <span style={{ fg: themeV2.text.subdued }}>⋯ Loading</span>
-  if (props.enabled) {
+  if (props.status === "connected") {
     return <span style={{ fg: themeV2.text.feedback.success.default, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
   }
+  if (props.status === "needs_auth") {
+    return <span style={{ fg: themeV2.text.feedback.warning.default, attributes: TextAttributes.BOLD }}>↗ Authorize</span>
+  }
   return <span style={{ fg: themeV2.text.subdued }}>○ Disabled</span>
+}
+
+export function mcpDialogAction(status: McpServer["status"]["status"]) {
+  if (status === "pending") return "none" as const
+  if (status === "connected") return "disconnect" as const
+  if (status === "needs_auth") return "authorize" as const
+  return "connect" as const
+}
+
+export function mcpOAuthTarget(server: McpServer, integrations: readonly IntegrationInfo[]) {
+  if (!server.integrationID) return undefined
+  const integration = integrations.find((entry) => entry.id === server.integrationID)
+  if (!integration) return undefined
+  const method = integration.methods.find((entry): entry is IntegrationOAuthMethod => entry.type === "oauth")
+  return method ? { integration, method } : undefined
 }
 
 export function DialogMcp() {
@@ -57,32 +76,58 @@ export function DialogMcp() {
       value: server.name,
       title: server.name,
       description: server.status.status,
-      footer: <Status enabled={server.status.status === "connected"} loading={loadingMcp === server.name} />,
+      footer: <Status status={server.status.status} loading={loadingMcp === server.name} />,
     }))
   })
 
+  const focusedServer = createMemo(() => servers().find((entry) => entry.name === focused()))
   const focusedError = createMemo(() => {
-    const name = focused()
-    const server = servers().find((entry) => entry.name === name)
+    const server = focusedServer()
     return server ? statusError(server.status) : undefined
   })
 
   const open = (name: string | undefined) => {
     const server = servers().find((entry) => entry.name === name)
-    if (!server || !statusError(server.status)) return
+    if (!server) return
+    if (server.status.status === "needs_auth") {
+      authorize(server)
+      return
+    }
+    if (!statusError(server.status)) return
     setDetail(server)
   }
 
-  // Connected servers disconnect; everything else (disabled, failed, needs_auth) retries a
-  // connection. The mcp.status.changed event refreshes the list, so no manual sync is needed.
+  function authorize(server: McpServer) {
+    const target = mcpOAuthTarget(server, data.location.integration.list() ?? [])
+    if (!target) {
+      toast.show({
+        variant: "error",
+        message: `MCP server ${server.name} requires OAuth, but its authorization method is unavailable`,
+      })
+      return
+    }
+    void beginOAuth(target.integration, target.method, dialog, () => {
+      data.location.mcp.server.invalidate()
+      void data.location.mcp.server.sync().finally(() => dialog.clear())
+    }).catch(toast.error)
+  }
+
+  // Authentication-gated servers must enter their registered OAuth flow; retrying the
+  // unauthenticated MCP transport would only return needs_auth again.
   const toggle = (name: string) => {
     if (loading() !== null) return
     const server = servers().find((entry) => entry.name === name)
-    if (!server || server.status.status === "pending") return
+    if (!server) return
+    const action = mcpDialogAction(server.status.status)
+    if (action === "none") return
+    if (action === "authorize") {
+      authorize(server)
+      return
+    }
     setLoading(name)
     const current = data.location.default()
     const input = { server: name, location: { directory: current.directory, workspace: current.workspaceID } }
-    const call = server.status.status === "connected" ? client.api.mcp.disconnect(input) : client.api.mcp.connect(input)
+    const call = action === "disconnect" ? client.api.mcp.disconnect(input) : client.api.mcp.connect(input)
     void call.catch(toast.error).finally(() => setLoading(null))
   }
 
@@ -109,8 +154,15 @@ export function DialogMcp() {
               },
             ]}
             footer={
-              <Show when={focusedError()}>
-                <text fg={themeV2.text.subdued}>enter to view error</text>
+              <Show
+                when={focusedServer()?.status.status === "needs_auth"}
+                fallback={
+                  <Show when={focusedError()}>
+                    <text fg={themeV2.text.subdued}>enter to view error</text>
+                  </Show>
+                }
+              >
+                <text fg={themeV2.text.feedback.warning.default}>enter or space to authorize in browser</text>
               </Show>
             }
           />

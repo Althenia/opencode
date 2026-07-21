@@ -145,7 +145,7 @@ Select the MCP server under **Services**, then complete the browser authorizatio
 You can also authenticate from the command line:
 
 ```bash
-opencode2 mcp auth sentry
+opencode mcp auth sentry
 ```
 
 The CLI command prints the authorization URL and waits for the redirect to OpenCode's loopback callback server.
@@ -184,7 +184,7 @@ If the provider issued client credentials, configure them using V2's snake_case 
 Remove stored credentials with:
 
 ```bash
-opencode2 mcp logout sentry
+opencode mcp logout sentry
 ```
 
 ## Timeouts
@@ -261,20 +261,20 @@ V2 provides these MCP management commands:
 
 ```bash
 # Add a local server to the project config
-opencode2 mcp add everything --env LOG_LEVEL=info -- npx -y @modelcontextprotocol/server-everything
+opencode mcp add everything --env LOG_LEVEL=info -- npx -y @modelcontextprotocol/server-everything
 
 # Add a remote server to the project config
-opencode2 mcp add context7 --url https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY={env:CONTEXT7_API_KEY}'
+opencode mcp add context7 --url https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY={env:CONTEXT7_API_KEY}'
 
 # Add to the global config instead
-opencode2 mcp add context7 --global --url https://mcp.context7.com/mcp
+opencode mcp add context7 --global --url https://mcp.context7.com/mcp
 
 # List configured servers and connection status
-opencode2 mcp list
+opencode mcp list
 
 # Authenticate or remove OAuth credentials
-opencode2 mcp auth context7
-opencode2 mcp logout context7
+opencode mcp auth context7
+opencode mcp logout context7
 ```
 
 `mcp add` accepts either `--url` for a remote server or a command after `--` for a local server, not both. Use `--header NAME=VALUE` only with remote servers and `--env NAME=VALUE` only with local servers. Edit the config directly for OAuth, timeout, working-directory, or enablement settings.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import path from "node:path"
+import { BUN_BINARY, platformBinary } from "../src/binary"
 
 const dir = path.resolve(import.meta.dirname, "..")
 const outdir = path.resolve(
@@ -8,7 +9,7 @@ const outdir = path.resolve(
   process.argv.find((arg) => arg.startsWith("--dir="))?.slice("--dir=".length) ?? "dist",
 )
 const platform = process.platform === "win32" ? "windows" : process.platform
-const executable = process.platform === "win32" ? "opencode2.exe" : "opencode2"
+const executable = platformBinary(BUN_BINARY)
 const binary = path.join(outdir, `tui-${platform}-${process.arch}`, "bin", executable)
 
 if (!(await Bun.file(binary).exists())) throw new Error(`TUI artifact not found: ${binary}`)

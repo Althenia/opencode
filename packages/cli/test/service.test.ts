@@ -50,6 +50,7 @@ test("service filenames isolate installation channels", () => {
   expect(ServiceConfig.filename("preview-a")).not.toBe(ServiceConfig.filename("latest"))
   expect(ServiceConfig.versionBelongsToChannel("0.0.0-preview-a-1234", "preview-a")).toBe(true)
   expect(ServiceConfig.versionBelongsToChannel("0.0.0-preview-a-1234.2", "preview-a")).toBe(true)
+  expect(ServiceConfig.versionBelongsToChannel("0.0.0-preview-a-20260721094210123", "preview-a")).toBe(true)
   expect(ServiceConfig.versionBelongsToChannel("0.0.0-preview-a-other-1234", "preview-a")).toBe(false)
   expect(ServiceConfig.versionBelongsToChannel("1.2.3", "preview-a")).toBe(false)
 })

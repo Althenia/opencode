@@ -121,7 +121,7 @@
       "name": "@opencode-ai/cli",
       "version": "1.18.4",
       "bin": {
-        "opencode2": "./bin/opencode2.cjs",
+        "opencode": "./bin/opencode.cjs",
       },
       "dependencies": {
         "@effect/platform-node": "catalog:",

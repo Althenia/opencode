@@ -54,7 +54,7 @@ The CLI has no separate `compact` subcommand. Use the TUI command or the server
 API. For example:
 
 ```bash
-opencode2 api v2.session.compact \
+opencode api v2.session.compact \
   --param sessionID=ses_example \
   --data '{}'
 ```
@@ -62,7 +62,7 @@ opencode2 api v2.session.compact \
 The equivalent raw request is:
 
 ```bash
-opencode2 api post /api/session/ses_example/compact --data '{}'
+opencode api post /api/session/ses_example/compact --data '{}'
 ```
 
 `POST /api/session/:sessionID/compact` returns the admitted compaction input;
