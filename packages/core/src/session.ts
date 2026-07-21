@@ -45,6 +45,7 @@ import { SkillV2 } from "./skill"
 import { Job } from "./job"
 import { CommandV2 } from "./command"
 import { Shell } from "./shell"
+import { ShellSandbox } from "./shell-sandbox"
 import { Global } from "./global"
 import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
 import { KeyedMutex } from "./effect/keyed-mutex"
@@ -265,7 +266,7 @@ export interface Interface {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
     command: string
-  }) => Effect.Effect<void, NotFoundError>
+  }) => Effect.Effect<void, NotFoundError | ShellSandbox.Unavailable | Shell.SpawnError>
   readonly skill: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
@@ -617,27 +618,36 @@ const layer = Layer.effect(
             yield* execution.awaitIdle(input.sessionID)
             const started = yield* Effect.gen(function* () {
               const shell = yield* Shell.Service
-              return yield* shell.create({ command: input.command, cwd: session.location.directory, timeout: 0 })
+              const prepared = yield* shell.prepare({
+                command: input.command,
+                cwd: session.location.directory,
+                timeout: 0,
+              })
+              const info = yield* shell.create(prepared)
+              return { info, warnings: prepared.warnings }
             }).pipe(Effect.provide(locations.get(session.location)))
             yield* events.publish(
               SessionEvent.Shell.Started,
               {
                 sessionID: input.sessionID,
-                shell: started,
+                shell: started.info,
               },
-              { id: input.id },
+              {
+                id: input.id,
+                metadata: started.warnings.length === 0 ? undefined : { sandboxWarnings: started.warnings },
+              },
             )
             const completed = yield* Effect.gen(function* () {
               const shell = yield* Shell.Service
-              const terminal = yield* shell.wait(started.id).pipe(
+              const terminal = yield* shell.wait(started.info.id).pipe(
                 Effect.map((info) => ({ info, retained: true as const })),
                 Effect.catchTag("Shell.NotFoundError", () =>
-                  Effect.succeed({ info: synthesizeTerminalShellInfo(started), retained: false as const }),
+                  Effect.succeed({ info: synthesizeTerminalShellInfo(started.info), retained: false as const }),
                 ),
               )
               const output = terminal.retained
                 ? yield* shell
-                    .output(started.id, { limit: SHELL_MAX_CAPTURE_BYTES })
+                    .output(started.info.id, { limit: SHELL_MAX_CAPTURE_BYTES })
                     .pipe(Effect.catchTag("Shell.NotFoundError", () => Effect.succeed(missingShellOutput())))
                 : missingShellOutput()
               return { shell: terminal.info, output }

@@ -296,6 +296,18 @@ function shellCommit(
   }
 }
 
+function shellWarnings(metadata: unknown) {
+  if (metadata === null || typeof metadata !== "object") return []
+  const warnings = (metadata as Record<string, unknown>).sandboxWarnings
+  return Array.isArray(warnings) ? warnings.filter((warning): warning is string => typeof warning === "string") : []
+}
+
+function shellWarningCommits(callID: string, command: string, metadata: unknown) {
+  return shellWarnings(metadata).map((warning) =>
+    shellCommit(callID, command, { text: `△ ${warning}`, phase: "progress", toolState: "running" }),
+  )
+}
+
 function shellTerminal(
   callID: string,
   command: string,
@@ -567,6 +579,7 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
             phase: "start",
             toolState: "running",
           }),
+          ...shellWarningCommits(message.shellID, message.command, message.metadata),
         ])
       }
       if (completed && message.output && !state.shellEnded.has(message.shellID)) {
@@ -787,6 +800,7 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
             phase: "start",
             toolState: "running",
           }),
+          ...shellWarningCommits(event.data.shell.id, event.data.shell.command, event.metadata),
         ],
         {
           phase: "running",

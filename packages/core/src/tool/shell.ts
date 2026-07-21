@@ -144,7 +144,7 @@ export const Plugin = {
         draft.add(
           name,
           Tool.make({
-            description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. An optional timeout may be provided in milliseconds (zero: unlimited; foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to unlimited. Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows. Background mode (background=true) launches the command asynchronously and returns immediately; you are notified when it finishes.`,
+            description: `Execute one shell command string. By default, commands use the host user's filesystem, process, and network authority. shell_sandbox=optional uses an enforceable sandbox backend when available and warns otherwise; shell_sandbox=required rejects before approval or spawn when unavailable. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. An optional timeout may be provided in milliseconds (zero: unlimited; foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to unlimited. Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows. Background mode (background=true) launches the command asynchronously and returns immediately; you are notified when it finishes.`,
             input: Input,
             output: Output,
             structured: StructuredOutput,
@@ -168,6 +168,23 @@ export const Plugin = {
                   callID: context.callID,
                 }
                 const target = yield* mutation.resolve({ path: input.workdir ?? ".", kind: "directory" })
+                const timeout = input.background === true ? (input.timeout ?? 0) : (input.timeout ?? DEFAULT_TIMEOUT_MS)
+                const prepared = yield* shell
+                  .prepare({
+                    command: input.command,
+                    cwd: target.canonical,
+                    timeout,
+                    metadata: { sessionID: context.sessionID },
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (error) =>
+                        new ToolFailure({
+                          message: "Shell sandboxing is required, but no enforceable backend is available.",
+                          error,
+                        }),
+                    ),
+                  )
                 const external = target.externalDirectory
                 if (external)
                   yield* permission.assert({
@@ -176,10 +193,13 @@ export const Plugin = {
                     agent: context.agent,
                     source,
                   })
-                const warnings = (yield* externalCommandDirectories(fsUtil, input.command, target.canonical)).map(
-                  (directory) =>
-                    `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Shell runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
-                )
+                const warnings = [
+                  ...prepared.warnings,
+                  ...(yield* externalCommandDirectories(fsUtil, input.command, target.canonical)).map(
+                    (directory) =>
+                      `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Shell runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
+                  ),
+                ]
                 yield* permission.assert({
                   action: name,
                   resources: [input.command],
@@ -192,13 +212,7 @@ export const Plugin = {
                 if ((yield* fsUtil.stat(target.canonical)).type !== "Directory")
                   return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
 
-                const timeout = input.background === true ? (input.timeout ?? 0) : (input.timeout ?? DEFAULT_TIMEOUT_MS)
-                const info = yield* shell.create({
-                  command: input.command,
-                  cwd: target.canonical,
-                  timeout,
-                  metadata: { sessionID: context.sessionID },
-                })
+                const info = yield* shell.create(prepared)
 
                 const captureShell = Effect.fn("ShellTool.captureShell")(function* () {
                   const page = yield* shell.output(info.id, { limit: MAX_CAPTURE_BYTES })
@@ -294,8 +308,10 @@ export const Plugin = {
                   ...(warnings.length ? { warnings } : {}),
                 }
               }).pipe(
-                Effect.mapError(
-                  (error) => new ToolFailure({ message: `Unable to execute command: ${input.command}`, error }),
+                Effect.mapError((error) =>
+                  error instanceof ToolFailure
+                    ? error
+                    : new ToolFailure({ message: `Unable to execute command: ${input.command}`, error }),
                 ),
               ),
           }),

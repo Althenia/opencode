@@ -353,7 +353,7 @@ describe("Config", () => {
     }),
   )
 
-  it.effect("bounds and migrates the instruction inline byte budget", () =>
+  it.effect("bounds and migrates instruction and shell sandbox settings", () =>
     Effect.sync(() => {
       const decode = Schema.decodeUnknownSync(Config.Info)
       expect(decode({ instruction_max_bytes: 1 }).instruction_max_bytes).toBe(1)
@@ -361,6 +361,11 @@ describe("Config", () => {
       expect(() => decode({ instruction_max_bytes: 0 })).toThrow()
       expect(() => decode({ instruction_max_bytes: 1_048_577 })).toThrow()
       expect(ConfigMigrateV1.migrate({ instruction_max_bytes: 4_096 }).instruction_max_bytes).toBe(4_096)
+      for (const mode of ["disabled", "optional", "required"] as const) {
+        expect(decode({ shell_sandbox: mode }).shell_sandbox).toBe(mode)
+        expect(ConfigMigrateV1.migrate({ shell_sandbox: mode }).shell_sandbox).toBe(mode)
+      }
+      expect(() => decode({ shell_sandbox: "pretend" })).toThrow()
     }),
   )
 

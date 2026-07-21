@@ -1623,6 +1623,10 @@ function RevertMessage(props: {
 function ShellMessage(props: { message: Extract<SessionMessageInfo, { type: "shell" }> }) {
   const { themeV2 } = useTheme().contextual("elevated")
   const output = createMemo(() => stripAnsi(props.message.output?.output.trim() ?? ""))
+  const warnings = createMemo(() => {
+    const value = props.message.metadata?.sandboxWarnings
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+  })
 
   return (
     <box
@@ -1636,6 +1640,9 @@ function ShellMessage(props: { message: Extract<SessionMessageInfo, { type: "she
       borderColor={themeV2.background.default}
     >
       <text fg={themeV2.text.default}>$ {props.message.command}</text>
+      <For each={warnings()}>
+        {(warning) => <text fg={themeV2.text.feedback.warning.default}>△ {warning}</text>}
+      </For>
       <Show when={output()}>
         <text fg={themeV2.text.subdued}>{output()}</text>
       </Show>

@@ -541,6 +541,50 @@ describe("SessionV2.create", () => {
     ),
   )
 
+  it.live("fails direct shell execution when sandboxing is required but unavailable", () =>
+    withTmp((directory) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          Bun.write(path.join(directory, "opencode.json"), JSON.stringify({ shell_sandbox: "required" })),
+        )
+        const session = yield* SessionV2.Service
+        const created = yield* session.create({
+          location: Location.Ref.make({ directory: AbsolutePath.make(directory) }),
+        })
+
+        expect(
+          yield* session.shell({ sessionID: created.id, command: "echo hello" }).pipe(
+            Effect.flip,
+            Effect.map((error) => error._tag),
+          ),
+        ).toBe("ShellSandbox.Unavailable")
+        expect(yield* session.messages({ sessionID: created.id, order: "asc" })).toEqual([])
+      }),
+    ),
+  )
+
+  it.live("projects optional sandbox fallback warnings for the TUI", () =>
+    withTmp((directory) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          Bun.write(path.join(directory, "opencode.json"), JSON.stringify({ shell: "/bin/sh", shell_sandbox: "optional" })),
+        )
+        const session = yield* SessionV2.Service
+        const created = yield* session.create({
+          location: Location.Ref.make({ directory: AbsolutePath.make(directory) }),
+        })
+
+        yield* session.shell({ sessionID: created.id, command: "echo hello" })
+
+        const messages = yield* session.messages({ sessionID: created.id, order: "asc" })
+        const shell = messages.find((message): message is SessionMessage.Shell => message.type === "shell")
+        expect(shell?.metadata?.sandboxWarnings).toEqual([
+          "No enforceable shell sandbox backend was available; command ran with host-user filesystem, process, and network authority.",
+        ])
+      }),
+    ),
+  )
+
   it.live("still emits shell ended for a failing command", () =>
     withTmp((directory) =>
       Effect.gen(function* () {

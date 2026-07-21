@@ -3,11 +3,13 @@ import { realpathSync } from "node:fs"
 import path from "path"
 import { describe, expect, test } from "bun:test"
 import { DateTime, Deferred, Duration, Effect, Fiber, Layer, Scope, Stream } from "effect"
+import { ChildProcess } from "effect/unstable/process"
 import { Money } from "@opencode-ai/schema/money"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { filesystem } from "@opencode-ai/core/effect/app-node-platform"
+import { Config } from "@opencode-ai/core/config"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -27,6 +29,7 @@ import { SessionStore } from "@opencode-ai/core/session/store"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { Shell } from "@opencode-ai/core/shell"
+import { ShellSandbox } from "@opencode-ai/core/shell-sandbox"
 import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
 import { ShellTool } from "@opencode-ai/core/tool/shell"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
@@ -37,9 +40,23 @@ import { toolIdentity, executeTool, settleTool, toolDefinitions, waitForTool } f
 
 const sessionID = SessionV2.ID.make("ses_shell_tool_test")
 const sessionModel = ModelV2.Ref.make({ id: ModelV2.ID.make("test"), providerID: ProviderV2.ID.make("test") })
+const testShell = process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh"
+const configDocument = (shellSandbox?: "disabled" | "optional" | "required") =>
+  new Config.Document({
+    type: "document",
+    info: new Config.Info({ shell: testShell, shell_sandbox: shellSandbox }),
+  })
 const assertions: PermissionV2.AssertInput[] = []
+let configEntries: Config.Entry[] = [configDocument()]
 let denyAction: string | undefined
 let afterPermission = (_input: PermissionV2.AssertInput): Effect.Effect<void> => Effect.void
+let sandboxPrepare: ShellSandbox.Interface["prepare"] = () =>
+  Effect.fail(new ShellSandbox.Unavailable({ message: "No enforceable shell sandbox backend" }))
+
+const config = Layer.succeed(
+  Config.Service,
+  Config.Service.of({ entries: () => Effect.succeed(configEntries) }),
+)
 
 const permission = Layer.succeed(
   PermissionV2.Service,
@@ -71,7 +88,19 @@ const reset = () => {
   assertions.length = 0
   denyAction = undefined
   afterPermission = () => Effect.void
+  configEntries = [configDocument()]
+  sandboxPrepare = () =>
+    Effect.fail(new ShellSandbox.Unavailable({ message: "No enforceable shell sandbox backend" }))
 }
+
+const sandboxNode = makeGlobalNode({
+  service: ShellSandbox.Service,
+  layer: Layer.succeed(
+    ShellSandbox.Service,
+    ShellSandbox.Service.of({ prepare: (command) => sandboxPrepare(command) }),
+  ),
+  deps: [],
+})
 
 const executionNode = makeGlobalNode({
   service: SessionExecution.Service,
@@ -134,10 +163,13 @@ const layer = AppNodeBuilder.build(
     filesystem,
     FSUtil.node,
     Global.node,
+    ShellSandbox.node,
   ]),
   [
     [SessionExecution.node, executionNode],
+    [Config.node, config],
     [PermissionV2.node, permission],
+    [ShellSandbox.node, sandboxNode],
   ],
 )
 
@@ -191,6 +223,150 @@ const withSession = <A, E, R>(directory: string, body: (registry: ToolRegistry.I
   })
 
 describe("ShellTool", () => {
+  it.live("fails closed before approval or spawn when sandboxing is required but unavailable", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configEntries = [configDocument("required")]
+        return withSession(tmp.path, (registry) =>
+          executeTool(registry, call({ command: helloCommand })).pipe(
+            Effect.tap((output) =>
+              Effect.sync(() => {
+                expect(output).toEqual({
+                  type: "error",
+                  value: "Shell sandboxing is required, but no enforceable backend is available.",
+                })
+                expect(assertions).toEqual([])
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("runs with an explicit warning when optional sandboxing is unavailable", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configEntries = [configDocument("optional")]
+        return withSession(tmp.path, (registry) =>
+          settleTool(registry, call({ command: helloCommand })).pipe(
+            Effect.tap((settled) =>
+              Effect.sync(() => {
+                expect(assertions.map((input) => input.action)).toEqual(["shell"])
+                expect(settled.output?.content[1]).toMatchObject({
+                  type: "text",
+                  text: expect.stringContaining("No enforceable shell sandbox backend was available"),
+                })
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("delegates the process command to an enforceable sandbox backend", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        let prepared = 0
+        sandboxPrepare = (command) =>
+          Effect.sync(() => {
+            prepared++
+            expect(command._tag).toBe("StandardCommand")
+            return command
+          })
+        configEntries = [configDocument("required")]
+        return withSession(tmp.path, (registry) =>
+          settleTool(registry, call({ command: helloCommand })).pipe(
+            Effect.tap((settled) =>
+              Effect.sync(() => {
+                expect(prepared).toBe(1)
+                expect(assertions.map((input) => input.action)).toEqual(["shell"])
+                expect(settled.output?.content[0]).toEqual({ type: "text", text: "hello" })
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("does not consult the sandbox backend when sandboxing is disabled", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        sandboxPrepare = () => Effect.die("sandbox backend must not be called")
+        configEntries = [configDocument("disabled")]
+        return withSession(tmp.path, (registry) =>
+          settleTool(registry, call({ command: helloCommand })).pipe(
+            Effect.tap((settled) =>
+              Effect.sync(() => {
+                expect(settled.output?.content[0]).toEqual({ type: "text", text: "hello" })
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("rejects forged prepared commands instead of bypassing sandbox policy", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withSession(tmp.path, () =>
+          Effect.gen(function* () {
+            const shell = yield* Shell.Service
+            const rejected = yield* shell
+              .create(Object.freeze({ warnings: [] }) as Shell.Prepared)
+              .pipe(Effect.catchDefect(Effect.succeed))
+            expect(rejected).toBeInstanceOf(Error)
+            expect((rejected as Error).message).toBe("Invalid shell preparation capability")
+            expect(yield* shell.list()).toEqual([])
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("settles a prepared spawn failure instead of hanging forever", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configEntries = [configDocument("required")]
+        sandboxPrepare = () => Effect.succeed(ChildProcess.make("opencode-missing-shell", [], { cwd: tmp.path }))
+        return withSession(tmp.path, () =>
+          Effect.gen(function* () {
+            const shell = yield* Shell.Service
+            const prepared = yield* shell.prepare({ command: helloCommand, cwd: tmp.path, timeout: 50 })
+            const result = yield* Effect.raceFirst(
+              shell.create(prepared).pipe(Effect.exit, Effect.map((exit) => ({ type: "settled" as const, exit }))),
+              Effect.sleep("250 millis").pipe(Effect.as({ type: "hung" as const })),
+            )
+            expect(result.type).toBe("settled")
+            if (result.type === "settled") expect(result.exit).toMatchObject({ _tag: "Failure" })
+            expect(yield* shell.list()).toEqual([])
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("registers and returns real successful output from the active Location", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

@@ -1,7 +1,7 @@
 export * as Shell from "./shell"
 
 import path from "path"
-import { Context, Deferred, Duration, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { produce } from "immer"
 import { Shell } from "@opencode-ai/schema/shell"
@@ -11,17 +11,41 @@ import { Config } from "./config"
 import { EventV2 } from "./event"
 import { Location } from "./location"
 import { Global } from "./global"
+import { ShellSandbox } from "./shell-sandbox"
 import { ShellSelect } from "./shell/select"
 
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Shell.NotFoundError", {
   id: Shell.ID,
 }) {}
 
+export class SpawnError extends Schema.TaggedErrorClass<SpawnError>()("Shell.SpawnError", {
+  command: Schema.String,
+  cause: Schema.Defect(),
+}) {
+  override get message() {
+    const detail = this.cause instanceof Error ? this.cause.message : String(this.cause)
+    return `Unable to start shell command: ${this.command}${detail ? `: ${detail}` : ""}`
+  }
+}
+
 // Exited processes stay observable (status, exit code, retained output) until removed explicitly.
 // Cap retention so abandoned commands do not accumulate unbounded state and output files.
 const EXITED_LIMIT = 25
 
 type Info = Shell.Info
+
+export interface Prepared {
+  readonly warnings: readonly string[]
+}
+
+type PreparedState = {
+  readonly process: ChildProcess.Command
+  readonly command: string
+  readonly cwd: string
+  readonly timeout: number
+  readonly metadata?: Shell.Metadata
+  readonly shell: string
+}
 
 type Active = {
   // Immutable snapshot; lifecycle updates replace it via immer `produce`.
@@ -44,7 +68,8 @@ type Active = {
  * here; callers (e.g. `ShellTool`) own that association and store the shell ID.
  */
 export interface Interface {
-  readonly create: (input: Shell.CreateInput) => Effect.Effect<Shell.Info>
+  readonly prepare: (input: Shell.CreateInput) => Effect.Effect<Prepared, ShellSandbox.Unavailable>
+  readonly create: (prepared: Prepared) => Effect.Effect<Shell.Info, SpawnError>
   // Currently running commands only; exited shells are retained for get/output but excluded here.
   readonly list: () => Effect.Effect<Shell.Info[]>
   readonly get: (id: Shell.ID) => Effect.Effect<Shell.Info, NotFoundError>
@@ -67,9 +92,11 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
     const config = yield* Config.Service
     const global = yield* Global.Service
     const appProcess = yield* AppProcess.Service
+    const sandbox = yield* ShellSandbox.Service
     const context = yield* Effect.context()
     const runFork = Effect.runForkWith(context)
     const sessions = new Map<string, Active>()
+    const preparations = new WeakMap<Prepared, PreparedState>()
     const exitOrder: string[] = []
 
     const outputDir = path.join(global.data, "shell", location.project.id)
@@ -164,45 +191,76 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
       }
     })
 
-    const create = Effect.fn("Shell.create")(function* (input: Shell.CreateInput) {
-      const id = Shell.ID.ascending()
+    const capability = (state: PreparedState, warnings: readonly string[]): Prepared => {
+      const prepared = Object.freeze({ warnings: Object.freeze([...warnings]) })
+      preparations.set(prepared, state)
+      return prepared
+    }
+
+    const prepare = Effect.fn("Shell.prepare")(function* (input: Shell.CreateInput) {
       const cwd = input.cwd ?? location.directory
-      const configShell = Config.latest(yield* config.entries(), "shell")
-      const shell = ShellSelect.preferred(configShell, options)
-      const args = ShellSelect.args(shell, input.command)
+      const entries = yield* config.entries()
+      const shell = ShellSelect.preferred(Config.latest(entries, "shell"), options)
+      const raw = ChildProcess.make(shell, ShellSelect.args(shell, input.command), {
+        cwd,
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+          OPENCODE_TERMINAL: "1",
+        } as Record<string, string>,
+        stdin: "ignore",
+        detached: process.platform !== "win32",
+        forceKillAfter: Duration.seconds(3),
+      })
+      const state: PreparedState = {
+        process: raw,
+        command: input.command,
+        cwd,
+        timeout: input.timeout,
+        metadata: input.metadata,
+        shell,
+      }
+      const mode = Config.latest(entries, "shell_sandbox") ?? "disabled"
+      if (mode === "disabled") return capability(state, [])
+      const sandboxed = yield* sandbox.prepare(raw).pipe(
+        Effect.map((process) => ({ process })),
+        Effect.catchTag("ShellSandbox.Unavailable", (error) =>
+          mode === "required" ? Effect.fail(error) : Effect.succeed(undefined),
+        ),
+      )
+      if (sandboxed) return capability({ ...state, process: sandboxed.process }, [])
+      return capability(state, [
+        "No enforceable shell sandbox backend was available; command ran with host-user filesystem, process, and network authority.",
+      ])
+    })
+
+    const create = Effect.fn("Shell.create")(function* (prepared: Prepared) {
+      const state = preparations.get(prepared)
+      if (!state) return yield* Effect.die(new Error("Invalid shell preparation capability"))
+      preparations.delete(prepared)
+      const id = Shell.ID.ascending()
       const file = path.join(outputDir, `${id}.out`)
-      const env = {
-        ...process.env,
-        TERM: "xterm-256color",
-        OPENCODE_TERMINAL: "1",
-      } as Record<string, string>
 
       const info: Info = {
         id,
         status: "running",
-        command: input.command,
-        cwd,
-        shell,
+        command: state.command,
+        cwd: state.cwd,
+        shell: state.shell,
         file,
-        metadata: input.metadata ?? {},
+        metadata: state.metadata ?? {},
         time: { started: Date.now() },
       }
 
       // Spawn via AppProcess and stream combined output to the file. The handle is scope-bound, so
       // the managing fiber keeps its scope open until the command terminates (it awaits `done` at the
       // end). `create` returns once `ready` resolves with the registered session.
-      const ready = Deferred.makeUnsafe<Active>()
+      const ready = Deferred.makeUnsafe<Active, SpawnError>()
       runFork(
         Effect.scoped(
           Effect.gen(function* () {
-            const handle = yield* appProcess.spawn(
-              ChildProcess.make(shell, args, {
-                cwd,
-                env,
-                stdin: "ignore",
-                detached: process.platform !== "win32",
-                forceKillAfter: Duration.seconds(3),
-              }),
+            const handle = yield* appProcess.spawn(state.process).pipe(
+              Effect.mapError((cause) => new SpawnError({ command: state.command, cause })),
             )
             const session: Active = {
               info: produce(info, (draft) => {
@@ -290,7 +348,7 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
                 )
               })
 
-            yield* session.timeout(input.timeout)
+            yield* session.timeout(state.timeout)
 
             runFork(
               handle.exitCode.pipe(
@@ -305,14 +363,16 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
             // release (kill) the process before its exit is observed.
             yield* Deferred.await(session.done).pipe(Effect.catch(() => Effect.void))
           }),
-        ).pipe(Effect.catch(() => Effect.void)),
+        ).pipe(
+          Effect.catchCause((cause) => Deferred.done(ready, Exit.failCause(cause)).pipe(Effect.asVoid)),
+        ),
       )
 
       const session = yield* Deferred.await(ready)
       return session.info
     })
 
-    return Service.of({ create, list, get, wait, timeout, output, remove })
+    return Service.of({ prepare, create, list, get, wait, timeout, output, remove })
   }),
 )
 
@@ -320,7 +380,7 @@ export function configured(options?: ShellSelect.Options) {
   return makeLocationNode({
     service: Service,
     layer: layer(options),
-    deps: [EventV2.node, Location.node, Config.node, Global.node, AppProcess.node],
+    deps: [EventV2.node, Location.node, Config.node, Global.node, AppProcess.node, ShellSandbox.node],
   })
 }
 

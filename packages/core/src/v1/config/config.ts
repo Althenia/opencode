@@ -34,6 +34,10 @@ export const Info = Schema.Struct({
     description: "JSON schema reference for configuration validation",
   }),
   shell: Schema.optional(Schema.String).annotate({ description: "Default shell to use for terminal and bash tool" }),
+  shell_sandbox: Schema.optional(Schema.Literals(["disabled", "optional", "required"])).annotate({
+    description:
+      "Shell isolation policy. disabled preserves host execution; optional uses an enforceable backend when available and warns otherwise; required rejects before approval or spawn when unavailable.",
+  }),
   logLevel: Schema.optional(LogLevelRef).annotate({ description: "Log level" }),
   server: Schema.optional(ConfigServerV1.Server).annotate({
     description: "Server configuration for opencode serve and web commands",

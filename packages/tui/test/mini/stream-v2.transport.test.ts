@@ -1954,6 +1954,7 @@ describe("V2 mini transport", () => {
   })
 
   test("runs a shell turn through v2.session.shell and renders live output", async () => {
+    const warning = "No enforceable shell sandbox backend was available"
     const events = feed()
     events.push(connected())
     const client = sdk({ streams: [events] })
@@ -1973,6 +1974,7 @@ describe("V2 mini transport", () => {
           created: 0,
           type: "session.shell.started",
           durable: durable("ses_1"),
+          metadata: { sandboxWarnings: [warning] },
           data: {
             sessionID: "ses_1",
             shell: {
@@ -2024,6 +2026,13 @@ describe("V2 mini transport", () => {
     expect(request).toMatchObject({ sessionID: "ses_1", command: "ls", id: expect.stringMatching(/^evt_/) })
     expect(ui.commits.filter((item) => item.shell)).toMatchObject([
       { phase: "start", partID: "shell:sh_shell", tool: "shell", toolState: "running", shell: { command: "ls" } },
+      {
+        phase: "progress",
+        partID: "shell:sh_shell",
+        text: `△ ${warning}`,
+        toolState: "running",
+        shell: { command: "ls" },
+      },
       {
         phase: "progress",
         partID: "shell:sh_shell",
@@ -2205,6 +2214,7 @@ describe("V2 mini transport", () => {
   })
 
   test("hydrates projected shell transcripts once and dedupes live redelivery", async () => {
+    const warning = "No enforceable shell sandbox backend was available"
     const events = feed()
     events.push(connected())
     const client = sdk({
@@ -2219,6 +2229,7 @@ describe("V2 mini transport", () => {
             command: "ls",
             exit: 0,
             output: { output: "file.txt", cursor: 8, size: 8, truncated: false },
+            metadata: { sandboxWarnings: [warning] },
             time: { created: 1, completed: 2 },
           },
         ],
@@ -2258,6 +2269,7 @@ describe("V2 mini transport", () => {
 
     expect(ui.commits.filter((item) => item.shell)).toMatchObject([
       { phase: "start", partID: "shell:sh_1", shell: { command: "ls" } },
+      { phase: "progress", partID: "shell:sh_1", text: `△ ${warning}`, toolState: "running" },
       { phase: "progress", partID: "shell:sh_1", text: "file.txt", toolState: "completed" },
     ])
     await transport.close()
