@@ -184,6 +184,7 @@ export const Info = Schema.Struct({
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),
+      self_improvement: Schema.optional(Schema.Unknown),
     }),
   ),
 }).annotate({ identifier: "Config" })

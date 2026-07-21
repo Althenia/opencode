@@ -15,8 +15,12 @@ import { Form } from "./form"
 import { Image } from "./image"
 import { LocationWatcher } from "./filesystem/location-watcher"
 import { Integration } from "./integration"
+import { InstructionDiscovery } from "./instruction-discovery"
+import { InstructionBuiltIns } from "./instructions/builtins"
+import { SystemContextInstructions } from "./instructions/system-context"
 import { Location } from "./location"
 import { LocationMutation } from "./location-mutation"
+import { Policy } from "./policy"
 import { LocationServiceMap } from "./location-service-map"
 import { MCP } from "./mcp/index"
 import { PermissionV2 } from "./permission"
@@ -28,18 +32,40 @@ import { QuestionV2 } from "./question"
 import { Shell } from "./shell"
 import { Reference } from "./reference"
 import { ReferenceInstructions } from "./reference/instructions"
+import { SelfImprovementAdmission } from "./self-improvement/admission"
+import { SelfImprovementApprovalStore } from "./self-improvement/approval-store"
+import { SelfImprovementArtifactStore } from "./self-improvement/artifact-store"
+import { SelfImprovementAutomation } from "./self-improvement/automation"
+import { SelfImprovementAuditStore } from "./self-improvement/audit-store"
+import { SelfImprovementContextReconciler } from "./self-improvement/context-reconciler"
+import { SelfImprovementContextStore } from "./self-improvement/context-store"
+import { SelfImprovementEvaluationStore } from "./self-improvement/evaluation-store"
+import { SelfImprovementGeneration } from "./self-improvement/generation"
+import { SelfImprovementGenerationStore } from "./self-improvement/generation-store"
+import { SelfImprovementIdempotencyStore } from "./self-improvement/idempotency-store"
+import { SelfImprovementIngressStore } from "./self-improvement/ingress-store"
+import { SelfImprovementLearningStore } from "./self-improvement/learning-store"
+import { SelfImprovementLifecycleCoordinator } from "./self-improvement/lifecycle-coordinator"
+import { SelfImprovementLifecycleWorkflow } from "./self-improvement/lifecycle-workflow"
+import { SelfImprovementMutationStore } from "./self-improvement/mutation-store"
+import { SelfImprovementPrivateArtifactCommand } from "./self-improvement/private-artifact-command"
+import { SelfImprovementPrivateEvidenceCommand } from "./self-improvement/private-evidence-command"
+import { SelfImprovementPrivateQuery } from "./self-improvement/private-query"
+import { SelfImprovementRetention } from "./self-improvement/retention"
+import { Routing } from "./self-improvement/routing"
+import { SelfImprovementSessionObserver } from "./self-improvement/session-observer"
+import { SelfImprovementTransitionStore } from "./self-improvement/transition-store"
+import { SessionCompaction } from "./session/compaction"
+import { SessionGenerateNode } from "./session/generate-node"
+import { InstructionEntry } from "./session/instruction-entry"
+import { SessionInstructions } from "./session/instructions"
 import { SessionRunnerLLM } from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
-import { SessionCompaction } from "./session/compaction"
 import { SessionTitle } from "./session/title"
 import { SkillV2 } from "./skill"
 import { SkillInstructions } from "./skill/instructions"
 import { Snapshot } from "./snapshot"
-import { InstructionDiscovery } from "./instruction-discovery"
-import { InstructionBuiltIns } from "./instructions/builtins"
-import { InstructionEntry } from "./session/instruction-entry"
-import { SessionInstructions } from "./session/instructions"
-import { SessionGenerateNode } from "./session/generate-node"
+import { SystemContextRegistry } from "./system-context/registry"
 import { McpTool } from "./tool/mcp"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
 import { ToolRegistry } from "./tool/registry"
@@ -50,6 +76,7 @@ export { LocationServiceMap } from "./location-service-map"
 
 const locationServiceNodes = [
   Location.node,
+  Policy.node,
   Config.node,
   AgentV2.node,
   CommandV2.node,
@@ -68,6 +95,27 @@ const locationServiceNodes = [
   SkillV2.node,
   InstructionBuiltIns.node,
   InstructionDiscovery.node,
+  SystemContextRegistry.node,
+  SelfImprovementArtifactStore.node,
+  SelfImprovementApprovalStore.node,
+  SelfImprovementAuditStore.node,
+  SelfImprovementEvaluationStore.node,
+  SelfImprovementIngressStore.node,
+  SelfImprovementRetention.node,
+  SelfImprovementContextStore.node,
+  SelfImprovementIdempotencyStore.node,
+  SelfImprovementLearningStore.node,
+  SelfImprovementMutationStore.node,
+  SelfImprovementTransitionStore.node,
+  SelfImprovementPrivateQuery.node,
+  SelfImprovementPrivateArtifactCommand.node,
+  SelfImprovementPrivateEvidenceCommand.node,
+  SelfImprovementAdmission.node,
+  SelfImprovementContextReconciler.materializerNode,
+  SelfImprovementContextReconciler.node,
+  SelfImprovementLifecycleCoordinator.node,
+  SelfImprovementLifecycleWorkflow.node,
+  SystemContextInstructions.node,
   LocationMutation.node,
   FileMutation.node,
   MCP.node,
@@ -86,11 +134,16 @@ const locationServiceNodes = [
   ReadToolFileSystem.node,
   McpTool.node,
   SessionInstructions.node,
+  Routing.node,
   SessionRunnerModel.node,
   SessionCompaction.node,
   SessionTitle.node,
   Snapshot.node,
+  SelfImprovementSessionObserver.node,
   SessionRunnerLLM.node,
+  SelfImprovementGenerationStore.node,
+  SelfImprovementGeneration.node,
+  SelfImprovementAutomation.node,
   Vcs.node,
   // Start repository watches only after boot-critical filesystem and Git work.
   LocationWatcher.node,

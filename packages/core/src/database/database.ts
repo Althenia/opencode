@@ -57,6 +57,8 @@ export function layer(options?: Options) {
   })
 }
 
+export const layerFromPath = (path: string) => layer({ path })
+
 export function configured(options?: Options) {
   return makeGlobalNode({ service: Service, layer: layer(options), deps: [] })
 }

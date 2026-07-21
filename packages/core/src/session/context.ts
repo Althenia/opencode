@@ -7,6 +7,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { InstructionDiscovery } from "../instruction-discovery"
 import { Instructions } from "../instructions/index"
 import { InstructionBuiltIns } from "../instructions/builtins"
+import { SystemContextInstructions } from "../instructions/system-context"
 import { Location } from "../location"
 import { McpInstructions } from "../mcp/instructions"
 import { PluginSupervisor } from "../plugin/supervisor"
@@ -63,6 +64,7 @@ const layer = Layer.effect(
     const plugins = yield* PluginSupervisor.Service
     const referenceInstructions = yield* ReferenceInstructions.Service
     const skillInstructions = yield* SkillInstructions.Service
+    const systemContextInstructions = yield* SystemContextInstructions.Service
     const store = yield* SessionStore.Service
 
     const select = Effect.fn("SessionContext.select")(function* (sessionID: SessionSchema.ID) {
@@ -81,6 +83,7 @@ const layer = Layer.effect(
           skillInstructions.load(agent),
           referenceInstructions.load(),
           mcpInstructions.load(agent),
+          systemContextInstructions.load(),
           entries.load(sessionID),
         ],
         { concurrency: "unbounded" },
@@ -120,5 +123,6 @@ export const node = makeLocationNode({
     SessionRunnerModel.node,
     SessionStore.node,
     SkillInstructions.node,
+    SystemContextInstructions.node,
   ],
 })

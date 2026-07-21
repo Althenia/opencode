@@ -14,6 +14,7 @@ import { Watcher } from "./filesystem/watcher"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
 import { Location } from "./location"
+import { Policy } from "./policy"
 import { AbsolutePath } from "./schema"
 import { ConfigAgent } from "./config/agent"
 import { ConfigAttachments } from "./config/attachments"
@@ -168,6 +169,7 @@ export const layer = (options?: Options) => Layer.effect(
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
+    const policy = yield* Policy.Service
     const watcher = yield* Watcher.Service
     const events = yield* EventV2.Service
     const credentials = yield* Credential.Service
@@ -331,7 +333,16 @@ export const layer = (options?: Options) => Layer.effect(
       ]
     })
 
+    const loadPolicies = (entries: readonly Entry[]) =>
+      policy.load(
+        entries
+          .filter((entry): entry is Document => entry.type === "document")
+          .toReversed()
+          .flatMap((entry) => entry.info.experimental?.policies ?? []),
+      )
+
     const initial = yield* discover()
+    yield* loadPolicies(initial)
     let configs = initial
     const updates = yield* PubSub.unbounded<Watcher.Update>()
     const subscriptions = new Map<string, Effect.Effect<unknown>>()
@@ -366,6 +377,7 @@ export const layer = (options?: Options) => Layer.effect(
           const next = yield* discover()
           if (isDeepStrictEqual(configs, next)) return
           configs = next
+          yield* loadPolicies(next)
           yield* reconcile(next)
           yield* events.publish(ConfigSchema.Event.Updated, {})
         }),
@@ -430,7 +442,16 @@ export function configured(options?: Options) {
   return makeLocationNode({
     service: Service,
     layer: layer(options),
-    deps: [Watcher.node, EventV2.node, FSUtil.node, Global.node, Location.node, Credential.node, WellKnown.node],
+    deps: [
+      Watcher.node,
+      EventV2.node,
+      FSUtil.node,
+      Global.node,
+      Location.node,
+      Policy.node,
+      Credential.node,
+      WellKnown.node,
+    ],
   })
 }
 

@@ -6,6 +6,7 @@ import { Catalog } from "@opencode-ai/schema/catalog"
 import { ModelV2 } from "./model"
 import { ProviderV2 } from "./provider"
 import { EventV2 } from "./event"
+import { Policy } from "./policy"
 import { State } from "./state"
 import { Integration } from "./integration"
 
@@ -63,6 +64,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const integrations = yield* Integration.Service
+    const policy = yield* Policy.Service
 
     const available = (provider: ProviderV2.Info, integration: Integration.Info | undefined) => {
       if (provider.disabled) return false
@@ -154,9 +156,16 @@ const layer = Layer.effect(
 
         available: Effect.fn("CatalogV2.provider.available")(function* () {
           const active = new Map((yield* integrations.list()).map((integration) => [integration.id, integration]))
-          return (yield* result.provider.all()).filter((provider) =>
-            available(provider, active.get(provider.integrationID ?? Integration.ID.make(provider.id))),
+          const permitted = yield* Effect.forEach(yield* result.provider.all(), (provider) =>
+            policy
+              .evaluate("provider.use", provider.id, "allow")
+              .pipe(Effect.map((effect) => (effect === "deny" ? undefined : provider))),
           )
+          return permitted
+            .filter((provider): provider is ProviderV2.Info => provider !== undefined)
+            .filter((provider) =>
+              available(provider, active.get(provider.integrationID ?? Integration.ID.make(provider.id))),
+            )
         }),
       },
 
@@ -238,7 +247,7 @@ const layer = Layer.effect(
               age: (Date.now() - model.time.released) / (1000 * 60 * 60 * 24 * 30),
               small: SMALL_MODEL_RE.test(`${model.id} ${model.family ?? ""} ${model.name}`.toLowerCase()),
             })),
-            Array.filter((item) => item.cost > 0 && item.age <= 18),
+            Array.filter((item) => item.cost > 0 && (item.model.time.released === 0 || item.age <= 18)),
           )
 
           const pick = (items: typeof candidates) => {
@@ -269,4 +278,4 @@ const layer = Layer.effect(
 
 const SMALL_MODEL_RE = /\b(nano|flash|lite|mini|haiku|small|fast)\b/
 
-export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node, Integration.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node, Integration.node, Policy.node] })
