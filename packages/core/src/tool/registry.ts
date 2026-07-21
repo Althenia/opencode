@@ -276,16 +276,22 @@ const registryLayer = Layer.effect(
               if (registration.codemode) codemode.set(name, registration)
               else direct.set(name, registration)
             }
+            const ordered = (registrations: Map<string, Registration>) =>
+              new Map([...registrations].toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)))
+            const orderedDirect = ordered(direct)
+            const orderedCodemode = ordered(codemode)
             const execute =
-              codemode.size > 0 && !whollyDisabled("execute", rules) ? ExecuteTool.create(codemode) : undefined
+              orderedCodemode.size > 0 && !whollyDisabled("execute", rules)
+                ? ExecuteTool.create(orderedCodemode)
+                : undefined
             return {
               definitions: [
-                ...Array.from(direct, ([name, registration]) => definition(name, registration.tool)),
+                ...Array.from(orderedDirect, ([name, registration]) => definition(name, registration.tool)),
                 ...(execute ? [definition("execute", execute)] : []),
               ],
               settle: (input: ExecuteInput) => {
                 if (input.call.name === "execute" && execute) return settleTool(input, execute)
-                const registration = direct.get(input.call.name)
+                const registration = orderedDirect.get(input.call.name)
                 if (registration) return settleTool(input, registration.tool)
                 return Effect.succeed({
                   result: { type: "error", value: `Unknown tool: ${input.call.name}` },

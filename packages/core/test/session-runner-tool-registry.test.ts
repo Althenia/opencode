@@ -110,6 +110,15 @@ describe("ToolRegistry", () => {
     }),
   )
 
+  it.effect("materializes definitions in lexical order regardless of registration order", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      yield* service.register({ zeta: make(), alpha: make(), middle: make() }, { codemode: false })
+
+      expect((yield* toolDefinitions(service)).map((tool) => tool.name)).toEqual(["alpha", "middle", "zeta"])
+    }),
+  )
+
   it.effect("filters disabled tools with edit aliases and ordered wildcard precedence", () =>
     Effect.gen(function* () {
       const service = yield* ToolRegistry.Service
@@ -135,7 +144,7 @@ describe("ToolRegistry", () => {
           { action: "*", resource: "*", effect: "deny" },
         ]),
       ).toEqual([])
-      expect(yield* names([{ action: "edit", resource: "*", effect: "deny" }])).toEqual(["question", "bash"])
+      expect(yield* names([{ action: "edit", resource: "*", effect: "deny" }])).toEqual(["bash", "question"])
     }),
   )
 

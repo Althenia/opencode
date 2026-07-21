@@ -52,24 +52,25 @@ const markLastTool = (tools: ReadonlyArray<ToolDefinition>, hint: CacheHint): Re
 }
 
 const markLastSystem = (system: LLMRequest["system"], hint: CacheHint): LLMRequest["system"] => {
-  if (system.length === 0) return system
-  const last = system.length - 1
-  if (system[last]!.cache) return system
+  const last = system.findLastIndex((part) => part.text.trim().length > 0)
+  if (last < 0 || system[last]!.cache) return system
   return system.map((part, i) => (i === last ? { ...part, cache: hint } : part))
 }
 
 const lastIndexOfRole = (messages: ReadonlyArray<Message>, role: Message["role"]): number =>
   messages.findLastIndex((m) => m.role === role)
 
-// Mark the last text part of `messages[index]`. If no text part exists, mark
-// the last content part regardless of type — that's the breakpoint position
-// in tool-result-only messages too.
+// Mark the last non-empty text or tool-result part of `messages[index]`.
+// Other part types do not expose a cache field in the canonical schema and
+// empty text markers are rejected by Anthropic-compatible APIs.
 const markMessageAt = (messages: ReadonlyArray<Message>, index: number, hint: CacheHint): ReadonlyArray<Message> => {
   if (index < 0 || index >= messages.length) return messages
   const target = messages[index]!
   if (target.content.length === 0) return messages
-  const lastTextIndex = target.content.findLastIndex((part) => part.type === "text")
-  const markAt = lastTextIndex >= 0 ? lastTextIndex : target.content.length - 1
+  const markAt = target.content.findLastIndex(
+    (part) => (part.type === "text" && part.text.trim().length > 0) || part.type === "tool-result",
+  )
+  if (markAt < 0) return messages
   const existing = target.content[markAt]!
   if ("cache" in existing && existing.cache) return messages
   const nextContent = target.content.map((part, i) => (i === markAt ? ({ ...part, cache: hint } as ContentPart) : part))

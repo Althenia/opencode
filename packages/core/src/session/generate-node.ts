@@ -10,6 +10,7 @@ import { SessionContext } from "./context"
 import { SessionGenerate } from "./generate"
 import { SessionHistory } from "./history"
 import { SessionModelHeaders } from "./model-headers"
+import { SessionRunnerCache } from "./runner/cache"
 import { SessionRunnerModel } from "./runner/model"
 import PROMPT_DEFAULT from "./runner/prompt/base.txt"
 import { toLLMMessages } from "./runner/to-llm-message"
@@ -29,9 +30,14 @@ export const layer = (options?: SessionModelHeaders.Options) => Layer.effect(
         const model = yield* models.resolve(selection.session)
         const history = yield* SessionHistory.preview(database.db, selection.session.id, selection.instructions)
         const providerMetadataKey = model.model.route.providerMetadataKey ?? model.model.provider
-        const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(selection.session.id)
-          ? selection.session.id.slice(4)
-          : selection.session.id
+        const promptCacheKey = SessionRunnerCache.promptCacheNamespace({
+          projectID: selection.session.projectID,
+          directory: selection.session.location.directory,
+          workspaceID: selection.session.location.workspaceID,
+          agentID: selection.agent.id,
+          providerID: model.ref.providerID,
+          modelID: model.ref.id,
+        })
         const contextEvent = yield* hooks.trigger("session", "context", {
           sessionID: selection.session.id,
           agent: selection.agent.id,
@@ -50,7 +56,10 @@ export const layer = (options?: SessionModelHeaders.Options) => Layer.effect(
           LLM.request({
             model: model.model,
             http: { headers: SessionModelHeaders.make(selection.session, options) },
-            providerOptions: { openai: { promptCacheKey } },
+            providerOptions: {
+              openai: { promptCacheKey },
+              openrouter: { promptCacheKey, sessionID: promptCacheKey },
+            },
             system: contextEvent.system,
             messages: contextEvent.messages,
             tools: [],

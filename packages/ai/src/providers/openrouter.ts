@@ -18,6 +18,7 @@ export interface OpenRouterOptions {
   readonly usage?: boolean | Record<string, unknown>
   readonly reasoning?: Record<string, unknown>
   readonly promptCacheKey?: string
+  readonly sessionID?: string
 }
 
 export type OpenRouterProviderOptionsInput = ProviderOptions & {
@@ -81,6 +82,7 @@ const bodyOptions = (input: unknown) => {
         : {}),
     ...(isRecord(openrouter.reasoning) ? { reasoning: openrouter.reasoning } : {}),
     ...(typeof openrouter.promptCacheKey === "string" ? { prompt_cache_key: openrouter.promptCacheKey } : {}),
+    ...(typeof openrouter.sessionID === "string" ? { session_id: openrouter.sessionID } : {}),
   }
 }
 

@@ -9,6 +9,7 @@ import { PluginHooks } from "../plugin/hooks"
 import { ToolRegistry } from "../tool/registry"
 import { SessionContext } from "./context"
 import { SessionModelHeaders } from "./model-headers"
+import { SessionRunnerCache } from "./runner/cache"
 import { MAX_STEPS_PROMPT } from "./runner/max-steps"
 import PROMPT_DEFAULT from "./runner/prompt/base.txt"
 import { toLLMMessages } from "./runner/to-llm-message"
@@ -60,7 +61,14 @@ export const layer = (options?: SessionModelHeaders.Options) => Layer.effect(
       const stepLimitReached = agent.info.steps !== undefined && input.step >= agent.info.steps
       const permissions = PermissionV2.merge(agent.info.permissions, session.permissionCeiling ?? [])
       const executableTools = stepLimitReached ? undefined : yield* registry.materialize(permissions)
-      const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
+      const promptCacheKey = SessionRunnerCache.promptCacheNamespace({
+        projectID: session.projectID,
+        directory: session.location.directory,
+        workspaceID: session.location.workspaceID,
+        agentID: agent.id,
+        providerID: resolved.ref.providerID,
+        modelID: resolved.ref.id,
+      })
       const system = baseSystem(input.context)
       const history = toLLMMessages(input.context.messages, resolved.ref, providerMetadataKey)
       const messages = stepLimitReached ? [...history, Message.assistant(MAX_STEPS_PROMPT)] : history
@@ -88,7 +96,10 @@ export const layer = (options?: SessionModelHeaders.Options) => Layer.effect(
         http: {
           headers: SessionModelHeaders.make(session, options),
         },
-        providerOptions: { openai: { promptCacheKey } },
+        providerOptions: {
+          openai: { promptCacheKey },
+          openrouter: { promptCacheKey, sessionID: promptCacheKey },
+        },
         system: contextEvent.system,
         messages: contextEvent.messages,
         tools: hookedTools,

@@ -264,7 +264,13 @@ it.effect("generates from fresh settled Session context without durable mutation
     expect(requests[0]?.system[0]?.text).toBe("Hooked system")
     expect(requests[0]?.system.map((part) => part.text)).toContain("Initial context")
     expect(requests[0]?.http?.headers).toMatchObject({ "X-Session-Id": sessionID })
-    expect(requests[0]?.providerOptions).toMatchObject({ openai: { promptCacheKey: sessionID } })
+    const promptCacheKey = requests[0]?.providerOptions?.openai?.promptCacheKey
+    expect(promptCacheKey).toMatch(/^[0-9a-f]{64}$/)
+    expect(promptCacheKey).not.toBe(sessionID)
+    expect(requests[0]?.providerOptions?.openrouter).toMatchObject({
+      promptCacheKey,
+      sessionID: promptCacheKey,
+    })
     expect(
       requests[0]?.messages.flatMap((message) =>
         message.role === "system"

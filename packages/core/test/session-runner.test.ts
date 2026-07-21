@@ -1032,7 +1032,7 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.model).toBe(model)
-      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["echo", "defect", "storefail"])
+      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["defect", "echo", "storefail"])
       expect(requests[0]?.messages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
         { role: "user", content: [{ type: "text", text: "First" }] },
         { role: "user", content: [{ type: "text", text: "Second" }] },
@@ -2326,7 +2326,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(requests).toHaveLength(1)
-      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["echo", "defect", "storefail"])
+      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["defect", "echo", "storefail"])
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Use tools" },
         {
@@ -2782,6 +2782,43 @@ describe("SessionRunnerLLM", () => {
       expect(userTexts(requests[0]!)).toEqual(["Start working"])
       expect(userTexts(requests[1]!)).toEqual(["Start working"])
       expect(userTexts(requests[2]!)).toEqual(["Start working", "Wait until continuation ends"])
+    }),
+  )
+
+  it.effect("serializes promoted queued input identically on later turns", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Start working")
+
+      responses = [reply.tool("call-cache", "echo", { text: "continue" }), reply.stop(), reply.stop(), reply.stop()]
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+
+      const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* session.prompt({ sessionID, text: "Stable queued prompt", delivery: "queue" })
+      yield* Deferred.succeed(streamGate, undefined)
+      yield* Fiber.join(first)
+      streamGate = undefined
+      streamStarted = undefined
+
+      expect(requests).toHaveLength(3)
+      yield* session.prompt({ sessionID, text: "Later turn", resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(4)
+
+      const queuedContent = (request: LLMRequest) =>
+        request.messages.find(
+          (message) =>
+            message.role === "user" &&
+            message.content.some((part) => part.type === "text" && part.text === "Stable queued prompt"),
+        )?.content
+      const firstConsumption = queuedContent(requests[2]!)
+      const laterHistory = queuedContent(requests[3]!)
+
+      expect(firstConsumption).toBeDefined()
+      expect(laterHistory).toEqual(firstConsumption)
+      expect(JSON.stringify(firstConsumption)).not.toContain("<system-reminder>")
     }),
   )
 
@@ -3254,10 +3291,10 @@ describe("SessionRunnerLLM", () => {
       yield* Deferred.await(streamStarted)
 
       expect(requests).toHaveLength(2)
-      expect(requests.map((request) => request.providerOptions?.openai?.promptCacheKey)).toEqual([
-        sessionID,
-        otherSessionID,
-      ])
+      const namespaces = requests.map((request) => request.providerOptions?.openai?.promptCacheKey)
+      expect(namespaces[0]).toBe(namespaces[1])
+      expect(namespaces[0]).toMatch(/^[0-9a-f]{64}$/)
+      expect(requests.map((request) => request.providerOptions?.openrouter?.sessionID)).toEqual(namespaces)
       yield* Deferred.succeed(streamGate, undefined)
       yield* Fiber.join(first)
       yield* Fiber.join(second)
@@ -3266,7 +3303,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("bounds 64-character session prompt cache keys", () =>
+  it.effect("shares a stable cache namespace across long session IDs", () =>
     Effect.gen(function* () {
       const session = yield* setup
       const longSessionID = SessionV2.ID.make(`ses_${"a".repeat(64)}`)
@@ -3288,9 +3325,9 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(otherLongSessionID)
 
       const keys = requests.map((request) => request.providerOptions?.openai?.promptCacheKey)
-      expect(keys).toEqual([longSessionID.slice(4), otherLongSessionID.slice(4)])
+      expect(keys[0]).toBe(keys[1])
       expect(keys.every((key) => typeof key === "string" && key.length === 64)).toBe(true)
-      expect(keys[0]).not.toBe(keys[1])
+      expect(requests.map((request) => request.providerOptions?.openrouter?.sessionID)).toEqual(keys)
     }),
   )
 

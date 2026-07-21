@@ -39,6 +39,7 @@ describe("OpenRouter", () => {
                 usage: true,
                 reasoning: { effort: "high" },
                 promptCacheKey: "session_123",
+                sessionID: "cache_namespace_123",
               },
             },
           }).model("anthropic/claude-3.7-sonnet:thinking"),
@@ -50,6 +51,7 @@ describe("OpenRouter", () => {
         usage: { include: true },
         reasoning: { effort: "high" },
         prompt_cache_key: "session_123",
+        session_id: "cache_namespace_123",
       })
     }),
   )
