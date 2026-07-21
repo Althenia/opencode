@@ -9,6 +9,7 @@ import type { LocationServices } from "@opencode-ai/core/location-services"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { SelfImprovementSessionObserver } from "@opencode-ai/core/self-improvement/session-observer"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
@@ -17,7 +18,7 @@ import { SessionRunner } from "@opencode-ai/core/session/runner"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
-import { Context, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Scope } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Scope } from "effect"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionStore.node])))
@@ -126,6 +127,51 @@ describe("SessionExecution lifecycle", () => {
       yield* Scope.close(scope, Exit.void)
     }),
   )
+
+  it.effect("records one terminal observation for a completed busy period", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const sessionID = SessionV2.ID.make("ses_observed")
+      yield* seedSessions(database, [sessionID])
+
+      const observed: Array<{ sessionID: SessionV2.ID; exit: Exit.Exit<void, unknown> }> = []
+      const scope = yield* Scope.make()
+      const context = yield* buildExecution(scope, () => Effect.void, (input) =>
+        Effect.sync(() => void observed.push(input)),
+      )
+      const execution = Context.get(context, SessionExecution.Service)
+
+      yield* execution.resume(sessionID)
+      yield* execution.awaitIdle(sessionID)
+
+      expect(observed).toHaveLength(1)
+      expect(observed[0]?.sessionID).toBe(sessionID)
+      expect(Exit.isSuccess(observed[0]!.exit)).toBe(true)
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect("records a typed user interruption as cancelled evidence", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const sessionID = SessionV2.ID.make("ses_user_interrupted")
+      yield* seedSessions(database, [sessionID])
+
+      const observed: Exit.Exit<void, unknown>[] = []
+      const scope = yield* Scope.make()
+      const context = yield* buildExecution(scope, () => Effect.fail(new UserInterruptedError()), (input) =>
+        Effect.sync(() => void observed.push(input.exit)),
+      )
+      const execution = Context.get(context, SessionExecution.Service)
+
+      yield* execution.resume(sessionID).pipe(Effect.exit)
+      yield* execution.awaitIdle(sessionID)
+
+      expect(observed).toHaveLength(1)
+      expect(Exit.isFailure(observed[0]!) && Cause.hasInterrupts(observed[0]!.cause)).toBe(true)
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
 })
 
 function seedSessions(
@@ -169,19 +215,27 @@ function suspensions(database: Database.Service["Service"]) {
 }
 
 /** Builds the local execution layer plus the restart actions against the test harness services. */
-function buildExecution(scope: Scope.Closeable, drain: SessionRunner.Interface["drain"]) {
+function buildExecution(
+  scope: Scope.Closeable,
+  drain: SessionRunner.Interface["drain"],
+  record: SelfImprovementSessionObserver.Interface["record"] = () => Effect.void,
+) {
   return Effect.gen(function* () {
     const database = yield* Database.Service
     const events = yield* EventV2.Service
     const store = yield* SessionStore.Service
     const runner = Layer.succeed(SessionRunner.Service, SessionRunner.Service.of({ drain }))
+    const observer = Layer.succeed(
+      SelfImprovementSessionObserver.Service,
+      SelfImprovementSessionObserver.Service.of({ record }),
+    )
     const locations = Layer.effect(
       LocationServiceMap.Service,
       LayerMap.make(
         () =>
-          // The local execution test only needs the Session runner from the Location graph.
+          // The local execution test only needs the Session runner and terminal observer from the Location graph.
           // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-          runner as unknown as Layer.Layer<LocationServices>,
+          Layer.merge(runner, observer) as unknown as Layer.Layer<LocationServices>,
       ),
     )
     return yield* Layer.buildWithScope(

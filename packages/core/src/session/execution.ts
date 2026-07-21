@@ -5,6 +5,7 @@ import { EventV2 } from "../event"
 import { LocationServiceMap } from "../location-service-map"
 import { makeGlobalNode } from "../effect/app-node"
 import { SessionEvent } from "./event"
+import { SelfImprovementSessionObserver } from "../self-improvement/session-observer"
 import { SessionRunCoordinator } from "./run-coordinator"
 import { SessionRunner } from "./runner/index"
 import { SessionSchema } from "./schema"
@@ -56,6 +57,23 @@ export const layer = Layer.effect(
         ),
         Effect.asVoid,
       )
+    const observeTerminal = (sessionID: SessionSchema.ID, exit: Exit.Exit<void, unknown>) =>
+      Effect.gen(function* () {
+        const session = yield* store.get(sessionID)
+        if (!session) return
+        yield* SelfImprovementSessionObserver.Service.use((observer) => observer.record({ sessionID, exit })).pipe(
+          Effect.provide(locations.get(session.location)),
+        )
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.void
+            : Effect.logWarning("Failed to record Session self-improvement evidence", cause).pipe(
+                Effect.annotateLogs({ sessionID }),
+              ),
+        ),
+        Effect.asVoid,
+      )
     // Starting or finishing on its own clears stale suspension; interruption preserves it because
     // managed-server teardown suspends active Sessions immediately before interrupting their drains.
     const clearSuspensionOnCommit = (sessionID: SessionSchema.ID) => ({
@@ -81,28 +99,36 @@ export const layer = Layer.effect(
       }),
       // One terminal observation per busy period, covering every coalesced drain.
       settled: (sessionID, exit, reason) =>
-        reportLifecycle(
-          sessionID,
-          Effect.gen(function* () {
-            const outcome = terminal(exit, reason)
-            if (outcome.type === "succeeded") {
-              yield* events.publish(SessionEvent.Execution.Succeeded, { sessionID }, clearSuspensionOnCommit(sessionID))
-              return
-            }
-            if (outcome.type === "interrupted") {
-              yield* events.publish(SessionEvent.Execution.Interrupted, { sessionID, reason: outcome.reason })
-              return
-            }
-            yield* events.publish(
-              SessionEvent.Execution.Failed,
-              {
-                sessionID,
-                error: outcome.error,
-              },
-              clearSuspensionOnCommit(sessionID),
-            )
-          }),
-        ),
+        Effect.gen(function* () {
+          const outcome = terminal(exit, reason)
+          yield* reportLifecycle(
+            sessionID,
+            Effect.gen(function* () {
+              if (outcome.type === "succeeded") {
+                yield* events.publish(SessionEvent.Execution.Succeeded, { sessionID }, clearSuspensionOnCommit(sessionID))
+                return
+              }
+              if (outcome.type === "interrupted") {
+                yield* events.publish(SessionEvent.Execution.Interrupted, { sessionID, reason: outcome.reason })
+                return
+              }
+              yield* events.publish(
+                SessionEvent.Execution.Failed,
+                {
+                  sessionID,
+                  error: outcome.error,
+                },
+                clearSuspensionOnCommit(sessionID),
+              )
+            }),
+          )
+          yield* observeTerminal(
+            sessionID,
+            outcome.type === "interrupted" && Exit.isFailure(exit) && !Cause.hasInterrupts(exit.cause)
+              ? Effect.runSyncExit(Effect.interrupt)
+              : exit,
+          )
+        }),
     })
 
     return Service.of({
