@@ -4,6 +4,7 @@ import { LLM, Message, SystemPart, type LLMRequest } from "@opencode-ai/ai"
 import { SessionError } from "@opencode-ai/schema/session-error"
 import { Context, Effect, Layer } from "effect"
 import { makeLocationNode } from "../effect/app-node"
+import { PermissionV2 } from "../permission"
 import { PluginHooks } from "../plugin/hooks"
 import { ToolRegistry } from "../tool/registry"
 import { SessionContext } from "./context"
@@ -57,7 +58,8 @@ export const layer = (options?: SessionModelHeaders.Options) => Layer.effect(
       const model = resolved.model
       const providerMetadataKey = model.route.providerMetadataKey ?? model.provider
       const stepLimitReached = agent.info.steps !== undefined && input.step >= agent.info.steps
-      const executableTools = stepLimitReached ? undefined : yield* registry.materialize(agent.info.permissions)
+      const permissions = PermissionV2.merge(agent.info.permissions, session.permissionCeiling ?? [])
+      const executableTools = stepLimitReached ? undefined : yield* registry.materialize(permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const system = baseSystem(input.context)
       const history = toLLMMessages(input.context.messages, resolved.ref, providerMetadataKey)

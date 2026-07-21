@@ -116,6 +116,25 @@ describe("SessionV2.create", () => {
     }),
   )
 
+  it.effect("persists only deny rules in the session permission ceiling", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const deny = { action: "shell", resource: "*", effect: "deny" as const }
+
+      const created = yield* session.create({
+        location,
+        permissionCeiling: [
+          { action: "read", resource: "*", effect: "allow" },
+          deny,
+          deny,
+        ],
+      })
+
+      expect(created.permissionCeiling).toEqual([deny])
+      expect((yield* session.get(created.id)).permissionCeiling).toEqual([deny])
+    }),
+  )
+
   it.effect("inherits location from an existing parent when omitted", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
@@ -123,6 +142,26 @@ describe("SessionV2.create", () => {
       const child = yield* session.create({ parentID: parent.id, title: "child" })
 
       expect(child).toMatchObject({ parentID: parent.id, location })
+    }),
+  )
+
+  it.effect("does not let child creation drop the parent permission ceiling", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const inherited = { action: "shell", resource: "*", effect: "deny" as const }
+      const added = { action: "read", resource: "/secret/*", effect: "deny" as const }
+      const parent = yield* session.create({ location, permissionCeiling: [inherited] })
+
+      const child = yield* session.create({
+        parentID: parent.id,
+        title: "child",
+        permissionCeiling: [
+          { action: "shell", resource: "*", effect: "allow" },
+          added,
+        ],
+      })
+
+      expect(child.permissionCeiling).toEqual([inherited, added])
     }),
   )
 
@@ -181,6 +220,18 @@ describe("SessionV2.create", () => {
       const page = yield* session.list({ parentID: parent.id })
 
       expect(page.data.map((item) => item.id)).toEqual([child.id])
+    }),
+  )
+
+  it.effect("preserves the permission ceiling when forking", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const deny = { action: "shell", resource: "*", effect: "deny" as const }
+      const parent = yield* session.create({ location, permissionCeiling: [deny] })
+
+      const fork = yield* session.fork({ sessionID: parent.id })
+
+      expect(fork.permissionCeiling).toEqual([deny])
     }),
   )
 

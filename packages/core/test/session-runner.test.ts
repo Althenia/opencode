@@ -34,6 +34,7 @@ import { Snapshot } from "@opencode-ai/core/snapshot"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionPending } from "@opencode-ai/core/session/pending"
 import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionPermissionCeiling } from "@opencode-ai/core/session/permission-ceiling"
 import { Money } from "@opencode-ai/schema/money"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
@@ -831,6 +832,31 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.tools.map((tool) => tool.name)).not.toContain("echo")
       expect(requests[0]?.tools.map((tool) => tool.name)).not.toContain("unregistered")
       expect(executions).toEqual([])
+    }),
+  )
+
+  it.effect("omits tools denied by the durable session ceiling", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const { db } = yield* Database.Service
+      yield* db
+        .update(SessionTable)
+        .set({
+          metadata: SessionPermissionCeiling.write(undefined, [
+            { action: "echo", resource: "*", effect: "deny" },
+          ]),
+        })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* admit(session, "Do not expose echo")
+      response = reply.stop()
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.tools.map((tool) => tool.name)).not.toContain("echo")
+      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["defect", "storefail"])
     }),
   )
 

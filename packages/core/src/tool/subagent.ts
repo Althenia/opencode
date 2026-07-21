@@ -7,6 +7,7 @@ import { AgentV2 } from "../agent"
 import { Config } from "../config"
 import { PluginRuntime } from "../plugin/runtime"
 import { PermissionV2 } from "../permission"
+import { SessionPermissionCeiling } from "../session/permission-ceiling"
 import { SessionSchema } from "../session/schema"
 import { Tool } from "./tool"
 
@@ -142,6 +143,9 @@ export const Plugin = {
                   return yield* new ToolFailure({
                     message: `Subagent depth limit reached (${limit}). Increase "experimental.subagent_depth" to allow nested subagents.`,
                   })
+                const caller = yield* agents.resolve(context.agent)
+                if (caller === undefined)
+                  return yield* new ToolFailure({ message: `Calling agent not found: ${context.agent}` })
                 const agent = yield* agents.resolve(input.agent)
                 if (agent === undefined) return yield* new ToolFailure({ message: `Unknown agent: ${input.agent}` })
                 if (agent.mode === "primary")
@@ -169,8 +173,7 @@ export const Plugin = {
                     title: input.description,
                     agent: AgentV2.ID.make(input.agent),
                     model,
-                    // TODO(opencode kkdvxn): derive restricted subagent permissions from the parent
-                    // session (V1 deriveSubagentSessionPermission). MVP uses the agent's own permissions.
+                    permissionCeiling: SessionPermissionCeiling.inherit(parent.permissionCeiling, caller.permissions),
                   })
                   .pipe(
                     Effect.mapError(

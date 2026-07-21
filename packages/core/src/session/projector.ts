@@ -12,6 +12,7 @@ import { WorkspaceTable } from "../control-plane/workspace.sql"
 import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
 import { SessionPending } from "./pending"
+import { SessionPermissionCeiling } from "./permission-ceiling"
 import { WorkspaceV2 } from "../workspace"
 import { InstructionState } from "./instruction-state"
 import { MessageTable, PartTable, SessionPendingTable, SessionMessageTable, SessionTable } from "./sql"
@@ -217,6 +218,7 @@ const projectFork = Effect.fn("SessionProjector.projectFork")(function* (
       title: forkTitle(parent.title),
       agent: parent.agent,
       model: parent.model,
+      metadata: SessionPermissionCeiling.write(undefined, SessionPermissionCeiling.read(parent.metadata)),
       version: parent.version,
       cost: 0,
       tokens_input: 0,

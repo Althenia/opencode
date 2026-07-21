@@ -9,6 +9,7 @@ import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
 import { Location } from "./location"
 import { SessionMessage } from "./session/message"
+import { SessionPermissionCeiling } from "./session/permission-ceiling"
 import { Base64, FileAttachment, Prompt } from "@opencode-ai/schema/prompt"
 import { PromptInput } from "@opencode-ai/schema/prompt-input"
 import { EventV2 } from "./event"
@@ -95,6 +96,7 @@ type CreateBaseInput = {
   title?: string
   agent?: AgentV2.ID
   model?: ModelV2.Ref
+  permissionCeiling?: SessionSchema.Info["permissionCeiling"]
 }
 type CreateInput = CreateBaseInput &
   ({ location: Location.Ref; parentID?: never } | { parentID: SessionSchema.ID; location?: never })
@@ -360,6 +362,10 @@ const layer = Layer.effect(
           path: path.relative(project.directory, location.directory).replaceAll("\\", "/"),
           workspaceID: location.workspaceID ? WorkspaceV2.ID.make(location.workspaceID) : undefined,
           title: input.title ?? `New session - ${new Date(now).toISOString()}`,
+          metadata: SessionPermissionCeiling.write(
+            undefined,
+            SessionPermissionCeiling.inherit(parent?.permissionCeiling, input.permissionCeiling),
+          ),
           agent: input.agent,
           model: input.model
             ? {

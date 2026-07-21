@@ -9,12 +9,14 @@ import { WorkspaceV2 } from "../workspace"
 import { SessionSchema } from "./schema"
 import { SessionTable } from "./sql"
 import { SessionMessage } from "./message"
+import { SessionPermissionCeiling } from "./permission-ceiling"
 import { PersistedRevert } from "@opencode-ai/schema/session-revert"
 import { Money } from "@opencode-ai/schema/money"
 
 const decodeRevert = Schema.decodeUnknownSync(PersistedRevert)
 
 export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.Info {
+  const permissionCeiling = SessionPermissionCeiling.read(row.metadata)
   return SessionSchema.Info.make({
     id: SessionSchema.ID.make(row.id),
     projectID: ProjectV2.ID.make(row.project_id),
@@ -34,6 +36,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
           variant: ModelV2.VariantID.make(row.model.variant ?? "default"),
         }
       : undefined,
+    permissionCeiling: permissionCeiling.length > 0 ? permissionCeiling : undefined,
     cost: Money.USD.make(row.cost),
     tokens: {
       input: row.tokens_input,

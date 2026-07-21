@@ -10,6 +10,7 @@ import { SessionEvent } from "./session-event.js"
 import { SessionID } from "./session-id.js"
 import { SessionMessage } from "./session-message.js"
 import { Money } from "./money.js"
+import { Permission } from "./permission.js"
 import { TokenUsage } from "./token-usage.js"
 import { Revert } from "./session-revert.js"
 
@@ -32,6 +33,7 @@ export const Info = Schema.Struct({
   projectID: Project.ID,
   agent: Agent.ID.pipe(optional),
   model: Model.Ref.pipe(optional),
+  permissionCeiling: Permission.Ruleset.pipe(optional),
   cost: Money.USD,
   tokens: TokenUsage.Info,
   time: Schema.Struct({

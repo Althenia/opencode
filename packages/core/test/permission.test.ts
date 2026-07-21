@@ -14,6 +14,7 @@ import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionPermissionCeiling } from "@opencode-ai/core/session/permission-ceiling"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { eq } from "drizzle-orm"
@@ -151,6 +152,29 @@ describe("PermissionV2", () => {
       const blocked = yield* service.assert(assertion()).pipe(Effect.flip)
       expect(blocked).toBeInstanceOf(PermissionV2.BlockedError)
       expect(yield* service.list()).toEqual([])
+    }),
+  )
+
+  it.effect("enforces the session ceiling after agent allows and remembered approvals", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "read", resource: "*", effect: "allow" }])
+      const { db } = yield* Database.Service
+      yield* db
+        .update(SessionTable)
+        .set({
+          metadata: SessionPermissionCeiling.write(undefined, [
+            { action: "read", resource: "src/*", effect: "deny" },
+          ]),
+        })
+        .where(eq(SessionTable.id, SessionV2.ID.make("ses_test")))
+        .run()
+        .pipe(Effect.orDie)
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({ projectID: Project.ID.global, action: "read", resources: ["src/index.ts"] })
+
+      const service = yield* PermissionV2.Service
+      expect(yield* service.ask(assertion())).toMatchObject({ effect: "deny" })
+      expect(yield* service.ask(assertion({ resources: ["README.md"] }))).toMatchObject({ effect: "allow" })
     }),
   )
 

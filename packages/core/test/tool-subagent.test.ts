@@ -22,6 +22,7 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
+import { PermissionV2 } from "@opencode-ai/core/permission"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { SubagentTool } from "@opencode-ai/core/tool/subagent"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
@@ -286,6 +287,83 @@ describe("SubagentTool", () => {
           })
           const fallbackChild = yield* sessions.get(outputSessionID(fallback.output?.structured))
           expect(fallbackChild).toMatchObject({ parentID: parent.id, model: parentModel })
+        }),
+      ),
+    ),
+  )
+
+  it.live("inherits the caller and parent deny ceilings without inheriting allows", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          const sessions = yield* SessionV2.Service
+          const parent = yield* sessions.create({
+            location,
+            permissionCeiling: [{ action: "read", resource: "/secret/*", effect: "deny" }],
+          })
+          yield* withSubagent(parent.location)
+          const locations = yield* LocationServiceMap.Service
+          yield* AgentV2.Service.use((agents) =>
+            agents.transform((draft) => {
+              draft.update(toolIdentity.agent, (agent) => {
+                agent.permissions = [
+                  { action: "*", resource: "*", effect: "allow" },
+                  { action: "shell", resource: "*", effect: "deny" },
+                ]
+              })
+              draft.update(AgentV2.ID.make("reviewer"), (agent) => {
+                agent.permissions = [{ action: "*", resource: "*", effect: "allow" }]
+              })
+            }),
+          ).pipe(Effect.provide(locations.get(parent.location)))
+          const registry = yield* ToolRegistry.Service.pipe(Effect.provide(locations.get(parent.location)))
+          yield* waitForTool(registry, SubagentTool.name)
+
+          const settled = yield* settleTool(registry, {
+            sessionID: parent.id,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "call-subagent-ceiling",
+              name: SubagentTool.name,
+              input: { agent: "reviewer", description: "restricted", prompt: "review this" },
+            },
+          })
+          const child = yield* sessions.get(outputSessionID(settled.output?.structured))
+          expect(child.permissionCeiling).toEqual([
+            { action: "read", resource: "/secret/*", effect: "deny" },
+            { action: "shell", resource: "*", effect: "deny" },
+          ])
+
+          const permission = yield* PermissionV2.Service.pipe(Effect.provide(locations.get(child.location)))
+          expect(
+            yield* permission.ask({
+              sessionID: child.id,
+              agent: AgentV2.ID.make("reviewer"),
+              action: "shell",
+              resources: ["pwd"],
+            }),
+          ).toMatchObject({ effect: "deny" })
+          expect(
+            yield* permission.ask({
+              sessionID: child.id,
+              agent: AgentV2.ID.make("reviewer"),
+              action: "read",
+              resources: ["/secret/token"],
+            }),
+          ).toMatchObject({ effect: "deny" })
+          expect(
+            yield* permission.ask({
+              sessionID: child.id,
+              agent: AgentV2.ID.make("reviewer"),
+              action: "edit",
+              resources: ["src/index.ts"],
+            }),
+          ).toMatchObject({ effect: "allow" })
         }),
       ),
     ),
