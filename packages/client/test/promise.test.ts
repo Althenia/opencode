@@ -31,6 +31,7 @@ test("exposes every standard HTTP API group", () => {
     "reference",
     "projectCopy",
     "vcs",
+    "selfImprovement",
     "debug",
   ])
   expect(Object.keys(client.debug)).toEqual(["location"])
@@ -220,6 +221,42 @@ test("session.get returns the wire projection", async () => {
   const result = await client.session.get({ sessionID: "ses_test" })
 
   expect(result.time.created).toBe(1_717_171_717_000)
+})
+
+test("self-improvement status returns privacy-safe engine diagnostics", async () => {
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input) => {
+      expect(typeof input === "string" ? input : input instanceof URL ? input.href : input.url).toBe(
+        "http://localhost:3000/api/self-improvement/status?location%5Bdirectory%5D=%2Ftmp%2Fproject",
+      )
+      return Response.json({
+        location: { directory: "/tmp/project", project: { id: "proj_test", directory: "/tmp/project" } },
+        data: {
+          enabled: true,
+          autoApprove: true,
+          intervalSeconds: 60,
+          evaluationWindowMinutes: 60,
+          evidence: {
+            count: 0,
+            reason: {
+              code: "no-terminal-evidence",
+              message:
+                "No terminal session evidence has been recorded. Complete a TUI prompt cycle and verify the configured evidence principal is authorized.",
+            },
+          },
+          automation: { running: false },
+          generatedSlots: [],
+        },
+      })
+    },
+  })
+
+  const result = await client.selfImprovement.status({ location: { directory: "/tmp/project" } })
+
+  expect(result.data.enabled).toBe(true)
+  expect(result.data.evidence.reason?.code).toBe("no-terminal-evidence")
+  expect(JSON.stringify(result.data)).not.toContain("metrics")
 })
 
 test("session instructions methods use the public HTTP contract", async () => {

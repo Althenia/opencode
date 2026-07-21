@@ -2772,6 +2772,72 @@ test("loads and refreshes normalized session diagnostics", async () => {
   }
 })
 
+test("loads and manually refreshes privacy-safe self-improvement status", async () => {
+  const events = createEventStream()
+  let evidenceCount = 0
+  let requests = 0
+  const calls = createFetch((url) => {
+    if (url.pathname !== "/api/self-improvement/status") return undefined
+    requests++
+    return json({
+      location: { directory, project: { id: "proj_test", directory } },
+      data: {
+        enabled: true,
+        autoApprove: true,
+        intervalSeconds: 60,
+        evaluationWindowMinutes: 60,
+        evidence: {
+          count: evidenceCount,
+          ...(evidenceCount === 0
+            ? {
+                reason: {
+                  code: "no-terminal-evidence",
+                  message:
+                    "No terminal session evidence has been recorded. Complete a TUI prompt cycle and verify the configured evidence principal is authorized.",
+                },
+              }
+            : { lastObservedAt: 1_000 }),
+        },
+        automation: { running: false },
+        generatedSlots: [],
+      },
+    })
+  }, events)
+  let data!: ReturnType<typeof useData>
+
+  function Probe() {
+    data = useData()
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <ClientProvider api={createApi(calls.fetch)}>
+        <ProjectProvider>
+          <DataProvider>
+            <Probe />
+          </DataProvider>
+        </ProjectProvider>
+      </ClientProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    const location = { directory }
+    await data.location.selfImprovement.sync(location)
+    expect(data.location.selfImprovement.get(location)?.evidence.reason?.code).toBe("no-terminal-evidence")
+
+    evidenceCount = 2
+    data.location.selfImprovement.invalidate(location)
+    await data.location.selfImprovement.sync(location)
+    expect(data.location.selfImprovement.get(location)?.evidence).toEqual({ count: 2, lastObservedAt: 1_000 })
+    expect(requests).toBe(2)
+    expect(JSON.stringify(data.location.selfImprovement.get(location))).not.toContain("metrics")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("stops at the last non-repeating ancestor on a parent cycle", async () => {
   const { data, app } = await mountData({ x: "y", y: "x" })
   try {

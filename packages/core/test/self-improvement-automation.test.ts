@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { Effect, Schema } from "effect"
+import { Deferred, Effect, Fiber, Schema } from "effect"
 import { SelfImprovement, SelfImprovementEvaluation, SelfImprovementLifecycle } from "@opencode-ai/schema"
 import { ConfigExperimental } from "@opencode-ai/core/config/experimental"
 import { SelfImprovementAutomation } from "@opencode-ai/core/self-improvement/automation"
@@ -33,6 +33,7 @@ const baseline = {
 const settings = {
   enabled: true,
   autoApprove: true,
+  intervalSeconds: 60,
   evaluationWindowMillis: 60_000,
 }
 const approvalBinding = new SelfImprovementLifecycle.ApprovalBinding({
@@ -76,6 +77,41 @@ const dependencies = (overrides: Partial<SelfImprovementAutomation.Dependencies>
     reconcile: Effect.succeed(0),
     ...overrides,
   })
+
+test("reports settings and completed automation tick state", async () => {
+  const service = SelfImprovementAutomation.make({ locationID, settings, dependencies: dependencies() })
+
+  expect(await Effect.runPromise(service.status)).toEqual({ settings, running: false })
+  const result = await Effect.runPromise(service.tick)
+  expect(await Effect.runPromise(service.status)).toEqual({
+    settings,
+    running: false,
+    lastStartedAt: now,
+    lastCompletedAt: now,
+    lastResult: result,
+  })
+})
+
+test("reports a running tick before it settles", async () => {
+  const started = Deferred.makeUnsafe<void>()
+  const release = Deferred.makeUnsafe<void>()
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings,
+    dependencies: dependencies({
+      listEligiblePatterns: () =>
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as([])),
+      listGeneratedWork: () => Effect.succeed([]),
+    }),
+  })
+
+  const fiber = Effect.runFork(service.tick)
+  await Effect.runPromise(Deferred.await(started))
+  expect(await Effect.runPromise(service.status)).toMatchObject({ settings, running: true, lastStartedAt: now })
+  await Effect.runPromise(Deferred.succeed(release, undefined))
+  await Effect.runPromise(Fiber.join(fiber))
+  expect((await Effect.runPromise(service.status)).running).toBe(false)
+})
 
 test("automatically generates eligible evidence, prepares shadow, and opens its first run", async () => {
   const calls: string[] = []

@@ -1036,13 +1036,24 @@ export interface VcsApi<E = never> {
   readonly diff: VcsDiffOperation<E>
 }
 
-export type Endpoint26_0Output = EffectValue<ReturnType<RawClient["server.debug"]["debug.location"]>>
-export type DebugLocationListOperation<E = never> = () => Effect.Effect<Endpoint26_0Output, E>
+type Endpoint26_0Request = Parameters<RawClient["server.selfImprovement"]["selfImprovement.status"]>[0]
+export type Endpoint26_0Input = { readonly location?: Endpoint26_0Request["query"]["location"] }
+export type Endpoint26_0Output = EffectValue<ReturnType<RawClient["server.selfImprovement"]["selfImprovement.status"]>>
+export type SelfImprovementStatusOperation<E = never> = (
+  input?: Endpoint26_0Input,
+) => Effect.Effect<Endpoint26_0Output, E>
 
-type Endpoint26_1Request = Parameters<RawClient["server.debug"]["debug.location.evict"]>[0]
-export type Endpoint26_1Input = { readonly location?: Endpoint26_1Request["query"]["location"] }
-export type Endpoint26_1Output = EffectValue<ReturnType<RawClient["server.debug"]["debug.location.evict"]>>
-export type DebugLocationEvictOperation<E = never> = (input?: Endpoint26_1Input) => Effect.Effect<Endpoint26_1Output, E>
+export interface SelfImprovementApi<E = never> {
+  readonly status: SelfImprovementStatusOperation<E>
+}
+
+export type Endpoint27_0Output = EffectValue<ReturnType<RawClient["server.debug"]["debug.location"]>>
+export type DebugLocationListOperation<E = never> = () => Effect.Effect<Endpoint27_0Output, E>
+
+type Endpoint27_1Request = Parameters<RawClient["server.debug"]["debug.location.evict"]>[0]
+export type Endpoint27_1Input = { readonly location?: Endpoint27_1Request["query"]["location"] }
+export type Endpoint27_1Output = EffectValue<ReturnType<RawClient["server.debug"]["debug.location.evict"]>>
+export type DebugLocationEvictOperation<E = never> = (input?: Endpoint27_1Input) => Effect.Effect<Endpoint27_1Output, E>
 
 export interface DebugApi<E = never> {
   readonly location: { readonly list: DebugLocationListOperation<E>; readonly evict: DebugLocationEvictOperation<E> }
@@ -1075,5 +1086,6 @@ export interface AppApi<E = never> {
   readonly reference: ReferenceApi<E>
   readonly projectCopy: ProjectCopyApi<E>
   readonly vcs: VcsApi<E>
+  readonly selfImprovement: SelfImprovementApi<E>
   readonly debug: DebugApi<E>
 }

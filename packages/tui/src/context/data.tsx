@@ -27,6 +27,7 @@ import type {
   SessionPendingInfo,
   ShellInfo,
   SkillInfo,
+  SelfImprovementStatusInfo,
   OpenCodeEvent,
 } from "@opencode-ai/client"
 import type { Plugin } from "@opencode-ai/plugin/v2/tui"
@@ -60,6 +61,7 @@ type LocationData = {
   // once the command exits or is deleted, so this only ever holds in-flight shells.
   shell?: Record<string, ShellInfo>
   skill?: SkillInfo[]
+  selfImprovement?: SelfImprovementStatusInfo
 }
 
 type Store = {
@@ -1146,6 +1148,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           result.location.provider.invalidate(location)
           result.location.reference.invalidate(location)
           result.location.skill.invalidate(location)
+          result.location.selfImprovement.invalidate(location)
           result.shell.invalidate(location)
           result.session.form.invalidate("global", location)
         },
@@ -1301,6 +1304,24 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           },
           invalidate(ref?: LocationRef) {
             sync.invalidate(`location.skill:${locationKey(ref ?? defaultLocation())}`)
+          },
+        },
+        selfImprovement: {
+          get(location?: LocationRef) {
+            return store.location[locationKey(location ?? defaultLocation())]?.selfImprovement
+          },
+          sync(ref?: LocationRef) {
+            const id = locationKey(ref ?? defaultLocation())
+            return sync.run(`location.self-improvement:${id}`, async () => {
+              const response = await client.api.selfImprovement.status({
+                location: locationQuery(ref ?? defaultLocation()),
+              })
+              const key = locationKey(response.location)
+              setStore("location", key, { ...store.location[key], selfImprovement: response.data })
+            })
+          },
+          invalidate(ref?: LocationRef) {
+            sync.invalidate(`location.self-improvement:${locationKey(ref ?? defaultLocation())}`)
           },
         },
       },

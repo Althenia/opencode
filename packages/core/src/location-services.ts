@@ -54,6 +54,7 @@ import { SelfImprovementPrivateQuery } from "./self-improvement/private-query"
 import { SelfImprovementRetention } from "./self-improvement/retention"
 import { Routing } from "./self-improvement/routing"
 import { SelfImprovementSessionObserver } from "./self-improvement/session-observer"
+import { SelfImprovementStatus } from "./self-improvement/status"
 import { SelfImprovementTransitionStore } from "./self-improvement/transition-store"
 import { SessionCompaction } from "./session/compaction"
 import { SessionGenerateNode } from "./session/generate-node"
@@ -144,6 +145,7 @@ const locationServiceNodes = [
   SelfImprovementGenerationStore.node,
   SelfImprovementGeneration.node,
   SelfImprovementAutomation.node,
+  SelfImprovementStatus.node,
   Vcs.node,
   // Start repository watches only after boot-critical filesystem and Git work.
   LocationWatcher.node,

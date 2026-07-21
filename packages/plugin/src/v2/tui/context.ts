@@ -19,6 +19,7 @@ import type {
   SessionPendingInfo,
   ShellInfo,
   SkillInfo,
+  SelfImprovementStatusInfo,
 } from "@opencode-ai/client"
 import type { KeyEvent, Renderable } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
@@ -99,6 +100,11 @@ export interface Data {
     readonly provider: LocationCollection<ProviderV2Info>
     readonly reference: LocationCollection<ReferenceInfo>
     readonly skill: LocationCollection<SkillInfo>
+    readonly selfImprovement: {
+      get(location?: LocationRef): SelfImprovementStatusInfo | undefined
+      sync(location?: LocationRef): Promise<void>
+      invalidate(location?: LocationRef): void
+    }
   }
 }
 

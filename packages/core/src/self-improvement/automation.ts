@@ -41,6 +41,7 @@ const preparableStages = new Set<SelfImprovementLifecycle.ArtifactStage>(["draft
 export interface Settings {
   readonly enabled: boolean
   readonly autoApprove: boolean
+  readonly intervalSeconds: number
   readonly evaluationWindowMillis: number
 }
 
@@ -133,8 +134,17 @@ export interface TickResult {
   readonly failures: number
 }
 
+export interface RuntimeStatus {
+  readonly settings: Settings
+  readonly running: boolean
+  readonly lastStartedAt?: SelfImprovementLifecycle.TimestampMillis
+  readonly lastCompletedAt?: SelfImprovementLifecycle.TimestampMillis
+  readonly lastResult?: TickResult
+}
+
 export interface Interface {
   readonly tick: Effect.Effect<TickResult>
+  readonly status: Effect.Effect<RuntimeStatus>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SelfImprovementAutomation") {}
@@ -156,9 +166,11 @@ export function make(input: {
   readonly settings: Settings
   readonly dependencies: Dependencies
 }): Interface {
-  if (!input.settings.enabled) return { tick: Effect.succeed(emptyResult) }
+  let runtimeStatus: RuntimeStatus = { settings: input.settings, running: false }
+  const status = Effect.sync(() => runtimeStatus)
+  if (!input.settings.enabled) return { tick: Effect.succeed(emptyResult), status }
 
-  const tick = Effect.fn("SelfImprovementAutomation.tick")(function* () {
+  const runTick = Effect.fn("SelfImprovementAutomation.runTick")(function* () {
     const now = yield* input.dependencies.now
     const seedResult = yield* attempt("seed generation strategy", input.dependencies.seedGenerationStrategy)
     const patternsResult = yield* attempt(
@@ -251,7 +263,22 @@ export function make(input: {
     }
   })()
 
-  return { tick }
+  const tick = Effect.gen(function* () {
+    const lastStartedAt = yield* input.dependencies.now
+    runtimeStatus = { ...runtimeStatus, running: true, lastStartedAt }
+    const lastResult = yield* runTick
+    const lastCompletedAt = yield* input.dependencies.now
+    runtimeStatus = { settings: input.settings, running: false, lastStartedAt, lastCompletedAt, lastResult }
+    return lastResult
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (runtimeStatus.running) runtimeStatus = { ...runtimeStatus, running: false }
+      }),
+    ),
+  )
+
+  return { tick, status }
 }
 
 function attempt<A>(label: string, effect: Effect.Effect<A, unknown>) {
@@ -297,6 +324,7 @@ export const layer = Layer.effect(
     const settings: Settings = {
       enabled: configured?.automatic === true,
       autoApprove: configured?.auto_approve !== false,
+      intervalSeconds: configured?.interval_seconds ?? 60,
       evaluationWindowMillis: (configured?.evaluation_window_minutes ?? 60) * 60_000,
     }
     const service = make({
@@ -600,7 +628,7 @@ export const layer = Layer.effect(
     })
     if (settings.enabled) {
       yield* service.tick.pipe(
-        Effect.repeat(Schedule.spaced(Duration.seconds(configured?.interval_seconds ?? 60))),
+        Effect.repeat(Schedule.spaced(Duration.seconds(settings.intervalSeconds))),
         Effect.forkScoped,
       )
     }

@@ -114,6 +114,26 @@ export function createFetch(override?: FetchHandler, events?: ReturnType<typeof 
     if (url.pathname === "/api/form/request")
       return json({ location: { directory, project: { id: "proj_test", directory: worktree } }, data: [] })
     if (/^\/api\/session\/[^/]+\/diagnostics$/.test(url.pathname)) return json({ data: null })
+    if (url.pathname === "/api/self-improvement/status")
+      return json({
+        location: { directory, project: { id: "proj_test", directory: worktree } },
+        data: {
+          enabled: false,
+          autoApprove: true,
+          intervalSeconds: 60,
+          evaluationWindowMinutes: 60,
+          evidence: {
+            count: 0,
+            reason: {
+              code: "automatic-disabled",
+              message:
+                "Automatic self-improvement is disabled. Set experimental.self_improvement.automatic to true for this location.",
+            },
+          },
+          automation: { running: false },
+          generatedSlots: [],
+        },
+      })
     if (/^\/api\/session\/[^/]+\/form$/.test(url.pathname)) return json({ data: [] })
     if (
       ["/api/agent", "/api/model", "/api/provider", "/api/integration", "/api/command", "/api/skill"].includes(

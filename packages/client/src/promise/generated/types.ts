@@ -540,6 +540,26 @@ export type VcsFileStatus = {
   status: "added" | "deleted" | "modified"
 }
 
+export type SelfImprovementStatusEmptyReasonCode = "automatic-disabled" | "no-terminal-evidence"
+
+export type SelfImprovementStatusTickResult = {
+  eligiblePatterns: number
+  generated: number
+  prepared: number
+  runsCreated: number
+  runsDecided: number
+  reconciled: number
+  failures: number
+}
+
+export type SelfImprovementStatusGeneratedSlot = {
+  slot: "active" | "shadow" | "canary"
+  artifactID: string
+  versionID: string
+  name: string
+  desiredRevision: number
+}
+
 export type SessionMessageModelSelected = {
   id: string
   metadata?: { [x: string]: JsonValue }
@@ -1792,6 +1812,8 @@ export type QuestionReplied = {
 
 export type ReferenceSource = ReferenceLocalSource | ReferenceGitSource
 
+export type SelfImprovementStatusEmptyReason = { code: SelfImprovementStatusEmptyReasonCode; message: string }
+
 export type PermissionV2Ruleset = Array<PermissionV2Rule>
 
 export type SessionRevertStaged = {
@@ -1993,6 +2015,21 @@ export type ReferenceInfo = {
   description?: string
   hidden?: boolean
   source: ReferenceSource
+}
+
+export type SelfImprovementStatusInfo = {
+  enabled: boolean
+  autoApprove: boolean
+  intervalSeconds: number
+  evaluationWindowMinutes: number
+  evidence: { count: number; lastObservedAt?: number; reason?: SelfImprovementStatusEmptyReason }
+  automation: {
+    running: boolean
+    lastStartedAt?: number
+    lastCompletedAt?: number
+    lastResult?: SelfImprovementStatusTickResult
+  }
+  generatedSlots: Array<SelfImprovementStatusGeneratedSlot>
 }
 
 export type AgentInfo = {
@@ -4972,6 +5009,17 @@ export type VcsDiffInput = {
 export type VcsDiffOutput = {
   location: { directory: string; workspaceID?: string; project: { id: string; directory: string } }
   data: Array<FileDiffInfo>
+}
+
+export type SelfImprovementStatusInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type SelfImprovementStatusOutput = {
+  location: { directory: string; workspaceID?: string; project: { id: string; directory: string } }
+  data: SelfImprovementStatusInfo
 }
 
 export type DebugLocationListOutput = Array<LocationRef>

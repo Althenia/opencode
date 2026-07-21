@@ -206,6 +206,8 @@ import type {
   VcsStatusOutput,
   VcsDiffInput,
   VcsDiffOutput,
+  SelfImprovementStatusInput,
+  SelfImprovementStatusOutput,
   DebugLocationListOutput,
   DebugLocationEvictInput,
   DebugLocationEvictOutput,
@@ -1714,6 +1716,20 @@ export function make(options: ClientOptions) {
             method: "GET",
             path: `/api/vcs/diff`,
             query: { location: input["location"], mode: input["mode"], context: input["context"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+    },
+    selfImprovement: {
+      status: (input?: SelfImprovementStatusInput, requestOptions?: RequestOptions) =>
+        request<SelfImprovementStatusOutput>(
+          {
+            method: "GET",
+            path: `/api/self-improvement/status`,
+            query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,
