@@ -92,6 +92,29 @@ test("reports settings and completed automation tick state", async () => {
   })
 })
 
+test("refreshes effective settings before reporting status and running a tick", async () => {
+  let current = { ...settings, enabled: false }
+  let called = false
+  const service = SelfImprovementAutomation.make({
+    locationID,
+    settings: current,
+    loadSettings: Effect.sync(() => current),
+    dependencies: dependencies({
+      listEligiblePatterns: () => Effect.sync(() => (called = true)).pipe(Effect.as([])),
+      listGeneratedWork: () => Effect.succeed([]),
+    }),
+  })
+
+  expect((await Effect.runPromise(service.status)).settings.enabled).toBe(false)
+  expect(await Effect.runPromise(service.tick)).toEqual(SelfImprovementAutomation.emptyResult)
+  expect(called).toBe(false)
+
+  current = { ...settings, enabled: true, intervalSeconds: 30 }
+  expect((await Effect.runPromise(service.status)).settings).toEqual(current)
+  await Effect.runPromise(service.tick)
+  expect(called).toBe(true)
+})
+
 test("reports a running tick before it settles", async () => {
   const started = Deferred.makeUnsafe<void>()
   const release = Deferred.makeUnsafe<void>()

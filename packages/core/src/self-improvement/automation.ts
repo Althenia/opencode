@@ -1,7 +1,7 @@
 export * as SelfImprovementAutomation from "./automation"
 
 import { and, asc, desc, eq, gt, isNotNull, isNull } from "drizzle-orm"
-import { Cause, Clock, Context, Duration, Effect, Layer, Schedule } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Layer } from "effect"
 import {
   SelfImprovement,
   SelfImprovementApi,
@@ -164,13 +164,19 @@ export const dependencies = (value: Dependencies): Dependencies => value
 export function make(input: {
   readonly locationID: SelfImprovementLifecycle.LocationID
   readonly settings: Settings
+  readonly loadSettings?: Effect.Effect<Settings>
   readonly dependencies: Dependencies
 }): Interface {
+  const readSettings = input.loadSettings ?? Effect.succeed(input.settings)
   let runtimeStatus: RuntimeStatus = { settings: input.settings, running: false }
-  const status = Effect.sync(() => runtimeStatus)
-  if (!input.settings.enabled) return { tick: Effect.succeed(emptyResult), status }
+  const status = readSettings.pipe(
+    Effect.map((settings) => {
+      runtimeStatus = { ...runtimeStatus, settings }
+      return runtimeStatus
+    }),
+  )
 
-  const runTick = Effect.fn("SelfImprovementAutomation.runTick")(function* () {
+  const runTick = Effect.fn("SelfImprovementAutomation.runTick")(function* (settings: Settings) {
     const now = yield* input.dependencies.now
     const seedResult = yield* attempt("seed generation strategy", input.dependencies.seedGenerationStrategy)
     const patternsResult = yield* attempt(
@@ -202,7 +208,7 @@ export function make(input: {
       ),
       (run) => attempt("decide evaluation run", input.dependencies.decideRun({ run, now })),
     )
-    const approvalsResult = input.settings.autoApprove
+    const approvalsResult = settings.autoApprove
       ? yield* attempt("list pending approvals", input.dependencies.listPendingApprovals())
       : ({ ok: true, value: [] } as const)
     const approvals = yield* Effect.forEach(approvalsResult.ok ? approvalsResult.value : [], (request) =>
@@ -255,20 +261,25 @@ export function make(input: {
             stage,
             baseline,
             now: at,
-            cutoffAt: SelfImprovementLifecycle.TimestampMillis.make(at + input.settings.evaluationWindowMillis),
+            cutoffAt: SelfImprovementLifecycle.TimestampMillis.make(at + settings.evaluationWindowMillis),
           })
           return { prepared: prepared ? 1 : 0, runsCreated: 1 }
         }),
       )
     }
-  })()
+  })
 
   const tick = Effect.gen(function* () {
+    const settings = yield* readSettings
+    if (!settings.enabled) {
+      runtimeStatus = { ...runtimeStatus, settings, running: false }
+      return emptyResult
+    }
     const lastStartedAt = yield* input.dependencies.now
-    runtimeStatus = { ...runtimeStatus, running: true, lastStartedAt }
-    const lastResult = yield* runTick
+    runtimeStatus = { ...runtimeStatus, settings, running: true, lastStartedAt }
+    const lastResult = yield* runTick(settings)
     const lastCompletedAt = yield* input.dependencies.now
-    runtimeStatus = { settings: input.settings, running: false, lastStartedAt, lastCompletedAt, lastResult }
+    runtimeStatus = { settings, running: false, lastStartedAt, lastCompletedAt, lastResult }
     return lastResult
   }).pipe(
     Effect.ensuring(
@@ -307,6 +318,17 @@ export const layer = Layer.effect(
     const evidence = yield* SelfImprovementPrivateEvidenceCommand.Service
     const transitions = yield* SelfImprovementTransitionStore.Service
     const reconciler = yield* SelfImprovementContextReconciler.Service
+    const loadSettings = config.entries().pipe(
+      Effect.map((entries) => {
+        const configured = Config.latest(entries, "experimental")?.self_improvement
+        return {
+          enabled: configured?.automatic === true,
+          autoApprove: configured?.auto_approve !== false,
+          intervalSeconds: configured?.interval_seconds ?? 60,
+          evaluationWindowMillis: (configured?.evaluation_window_minutes ?? 60) * 60_000,
+        } satisfies Settings
+      }),
+    )
     const configured = Config.latest(yield* config.entries(), "experimental")?.self_improvement
     const locationRef = Location.Ref.make({
       directory: location.directory,
@@ -321,15 +343,11 @@ export const layer = Layer.effect(
       "runtime-evidence-service",
       configured?.evidence_principal_id ?? "self-improvement-runtime-evidence",
     )
-    const settings: Settings = {
-      enabled: configured?.automatic === true,
-      autoApprove: configured?.auto_approve !== false,
-      intervalSeconds: configured?.interval_seconds ?? 60,
-      evaluationWindowMillis: (configured?.evaluation_window_minutes ?? 60) * 60_000,
-    }
+    const settings = yield* loadSettings
     const service = make({
       locationID,
       settings,
+      loadSettings,
       dependencies: {
         now: Clock.currentTimeMillis.pipe(Effect.map((now) => SelfImprovementLifecycle.TimestampMillis.make(now))),
         seedGenerationStrategy: learning
@@ -626,12 +644,12 @@ export const layer = Layer.effect(
         reconcile: reconciler.drain,
       },
     })
-    if (settings.enabled) {
-      yield* service.tick.pipe(
-        Effect.repeat(Schedule.spaced(Duration.seconds(settings.intervalSeconds))),
-        Effect.forkScoped,
-      )
-    }
+    yield* Effect.gen(function* () {
+      const current = yield* service.status
+      if (current.settings.enabled) yield* service.tick
+      const next = yield* service.status
+      yield* Effect.sleep(Duration.seconds(next.settings.enabled ? next.settings.intervalSeconds : 1))
+    }).pipe(Effect.forever, Effect.forkScoped({ startImmediately: true }))
     return Service.of(service)
   }),
 )

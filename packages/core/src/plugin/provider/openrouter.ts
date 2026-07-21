@@ -27,6 +27,19 @@ export const OpenRouterPlugin = define({
       "sdk",
       Effect.fn(function* (evt) {
         if (evt.package !== "@openrouter/ai-sdk-provider") return
+        const apiKey =
+          typeof evt.options.apiKey === "string" && evt.options.apiKey.length > 0 ? evt.options.apiKey : undefined
+        if (apiKey) {
+          const upstream = typeof evt.options.fetch === "function" ? evt.options.fetch : fetch
+          evt.options.fetch = Object.assign(
+            async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+              const headers = new Headers(init?.headers)
+              headers.set("Authorization", `Bearer ${apiKey}`)
+              return upstream(input, { ...init, headers })
+            },
+            { preconnect: upstream.preconnect ?? fetch.preconnect },
+          )
+        }
         const mod = yield* Effect.promise(() => import("@openrouter/ai-sdk-provider"))
         evt.sdk = mod.createOpenRouter(evt.options)
       }),

@@ -396,7 +396,7 @@ export class ListMetricRunsRequest extends Schema.Class<ListMetricRunsRequest>(
   versionID: SelfImprovementLifecycle.ArtifactVersionID.pipe(optional),
   stage: SelfImprovementLifecycle.ArtifactStage.pipe(optional),
   state: SelfImprovementEvaluation.RunState.pipe(optional),
-  includeSamples: BooleanFromString.pipe(Schema.withDecodingDefault(Effect.succeed("false"))),
+  includeSamples: BooleanFromString.pipe(Schema.withDecodingDefault(Effect.succeed("false" as const))),
   limit: PageLimit,
   cursor: Cursor.pipe(optional),
 }) {}

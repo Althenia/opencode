@@ -119,6 +119,7 @@ describe("OpenRouterPlugin", () => {
           ...ModelV2.Info.empty(ProviderV2.ID.openrouter, ModelV2.ID.make("openai/gpt-4o-mini")),
           modelID: ModelV2.ID.make("openai/gpt-4o-mini"),
           package: ProviderV2.aisdk("@openrouter/ai-sdk-provider"),
+          headers: { Authorization: "" },
           capabilities: { tools: true, input: ["text"], output: ["text"] },
           limit: { context: 128_000, output: 16_384 },
         }),

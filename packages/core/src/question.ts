@@ -5,6 +5,7 @@ import { Context, Deferred, Effect, Layer, Schema } from "effect"
 import { Question } from "@opencode-ai/schema/question"
 import { EventV2 } from "./event"
 import { SessionSchema } from "./session/schema"
+import { SessionAutonomy } from "./session/autonomy"
 
 export const ID = Question.ID
 export type ID = typeof ID.Type
@@ -76,6 +77,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    const autonomy = yield* SessionAutonomy.Service
     const pending = new Map<ID, Pending>()
 
     yield* Effect.addFinalizer(() =>
@@ -93,6 +95,17 @@ const layer = Layer.effect(
     const ask = Effect.fn("QuestionV2.ask")((input: AskInput) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
+          const mode = (
+            yield* autonomy
+              .get(input.sessionID)
+              .pipe(Effect.catchTag("SessionAutonomy.NotFound", () => Effect.succeed(SessionAutonomy.defaultState)))
+          ).mode
+          if (mode === "yolo" || mode === "goal") {
+            return input.questions.map((question) => {
+              const selected = question.options[0]?.label
+              return selected ? [selected] : ["Continue with the safest reasonable default."]
+            })
+          }
           const id = ID.ascending()
           const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
           const request: Request = { id, ...input }
@@ -148,4 +161,4 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node, SessionAutonomy.node] })
