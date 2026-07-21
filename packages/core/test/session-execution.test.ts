@@ -12,6 +12,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SelfImprovementSessionObserver } from "@opencode-ai/core/self-improvement/session-observer"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionAutonomy } from "@opencode-ai/core/session/autonomy"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
 import { UserInterruptedError } from "@opencode-ai/core/session/error"
 import { SessionRunner } from "@opencode-ai/core/session/runner"
@@ -224,6 +225,7 @@ function buildExecution(
     const database = yield* Database.Service
     const events = yield* EventV2.Service
     const store = yield* SessionStore.Service
+    const autonomy = SessionAutonomy.make({ db: database.db })
     const runner = Layer.succeed(SessionRunner.Service, SessionRunner.Service.of({ drain }))
     const observer = Layer.succeed(
       SelfImprovementSessionObserver.Service,
@@ -244,6 +246,7 @@ function buildExecution(
         Layer.provide(Layer.succeed(Database.Service, database)),
         Layer.provide(Layer.succeed(EventV2.Service, events)),
         Layer.provide(Layer.succeed(SessionStore.Service, store)),
+        Layer.provide(Layer.succeed(SessionAutonomy.Service, autonomy)),
         Layer.provide(locations),
       ),
       scope,

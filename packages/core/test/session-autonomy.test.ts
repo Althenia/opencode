@@ -80,3 +80,21 @@ it.effect("stops an active goal durably", () =>
     expect(yield* service.get(sessionID)).toMatchObject({ mode: "normal", goal: { status: "stopped" } })
   }),
 )
+
+it.effect("creates bounded continuation instructions and recognizes only the explicit completion marker", () =>
+  Effect.sync(() => {
+    const goal: SessionAutonomy.Goal = {
+      text: "Ship the fix",
+      status: "active",
+      iteration: 2,
+      maxIterations: 6,
+      noProgress: 0,
+      maxNoProgress: 3,
+    }
+    const prompt = SessionAutonomy.continuationPrompt(goal)
+    expect(prompt).toContain("Goal: Ship the fix")
+    expect(prompt).toContain("Continuation: 3/6")
+    expect(SessionAutonomy.isCompleted("work complete")).toBe(false)
+    expect(SessionAutonomy.isCompleted(`verified ${SessionAutonomy.CompletionMarker}`)).toBe(true)
+  }),
+)

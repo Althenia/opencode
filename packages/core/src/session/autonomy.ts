@@ -76,7 +76,25 @@ export const write = (metadata: Record<string, unknown> | null | undefined, stat
   [MetadataKey]: state,
 })
 
+export const CompletionMarker = "<goal-complete/>"
+
 export const progressDigest = (value: string) => Hash.sha256(value.trim())
+
+export function isCompleted(progress: string) {
+  return progress.includes(CompletionMarker)
+}
+
+export function continuationPrompt(goal: Goal) {
+  return [
+    "Continue autonomously toward the active user goal.",
+    `Goal: ${goal.text}`,
+    `Continuation: ${goal.iteration + 1}/${goal.maxIterations}`,
+    "Use the conversation and current repository state to choose the next useful action.",
+    "Answer routine blockers yourself using the safest reasonable default.",
+    `When the goal is actually achieved, include exactly ${CompletionMarker} in the final response.`,
+    "Do not claim completion without verification evidence.",
+  ].join("\n")
+}
 
 export function make(input: { db: Database.Interface["db"] }): Interface {
   const load = (sessionID: SessionSchema.ID) =>

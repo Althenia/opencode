@@ -12,6 +12,11 @@ import { SessionSchema } from "./schema"
 import { SessionStore } from "./store"
 import { toSessionError } from "./to-session-error"
 import { UserInterruptedError } from "./error"
+import { Database } from "../database/database"
+import { Hash } from "../util/hash"
+import { SessionAutonomy } from "./autonomy"
+import { SessionMessage } from "./message"
+import { SessionPending } from "./pending"
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */
@@ -46,6 +51,8 @@ export const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const events = yield* EventV2.Service
+    const db = (yield* Database.Service).db
+    const autonomy = yield* SessionAutonomy.Service
     const reportLifecycle = <A>(sessionID: SessionSchema.ID, effect: Effect.Effect<A>) =>
       effect.pipe(
         Effect.tapCause((cause) =>
@@ -74,11 +81,50 @@ export const layer = Layer.effect(
         ),
         Effect.asVoid,
       )
+    const queueGoalContinuation = Effect.fnUntraced(function* (sessionID: SessionSchema.ID) {
+      const state = yield* autonomy
+        .get(sessionID)
+        .pipe(Effect.catchTag("SessionAutonomy.NotFound", () => Effect.succeed(SessionAutonomy.defaultState)))
+      if (state.mode !== "goal" || !state.goal || state.goal.status !== "active") return false
+      const messages = yield* store.context(sessionID)
+      const assistant = messages.findLast((message) => message.type === "assistant")
+      const progress =
+        assistant?.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join("\n") ?? ""
+      const advanced = yield* autonomy.advance({
+        sessionID,
+        progress,
+        completed: SessionAutonomy.isCompleted(progress),
+      })
+      if (advanced.mode !== "goal" || !advanced.goal || advanced.goal.status !== "active") return false
+      const id = SessionMessage.ID.make(
+        `msg_goal_${Hash.sha256(`${sessionID}\0${advanced.goal.iteration}`).slice(0, 24)}`,
+      )
+      const input = SessionPending.Message.make({
+        type: "synthetic",
+        data: {
+          text: SessionAutonomy.continuationPrompt(advanced.goal),
+          description: "Autonomous goal continuation",
+          metadata: { autonomy: { mode: "goal", iteration: advanced.goal.iteration } },
+        },
+        delivery: "steer",
+      })
+      return yield* SessionPending.admit(db, events, { id, sessionID, input }).pipe(
+        Effect.as(true),
+        Effect.catchDefect((defect) =>
+          defect instanceof SessionPending.LifecycleConflict ? Effect.succeed(false) : Effect.die(defect),
+        ),
+      )
+    })
+
     // Starting or finishing on its own clears stale suspension; interruption preserves it because
     // managed-server teardown suspends active Sessions immediately before interrupting their drains.
     const clearSuspensionOnCommit = (sessionID: SessionSchema.ID) => ({
       commit: () => Effect.asVoid(store.consumeSuspended(sessionID)),
     })
+    let wake: (sessionID: SessionSchema.ID) => Effect.Effect<void> = () => Effect.void
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError, InterruptReason>({
       started: (sessionID) =>
         reportLifecycle(
@@ -128,9 +174,22 @@ export const layer = Layer.effect(
               ? Effect.runSyncExit(Effect.interrupt)
               : exit,
           )
+          const queued =
+            outcome.type === "succeeded"
+              ? yield* queueGoalContinuation(sessionID).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("Failed to queue autonomous goal continuation", cause).pipe(
+                      Effect.annotateLogs({ sessionID }),
+                      Effect.as(false),
+                    ),
+                  ),
+                )
+              : false
+          if (queued) yield* wake(sessionID)
         }),
     })
 
+    wake = coordinator.wake
     return Service.of({
       active: coordinator.active,
       interrupt: (sessionID) => coordinator.interrupt(sessionID, "user"),
@@ -144,7 +203,7 @@ export const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [SessionStore.node, LocationServiceMap.node, EventV2.node],
+  deps: [Database.node, SessionAutonomy.node, SessionStore.node, LocationServiceMap.node, EventV2.node],
 })
 
 /** Low-level compatibility layer for callers that only need durable Session recording. */
