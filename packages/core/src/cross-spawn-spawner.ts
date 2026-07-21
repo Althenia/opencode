@@ -211,6 +211,9 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
     }
   })
 
+  const nodeBufferEncoding = (encoding: ChildProcess.Encoding | undefined): BufferEncoding | undefined =>
+    encoding === "utf-16le" ? "utf16le" : encoding
+
   const setupStdin = (
     command: ChildProcess.StandardCommand,
     proc: NodeChildProcess.ChildProcess,
@@ -223,7 +226,7 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
           evaluate: () => proc.stdin!,
           onError: (err) => toPlatformError("fromWritable(stdin)", toError(err), command),
           endOnDone: cfg.endOnDone,
-          encoding: cfg.encoding,
+          encoding: nodeBufferEncoding(cfg.encoding),
         })
       }
       if (Stream.isStream(cfg.stream)) return Effect.as(Effect.forkScoped(Stream.run(cfg.stream, sink)), sink)

@@ -226,6 +226,27 @@ describe("cross-spawn spawner", () => {
         expect(out).toBe("a b c")
       }),
     )
+
+    fx.effect(
+      "normalizes the Effect utf-16le stdin encoding alias for Node",
+      Effect.gen(function* () {
+        const stdin = {
+          stream: Stream.make(Buffer.from("hello", "utf16le")),
+          encoding: "utf-16le" as const,
+        }
+        const handle = yield* ChildProcess.make(
+          process.execPath,
+          [
+            "-e",
+            'process.stdin.setEncoding("utf16le"); let out = ""; process.stdin.on("data", (chunk) => out += chunk); process.stdin.on("end", () => process.stdout.write(out))',
+          ],
+          { stdin },
+        )
+        const out = yield* decodeByteStream(handle.stdout)
+        yield* handle.exitCode
+        expect(out).toBe("hello")
+      }),
+    )
   })
 
   describe("process control", () => {
