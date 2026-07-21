@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { LLMClient, LLMEvent, Model, type LLMRequest } from "@opencode-ai/ai"
+import { LLMClient, LLMEvent, Model, SystemPart, type LLMRequest } from "@opencode-ai/ai"
 import { OpenAIChat } from "@opencode-ai/ai/protocols"
 import { Config } from "@opencode-ai/core/config"
 import { Database } from "@opencode-ai/core/database/database"
@@ -177,6 +177,7 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
         session,
         messages: [userMessage],
         inputID: SessionMessage.ID.make("msg_manual_compaction"),
+        system: [SystemPart.make("Manual constraints")],
       }),
     ).toEqual({ status: "completed" })
     expect(Array.from(yield* Fiber.join(delta)).map((event) => event.data.text)).toEqual(["manual summary"])
@@ -192,6 +193,7 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
       "x-opencode-client": "cli",
     })
     expect(requests[0]?.generation).toBeUndefined()
+    expect(requests[0]?.system.map((part) => part.text)).toEqual(["Manual constraints"])
     expect(JSON.stringify(requests[0]?.messages)).toContain("Manual compaction should include this short conversation.")
     expect(yield* store.context(sessionID)).toMatchObject([
       { type: "compaction", reason: "manual", summary: "manual summary", recent: "" },

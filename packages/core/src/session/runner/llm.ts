@@ -102,7 +102,13 @@ const layer = Layer.effect(
       const agent = loaded.agent
       const resolved = loaded.model
       const model = resolved.model
-      const compactionInput = { session, messages: loaded.messages, model, cost: resolved.cost }
+      const compactionInput = {
+        session,
+        messages: loaded.messages,
+        model,
+        cost: resolved.cost,
+        system: SessionModelRequest.baseSystem(loaded),
+      }
       if (compaction.required(compactionInput) && !(yield* SessionPending.compaction(db, session.id))) {
         const compacted = yield* compaction.compact(compactionInput)
         if (compacted.status === "completed") return { _tag: "RestartAfterCompaction", step: currentStep } as const
@@ -239,7 +245,15 @@ const layer = Layer.effect(
             recoverOverflow &&
             !publisher.hasRetryEvidence() &&
             isContextOverflowFailure(overflowFailure ?? streamFailure) &&
-            (yield* restore(recoverOverflow({ session, messages: loaded.messages, model, cost: resolved.cost })))
+            (yield* restore(
+              recoverOverflow({
+                session,
+                messages: loaded.messages,
+                model,
+                cost: resolved.cost,
+                system: prepared.request.system,
+              }),
+            ))
               .status === "completed"
           )
             return { _tag: "RestartAfterOverflowCompaction", step: currentStep } as const
@@ -413,10 +427,19 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const compacted = yield* restore(
             Effect.gen(function* () {
+              const messages = yield* store.context(sessionID)
+              const system = SessionCompaction.available(messages)
+                ? yield* Effect.gen(function* () {
+                    const selected = yield* context.select(sessionID)
+                    yield* InstructionState.prepare(db, events, selected.instructions, selected.session.id)
+                    return SessionModelRequest.baseSystem(yield* context.load(selected))
+                  })
+                : undefined
               return yield* compaction.compactManual({
                 session,
-                messages: yield* store.context(sessionID),
+                messages,
                 inputID: pending.id,
+                system,
               })
             }),
           ).pipe(Effect.exit)

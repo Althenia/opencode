@@ -26,6 +26,11 @@ interface PrepareInput {
   readonly step: number
 }
 
+export const baseSystem = (context: Pick<SessionContext.Loaded, "agent" | "initial">) =>
+  [context.agent.info.system ? context.agent.info.system : PROMPT_DEFAULT, context.initial]
+    .filter((part) => part.length > 0)
+    .map(SystemPart.make)
+
 /**
  * Builds an outbound model request and captures the tool-call capability that
  * must remain paired with it. It does not execute the request or mutate
@@ -54,9 +59,7 @@ export const layer = (options?: SessionModelHeaders.Options) => Layer.effect(
       const stepLimitReached = agent.info.steps !== undefined && input.step >= agent.info.steps
       const executableTools = stepLimitReached ? undefined : yield* registry.materialize(agent.info.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
-      const system = [agent.info.system ? agent.info.system : PROMPT_DEFAULT, input.context.initial]
-        .filter((part) => part.length > 0)
-        .map(SystemPart.make)
+      const system = baseSystem(input.context)
       const history = toLLMMessages(input.context.messages, resolved.ref, providerMetadataKey)
       const messages = stepLimitReached ? [...history, Message.assistant(MAX_STEPS_PROMPT)] : history
       const toolDefinitions = executableTools?.definitions ?? []

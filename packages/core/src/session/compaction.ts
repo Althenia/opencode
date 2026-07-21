@@ -1,12 +1,13 @@
 export * as SessionCompaction from "./compaction"
 
-import { LLM, LLMClient, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@opencode-ai/ai"
+import { LLM, LLMClient, LLMError, LLMEvent, Message, SystemPart, type LLMRequest, type Model } from "@opencode-ai/ai"
 import { SessionError } from "@opencode-ai/schema/session-error"
 import { Context, Effect, Layer, Stream } from "effect"
 import { Config } from "../config"
 import { EventV2 } from "../event"
 import { makeLocationNode } from "../effect/app-node"
 import { llmClient } from "../effect/app-node-platform"
+import { assembleCompactionConstraints } from "./compaction-constraints"
 import { SessionEvent } from "./event"
 import type { SessionMessage } from "./message"
 import { SessionModelHeaders } from "./model-headers"
@@ -74,12 +75,14 @@ export type AutoInput = {
   readonly messages: readonly SessionMessage.Info[]
   readonly model: Model
   readonly cost: ModelV2.Info["cost"]
+  readonly system: readonly SystemPart[]
 }
 
 export type ManualInput = {
   readonly session: SessionSchema.Info
   readonly messages: readonly SessionMessage.Info[]
   readonly inputID: SessionMessage.ID
+  readonly system?: readonly SystemPart[]
 }
 
 type Plan = {
@@ -90,6 +93,7 @@ type Plan = {
   readonly prompt: string
   readonly recent: string
   readonly inputID?: SessionMessage.ID
+  readonly system: readonly SystemPart[]
 }
 
 export type Outcome =
@@ -146,6 +150,11 @@ const serialize = (message: SessionMessage.Info) => {
   if (message.type === "shell") return `[Shell]: ${message.command}\n${truncate(message.output?.output ?? "")}`
   return ""
 }
+
+export const available = (messages: readonly SessionMessage.Info[]) =>
+  messages.some(
+    (message) => message.type !== "compaction" && message.type !== "system" && serialize(message).length > 0,
+  )
 
 const settings = (documents: readonly Config.Entry[]) => {
   const configured = documents
@@ -260,6 +269,7 @@ const make = (dependencies: Dependencies) => {
         LLM.request({
           model: plan.model,
           http: { headers: SessionModelHeaders.make(plan.session, dependencies.headers) },
+          system: plan.system,
           messages: [Message.user(plan.prompt)],
           tools: [],
         }),
@@ -331,6 +341,7 @@ const make = (dependencies: Dependencies) => {
         model: input.model,
         cost: input.cost,
         reason: "auto",
+        system: assembleCompactionConstraints(input.system.map((part) => part.text)).map(SystemPart.make),
         ...content,
       })
     const error = { type: "compaction.unavailable" as const, message: "Nothing to compact yet" }
@@ -381,6 +392,7 @@ const make = (dependencies: Dependencies) => {
       cost: resolved.cost,
       reason: "manual",
       inputID: input.inputID,
+      system: assembleCompactionConstraints((input.system ?? []).map((part) => part.text)).map(SystemPart.make),
       ...content,
     })
   })

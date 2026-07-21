@@ -2060,6 +2060,7 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(3)
       expect(userTexts(requests[1])[0]).toContain("## Objective")
+      expect(requests[1]?.system.map((part) => part.text)).toContain("Initial context")
       expect(userTexts(requests[2])[0]).toContain("<summary>\n## Objective\n- Recover overflow\n</summary>")
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "compaction", summary: "## Objective\n- Recover overflow" },
