@@ -26,6 +26,7 @@ const env = {
   XDG_DATA_HOME: path.join(root, "data"),
   XDG_STATE_HOME: path.join(root, "state"),
 }
+const port = await availablePort()
 const processes: Array<ReturnType<typeof Bun.spawn>> = []
 const errors: Array<Promise<string>> = []
 let failure: unknown
@@ -99,7 +100,11 @@ if (failure)
   })
 
 function spawnService() {
-  const process = Bun.spawn([binary, "serve", "--service"], { env, stdout: "ignore", stderr: "pipe" })
+  const process = Bun.spawn([binary, "serve", "--service", "--port", String(port)], {
+    env,
+    stdout: "ignore",
+    stderr: "pipe",
+  })
   processes.push(process)
   errors.push(new Response(process.stderr).text())
   return process
@@ -129,6 +134,14 @@ async function waitForReady(url: string, headers: HeadersInit) {
     await Bun.sleep(25)
   }
   throw new Error("Compiled service did not become ready")
+}
+
+async function availablePort() {
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() })
+  const port = server.port
+  await server.stop(true)
+  if (port === undefined) throw new Error("Could not allocate a compiled service smoke port")
+  return port
 }
 
 function exitsWithin(process: Bun.Subprocess, milliseconds: number) {
