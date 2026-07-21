@@ -1,6 +1,7 @@
 export * as ConfigV1 from "./config"
 
 import { Schema } from "effect"
+import { MAX_INSTRUCTION_MAX_BYTES } from "../../instruction-content"
 import { NonNegativeInt, PositiveInt, type DeepMutable } from "../../schema"
 import { ConfigReference } from "../../config/reference"
 import { ConfigAgentV1 } from "./agent"
@@ -122,6 +123,11 @@ export const Info = Schema.Struct({
   }),
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Additional instruction files or patterns to include",
+  }),
+  instruction_max_bytes: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_INSTRUCTION_MAX_BYTES)),
+  ).annotate({
+    description: "Maximum UTF-8 bytes inlined from each ambient instruction source",
   }),
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),

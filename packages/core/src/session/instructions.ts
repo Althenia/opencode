@@ -2,9 +2,11 @@ export * as SessionInstructions from "./instructions"
 
 import { relative } from "path"
 import { Context, DateTime, Effect, Layer, Option, Ref, Schema } from "effect"
+import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { FSUtil } from "../fs-util"
+import { renderInstructionContent } from "../instruction-content"
 import { Location } from "../location"
 import { SessionEvent } from "./event"
 import { MessageDecodeError } from "./error"
@@ -28,6 +30,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const config = yield* Config.Service
     const events = yield* EventV2.Service
     const fs = yield* FSUtil.Service
     const store = yield* SessionStore.Service
@@ -57,12 +60,22 @@ const layer = Layer.effect(
       const alreadyInjected = yield* previouslyInjected(store, input.sessionID)
       const toInject = claimed.filter((path) => !alreadyInjected.has(path))
       if (toInject.length === 0) return
+      const maxBytes = Config.latest(yield* config.entries(), "instruction_max_bytes")
       const files = yield* Effect.forEach(
         toInject,
         (path) =>
           fs
             .readFileStringSafe(path)
-            .pipe(Effect.map((content) => (content === undefined ? undefined : { path, content }))),
+            .pipe(
+              Effect.map((content) =>
+                content === undefined
+                  ? undefined
+                  : {
+                      path,
+                      content: renderInstructionContent({ source: path, content, maxBytes, retrieval: "read" }).content,
+                    },
+              ),
+            ),
         { concurrency: "unbounded" },
       )
       const readable = files.filter((file): file is { path: string; content: string } => file !== undefined)
@@ -109,5 +122,5 @@ function describePath(root: string, path: string) {
 export const node = makeLocationNode({
   name: "session-instructions",
   layer,
-  deps: [EventV2.node, FSUtil.node, Location.node, SessionStore.node],
+  deps: [Config.node, EventV2.node, FSUtil.node, Location.node, SessionStore.node],
 })

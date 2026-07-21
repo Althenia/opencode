@@ -2,8 +2,10 @@ export * as InstructionDiscovery from "./instruction-discovery"
 
 import { Array, Context, Effect, Layer, Schema } from "effect"
 import { isAbsolute, join, relative, sep } from "path"
+import { Config } from "./config"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
+import { renderInstructionContent } from "./instruction-content"
 import { Location } from "./location"
 import { AbsolutePath } from "./schema"
 import { Instructions } from "./instructions/index"
@@ -31,19 +33,23 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 export const layer = (options?: Options) => Layer.effect(
   Service,
   Effect.gen(function* () {
+    const config = yield* Config.Service
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
 
-    const source = (value: ReadonlyArray<File> | Instructions.Unavailable | Instructions.Removed) =>
+    const source = (
+      value: ReadonlyArray<File> | Instructions.Unavailable | Instructions.Removed,
+      maxBytes?: number,
+    ) =>
       Instructions.make<ReadonlyArray<File>>({
         key,
         codec: Schema.toCodecJson(Files),
         read: Effect.succeed(value),
         render: {
-          initial: render,
+          initial: (files) => render(files, maxBytes),
           changed: (_previous, current) =>
-            `These instructions replace all previously loaded ambient instructions.\n\n${render(current)}`,
+            `These instructions replace all previously loaded ambient instructions.\n\n${render(current, maxBytes)}`,
           removed: () => "Previously loaded instructions no longer apply.",
         },
       })
@@ -85,14 +91,18 @@ export const layer = (options?: Options) => Layer.effect(
     })
 
     return Service.of({
-      load: () =>
-        observe().pipe(
+      load: Effect.fn("InstructionDiscovery.load")(function* () {
+        const maxBytes = Config.latest(yield* config.entries(), "instruction_max_bytes")
+        return yield* observe().pipe(
           Effect.map((files) =>
-            Array.isArray(files) && files.length === 0 ? source(Instructions.removed) : source(files),
+            Array.isArray(files) && files.length === 0
+              ? source(Instructions.removed, maxBytes)
+              : source(files, maxBytes),
           ),
-          Effect.catch(() => Effect.succeed(source(Instructions.unavailable))),
-          Effect.catchDefect(() => Effect.succeed(source(Instructions.unavailable))),
-        ),
+          Effect.catch(() => Effect.succeed(source(Instructions.unavailable, maxBytes))),
+          Effect.catchDefect(() => Effect.succeed(source(Instructions.unavailable, maxBytes))),
+        )
+      }),
     })
   }),
 )
@@ -101,12 +111,19 @@ export function configured(options?: Options) {
   return makeLocationNode({
     service: Service,
     layer: layer(options),
-    deps: [FSUtil.node, Global.node, Location.node],
+    deps: [Config.node, FSUtil.node, Global.node, Location.node],
   })
 }
 
 export const node = configured()
 
-function render(files: ReadonlyArray<File>) {
-  return files.map((file) => `Instructions from: ${file.path}\n${file.content}`).join("\n\n")
+function render(files: ReadonlyArray<File>, maxBytes?: number) {
+  return files
+    .map((file) =>
+      [
+        `Instructions from: ${file.path}`,
+        renderInstructionContent({ source: file.path, content: file.content, maxBytes, retrieval: "read" }).content,
+      ].join("\n"),
+    )
+    .join("\n\n")
 }

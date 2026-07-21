@@ -13,9 +13,10 @@ import { EventV2 } from "./event"
 import { Watcher } from "./filesystem/watcher"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
+import { MAX_INSTRUCTION_MAX_BYTES } from "./instruction-content"
 import { Location } from "./location"
 import { Policy } from "./policy"
-import { AbsolutePath } from "./schema"
+import { AbsolutePath, PositiveInt } from "./schema"
 import { ConfigAgent } from "./config/agent"
 import { ConfigAttachments } from "./config/attachments"
 import { ConfigCompaction } from "./config/compaction"
@@ -105,6 +106,11 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   instructions: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs supplying ambient instructions",
   }),
+  instruction_max_bytes: PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_INSTRUCTION_MAX_BYTES))
+    .pipe(Schema.optional)
+    .annotate({
+      description: "Maximum UTF-8 bytes inlined from each ambient instruction source (default: 51200, max: 1048576)",
+    }),
   references: ConfigReference.Info.pipe(Schema.optional).annotate({
     description: "Named local directories or Git repositories available as external context",
   }),

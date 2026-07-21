@@ -2,6 +2,7 @@ import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import fs from "fs/promises"
 import path from "path"
+import { Config } from "@opencode-ai/core/config"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -20,10 +21,30 @@ const instructionLayer = (input: {
   config: string
   locationServiceLayer: Layer.Layer<Location.Service>
   filesystemLayer?: Layer.Layer<FSUtil.Service>
+  instructionMaxBytes?: number
   project?: boolean
 }) =>
   AppNodeBuilder.build(InstructionDiscovery.node, [
     [InstructionDiscovery.node, InstructionDiscovery.configured({ project: input.project })],
+    [
+      Config.node,
+      Layer.succeed(
+        Config.Service,
+        Config.Service.of({
+          entries: () =>
+            Effect.succeed(
+              input.instructionMaxBytes === undefined
+                ? []
+                : [
+                    new Config.Document({
+                      type: "document",
+                      info: new Config.Info({ instruction_max_bytes: input.instructionMaxBytes }),
+                    }),
+                  ],
+            ),
+        }),
+      ),
+    ],
     [Global.node, Global.layerWith({ config: input.config })],
     [Location.node, input.locationServiceLayer],
     ...(input.filesystemLayer ? [[FSUtil.node, input.filesystemLayer] as const] : []),
@@ -100,6 +121,42 @@ describe("InstructionDiscovery", () => {
           expect((yield* readUpdate(yield* load, initialized)).text).toBe(
             "Previously loaded instructions no longer apply.",
           )
+        }),
+      ),
+    ),
+  )
+
+  it.live("replaces oversized AGENTS.md content with a deterministic digest notice", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const file = path.join(tmp.path, "AGENTS.md")
+          const secret = "secret-rule\n".repeat(5_000)
+          yield* Effect.promise(() => fs.writeFile(file, secret))
+          const context = yield* InstructionDiscovery.Service.pipe(
+            Effect.flatMap((service) => service.load()),
+            Effect.provide(
+              instructionLayer({
+                config: path.join(tmp.path, "global"),
+                instructionMaxBytes: 32,
+                locationServiceLayer: Layer.succeed(
+                  Location.Service,
+                  Location.Service.of(location({ directory: AbsolutePath.make(tmp.path) })),
+                ),
+              }),
+            ),
+          )
+
+          const rendered = (yield* readInitial(context)).text
+          expect(rendered).toContain(`Instructions from: ${file}`)
+          expect(rendered).toContain("Instruction content omitted")
+          expect(rendered).toContain("32-byte inline limit")
+          expect(rendered).toContain("SHA-256:")
+          expect(rendered).toContain("read tool")
+          expect(rendered).not.toContain("secret-rule")
         }),
       ),
     ),

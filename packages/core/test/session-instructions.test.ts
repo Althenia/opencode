@@ -275,6 +275,32 @@ describe("SessionInstructions", () => {
     }),
   )
 
+  it.effect("replaces oversized directly loaded AGENTS.md content with a digest notice", () =>
+    Effect.gen(function* () {
+      const location = yield* Location.Service
+      const dir = location.directory
+      const subPath = path.resolve(dir, "sub", "AGENTS.md")
+      const secret = "secret-rule\n".repeat(5_000)
+      yield* mkdir(path.resolve(dir, "sub"))
+      yield* writeAgents(subPath, secret)
+
+      const session = yield* SessionV2.Service
+      const sessionInstructions = yield* SessionInstructions.Service
+      const sessionID = (yield* session.create({ location: Location.Ref.make({ directory: dir }) })).id
+
+      yield* sessionInstructions.load({ sessionID, paths: [subPath] })
+
+      const injected = yield* synthetics(sessionID)
+      expect(injected).toHaveLength(1)
+      expect(injected[0]!.text).toContain(`Instructions from: ${subPath}`)
+      expect(injected[0]!.text).toContain("Instruction content omitted")
+      expect(injected[0]!.text).toContain("SHA-256:")
+      expect(injected[0]!.text).toContain("read tool")
+      expect(injected[0]!.text).not.toContain("secret-rule")
+      expect(injected[0]!.metadata).toEqual({ instruction: { paths: [subPath] } })
+    }),
+  )
+
   it.effect("loads instructions directly without a read", () =>
     Effect.gen(function* () {
       const location = yield* Location.Service

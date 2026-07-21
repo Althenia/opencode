@@ -353,6 +353,17 @@ describe("Config", () => {
     }),
   )
 
+  it.effect("bounds and migrates the instruction inline byte budget", () =>
+    Effect.sync(() => {
+      const decode = Schema.decodeUnknownSync(Config.Info)
+      expect(decode({ instruction_max_bytes: 1 }).instruction_max_bytes).toBe(1)
+      expect(decode({ instruction_max_bytes: 1_048_576 }).instruction_max_bytes).toBe(1_048_576)
+      expect(() => decode({ instruction_max_bytes: 0 })).toThrow()
+      expect(() => decode({ instruction_max_bytes: 1_048_577 })).toThrow()
+      expect(ConfigMigrateV1.migrate({ instruction_max_bytes: 4_096 }).instruction_max_bytes).toBe(4_096)
+    }),
+  )
+
   it.effect("migrates arbitrary v1 configuration into valid v2 configuration", () =>
     Effect.sync(() => {
       FastCheck.assert(
