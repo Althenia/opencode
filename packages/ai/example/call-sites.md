@@ -599,13 +599,12 @@ App boundary = explicit durable-config -> typed-provider call
 - [ ] Decide whether a tiny `Provider.define(...)` helper is warranted after two
       or three provider conversions; start with plain objects if duplication is not
       yet painful.
-- [x] Update `packages/opencode/src/session/llm/native-request.ts` to construct
-      executable models at the session boundary with explicit provider facade
-      calls, mapping catalog metadata such as `endpoint.websocket` to the correct
-      named route selector.
-- [ ] Update tests so direct route/provider tests assert route values are carried
-      by executable models, and opencode/native tests assert boundary-based route
-      selection.
+- [x] Update `packages/core/src/session/runner/model.ts` to construct executable
+      models at the V2 session boundary with explicit native routes or the narrow
+      AI SDK adapter, while preserving the selected catalog identity separately.
+- [x] Update tests so direct route/provider tests assert route values are carried
+      by executable models, and Core runner tests assert catalog-bound route
+      selection, provider auth, cache identity, and continuation behavior.
 - [ ] Remove compatibility exports or stale docs only after internal call sites
       are migrated; do not keep duplicate constructor paths without an external
       compatibility need.
