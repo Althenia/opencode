@@ -127,6 +127,56 @@ function noUpdate<E>(check: (event: WatcherEvent) => boolean, trigger: Effect.Ef
   )
 }
 
+it.live("starts the recursive fallback without synchronously crawling existing files", () =>
+  Effect.promise(async () => {
+    const source = await fs.readFile(path.join(import.meta.dir, "../../src/filesystem/watcher.ts"), "utf8")
+    expect(source).not.toContain("readdirSync")
+    expect(source).not.toMatch(/readdir[^\n]*recursive:\s*true/)
+  }),
+)
+
+it.live("publishes create, update, and delete changes through the recursive fallback", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (value) => Effect.promise(() => value[Symbol.asyncDispose]()),
+    )
+    const fs = yield* FSUtil.Service
+    const watcher = yield* Watcher.Service
+    const existing = path.join(tmp.path, "existing.txt")
+    const created = path.join(tmp.path, "created.txt")
+    yield* fs.writeFileString(existing, "before")
+
+    const next = <E>(file: string, type: Watcher.Update["type"], trigger: Effect.Effect<void, E>) =>
+      Effect.gen(function* () {
+        const update = yield* watcher
+          .subscribe({ path: tmp.path, type: "directory" })
+          .pipe(
+            Stream.filter((event) => event.path === file && event.type === type),
+            Stream.take(1),
+            Stream.runHead,
+            Effect.forkScoped({ startImmediately: true }),
+          )
+        yield* Effect.sleep("50 millis")
+        yield* trigger
+        return yield* Fiber.join(update).pipe(Effect.timeout("5 seconds"))
+      })
+
+    expect((yield* next(existing, "update", fs.writeFileString(existing, "after"))).valueOrUndefined).toEqual({
+      path: existing,
+      type: "update",
+    })
+    expect((yield* next(existing, "delete", fs.remove(existing))).valueOrUndefined).toEqual({
+      path: existing,
+      type: "delete",
+    })
+    expect((yield* next(created, "create", fs.writeFileString(created, "created"))).valueOrUndefined).toEqual({
+      path: created,
+      type: "create",
+    })
+  }).pipe(Effect.provide(AppNodeBuilder.build(Watcher.configured({ native: false })))),
+)
+
 function ready(directory: string) {
   const file = path.join(directory, `.watcher-${Math.random().toString(36).slice(2)}`)
   return Effect.gen(function* () {

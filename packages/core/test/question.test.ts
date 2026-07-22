@@ -2,12 +2,20 @@ import { describe, expect } from "bun:test"
 import { Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Project } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { QuestionV2 } from "@opencode-ai/core/question"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionAutonomy } from "@opencode-ai/core/session/autonomy"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { testEffect } from "./lib/effect"
 
-const questions = AppNodeBuilder.build(LayerNode.group([EventV2.node, QuestionV2.node]))
+const questions = AppNodeBuilder.build(
+  LayerNode.group([Database.node, EventV2.node, SessionAutonomy.node, QuestionV2.node]),
+)
 const it = testEffect(questions)
 
 const sessionID = SessionV2.ID.make("ses_question_test")
@@ -16,6 +24,34 @@ const question: QuestionV2.Info = {
   header: "Option",
   options: [{ label: "One", description: "First option" }],
 }
+
+const setupAutonomy = Effect.fn("QuestionV2Test.setupAutonomy")(function* (mode: "yolo" | "goal") {
+  const { db } = yield* Database.Service
+  const directory = AbsolutePath.make("/project")
+  yield* db
+    .insert(ProjectTable)
+    .values({ id: Project.ID.global, worktree: directory, sandboxes: [] })
+    .onConflictDoNothing()
+    .run()
+    .pipe(Effect.orDie)
+  yield* db
+    .insert(SessionTable)
+    .values({
+      id: sessionID,
+      project_id: Project.ID.global,
+      slug: "question-autonomy",
+      directory,
+      title: "Question autonomy",
+      version: "test",
+    })
+    .onConflictDoNothing()
+    .run()
+    .pipe(Effect.orDie)
+  const autonomy = yield* SessionAutonomy.Service
+  yield* mode === "goal"
+    ? autonomy.setGoal({ sessionID, text: "Finish safely" })
+    : autonomy.setMode({ sessionID, mode })
+})
 
 const waitForAsk = Effect.fn("QuestionV2Test.waitForAsk")(function* (
   service: QuestionV2.Interface,
@@ -34,6 +70,22 @@ const waitForAsk = Effect.fn("QuestionV2Test.waitForAsk")(function* (
 })
 
 describe("QuestionV2", () => {
+  it.effect("auto answers questions in yolo and goal mode without pending requests", () =>
+    Effect.gen(function* () {
+      const service = yield* QuestionV2.Service
+      const fallback: QuestionV2.Info = { question: "Continue?", header: "Continue", options: [] }
+
+      for (const mode of ["yolo", "goal"] as const) {
+        yield* setupAutonomy(mode)
+        expect(yield* service.ask({ sessionID, questions: [question, fallback] })).toEqual([
+          ["One"],
+          ["Continue with the safest reasonable default."],
+        ])
+        expect(yield* service.list()).toEqual([])
+      }
+    }),
+  )
+
   it.effect("publishes lifecycle events and settles a pending reply", () =>
     Effect.gen(function* () {
       const service = yield* QuestionV2.Service

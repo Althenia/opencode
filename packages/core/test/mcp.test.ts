@@ -51,7 +51,13 @@ type ResourceTemplatePage = {
 }
 
 function resourceServer(
-  input: { resources?: boolean; listChanged?: boolean; emptyElicitation?: boolean; urlElicitation?: boolean } = {},
+  input: {
+    resources?: boolean
+    resourceMethods?: boolean
+    listChanged?: boolean
+    emptyElicitation?: boolean
+    urlElicitation?: boolean
+  } = {},
 ) {
   return Effect.acquireRelease(
     Effect.promise(async () => {
@@ -66,6 +72,8 @@ function resourceServer(
         ] as Array<{ uri: string; text: string; mimeType?: string } | { uri: string; blob: string; mimeType?: string }>,
         resourceLists: 0,
         templateLists: 0,
+        resourceMethodRequests: 0,
+        templateMethodRequests: 0,
       }
       const protocol = new Server(
         { name: "mcp-resources", version: "1.0.0" },
@@ -112,7 +120,7 @@ function resourceServer(
           }
         })
       }
-      if (input.resources !== false) {
+      if (input.resources !== false && input.resourceMethods !== false) {
         protocol.setRequestHandler(ListResourcesRequestSchema, (request) => {
           state.resourceLists += 1
           const page = state.resourcePages?.[request.params?.cursor ?? "initial"]
@@ -132,7 +140,12 @@ function resourceServer(
       await protocol.connect(transport)
       const http = Bun.serve({
         port: 0,
-        fetch: (request) => transport.handleRequest(request),
+        fetch: async (request) => {
+          const body = (await request.clone().json().catch(() => undefined)) as { method?: string } | undefined
+          if (body?.method === "resources/list") state.resourceMethodRequests++
+          if (body?.method === "resources/templates/list") state.templateMethodRequests++
+          return transport.handleRequest(request)
+        },
       })
       return {
         state,
@@ -553,6 +566,29 @@ test("skips MCP resource requests when the capability is absent", async () => {
         expect({ resources: server.state.resourceLists, templates: server.state.templateLists }).toEqual({
           resources: 0,
           templates: 0,
+        })
+      }),
+    ),
+  )
+})
+
+test("caches unsupported MCP resource list methods", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const server = yield* resourceServer({ resourceMethods: false })
+        const connection = yield* MCPClient.connect(
+          "resources",
+          new ConfigMCP.Remote({ type: "remote", url: server.url, oauth: false }),
+          import.meta.dir,
+        )
+        expect(yield* connection.resources()).toEqual([])
+        expect(yield* connection.resources()).toEqual([])
+        expect(yield* connection.resourceTemplates()).toEqual([])
+        expect(yield* connection.resourceTemplates()).toEqual([])
+        expect({ resources: server.state.resourceMethodRequests, templates: server.state.templateMethodRequests }).toEqual({
+          resources: 1,
+          templates: 1,
         })
       }),
     ),

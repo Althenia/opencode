@@ -98,3 +98,26 @@ it.effect("creates bounded continuation instructions and recognizes only the exp
     expect(SessionAutonomy.isCompleted(`verified ${SessionAutonomy.CompletionMarker}`)).toBe(true)
   }),
 )
+
+it.effect("answers a free-text assistant question on the user's behalf before continuing the goal", () =>
+  Effect.sync(() => {
+    const goal: SessionAutonomy.Goal = {
+      text: "Ship the fix",
+      status: "active",
+      iteration: 0,
+      maxIterations: 6,
+      noProgress: 0,
+      maxNoProgress: 3,
+    }
+    const prompt = SessionAutonomy.continuationPrompt(goal, {
+      latestAssistantText: "Which database should I use?",
+    })
+
+    expect(prompt).toContain("The assistant is waiting for user input.")
+    expect(prompt).toContain("Latest assistant request: Which database should I use?")
+    expect(prompt).toContain("Answer it on the user's behalf")
+    expect(SessionAutonomy.continuationPrompt(goal, { latestAssistantText: "Implemented the migration." })).not.toContain(
+      "The assistant is waiting for user input.",
+    )
+  }),
+)

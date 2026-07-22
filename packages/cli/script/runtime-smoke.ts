@@ -29,12 +29,17 @@ async function eventually<T>(fn: () => Promise<T | undefined>, timeout = 15_000)
   throw new Error("Timed out waiting for runtime smoke condition", { cause: lastError })
 }
 
-function streamResponse(index: number) {
-  const cached = index === 1 ? 0 : 900
-  const cacheWrite = index === 1 ? 100 : 0
-  const prompt = index === 1 ? 1000 : 1200
-  const content = index === 1 ? "First" : "Second"
-  const id = `runtime-smoke-${index}`
+function streamResponse(input: {
+  index: number
+  content: string
+  cached?: number
+  cacheWrite?: number
+  prompt?: number
+}) {
+  const cached = input.cached ?? (input.index === 1 ? 0 : 900)
+  const cacheWrite = input.cacheWrite ?? (input.index === 1 ? 100 : 0)
+  const prompt = input.prompt ?? (input.index === 1 ? 1000 : 1200)
+  const id = `runtime-smoke-${input.index}`
   const chunks = [
     {
       id,
@@ -42,7 +47,9 @@ function streamResponse(index: number) {
       created: Math.floor(Date.now() / 1000),
       model: MODEL_ID,
       provider: "Smoke",
-      choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null, native_finish_reason: null }],
+      choices: [
+        { index: 0, delta: { role: "assistant", content: input.content }, finish_reason: null, native_finish_reason: null },
+      ],
     },
     {
       id,
@@ -74,16 +81,40 @@ async function main() {
   const project = path.join(root, "project")
   await Promise.all([home, config, data, cache, state, project].map((dir) => mkdir(dir, { recursive: true })))
 
-  const requests: Array<{ authorization: string | null; model?: unknown }> = []
+  const requests: Array<{
+    authorization: string | null
+    model?: unknown
+    text: string
+    maxTokens?: number
+  }> = []
   const provider = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
-      const body = (await request.json().catch(() => undefined)) as { model?: unknown } | undefined
-      requests.push({ authorization: request.headers.get("authorization"), model: body?.model })
-      return new Response(streamResponse(requests.length), {
-        headers: { "content-type": "text/event-stream" },
-      })
+      const body = (await request.json().catch(() => undefined)) as
+        | { model?: unknown; max_tokens?: unknown }
+        | undefined
+      const text = JSON.stringify(body ?? {})
+      const maxTokens = typeof body?.max_tokens === "number" ? body.max_tokens : undefined
+      requests.push({ authorization: request.headers.get("authorization"), model: body?.model, text, maxTokens })
+      const continuation = text.includes("Continue autonomously toward the active user goal.")
+      const goalStart =
+        text.includes("Begin autonomous goal") && (maxTokens === undefined || maxTokens > 100)
+      const content = continuation
+        ? "Goal verified and complete. <goal-complete/>"
+        : goalStart
+          ? "Which database should I use?"
+          : requests.length === 1
+            ? "First"
+            : "Second"
+      return new Response(
+        streamResponse({
+          index: requests.length,
+          content,
+          ...(continuation || goalStart ? { cached: 0, cacheWrite: 0, prompt: 200 } : {}),
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      )
     },
   })
 
@@ -194,9 +225,6 @@ async function main() {
     })
 
     if (requests.length < 2) throw new Error(`Expected at least two provider requests, got ${requests.length}`)
-    for (const request of requests) {
-      if (request.authorization !== `Bearer ${KEY}`) throw new Error("OpenRouter request did not contain stored bearer credential")
-    }
     if (diagnostics.tokens.uncachedInput !== 300) throw new Error(`Unexpected uncached input: ${diagnostics.tokens.uncachedInput}`)
     if (diagnostics.tokens.cacheRead !== 900) throw new Error(`Unexpected cache read: ${diagnostics.tokens.cacheRead}`)
     if (diagnostics.cache.eligible !== 1200) throw new Error(`Unexpected cache-eligible tokens: ${diagnostics.cache.eligible}`)
@@ -212,10 +240,56 @@ async function main() {
     if (diagnostics.context.remaining !== 100_000 - expectedContext)
       throw new Error(`Unexpected context remaining: ${diagnostics.context.remaining}`)
 
+    phase = "yolo autonomy API"
+    const yoloSession = await client.session.create({
+      model: { providerID: PROVIDER_ID, id: MODEL_ID },
+      location: { directory: project },
+    })
+    const yoloSet = await client.session.autonomy.set({ sessionID: yoloSession.id, payload: { mode: "yolo" } })
+    if (yoloSet.mode !== "yolo") throw new Error(`YOLO mode was not persisted: ${yoloSet.mode}`)
+    const yoloRead = await client.session.autonomy.get({ sessionID: yoloSession.id })
+    if (yoloRead.mode !== "yolo") throw new Error(`YOLO mode did not round-trip: ${yoloRead.mode}`)
+    const normal = await client.session.autonomy.set({ sessionID: yoloSession.id, payload: { mode: "normal" } })
+    if (normal.mode !== "normal") throw new Error(`Normal mode was not restored: ${normal.mode}`)
+
+    phase = "goal autonomous continuation"
+    const goalSession = await client.session.create({
+      model: { providerID: PROVIDER_ID, id: MODEL_ID },
+      location: { directory: project },
+    })
+    const goalText = "Choose the safest database default and finish the task"
+    const goalSet = await client.session.autonomy.set({
+      sessionID: goalSession.id,
+      payload: { mode: "goal", goal: goalText, maxIterations: 4, maxNoProgress: 2 },
+    })
+    if (goalSet.mode !== "goal" || goalSet.goal?.status !== "active")
+      throw new Error("Goal mode was not activated")
+    await client.session.prompt({ sessionID: goalSession.id, text: "Begin autonomous goal" })
+    const completedGoal = await eventually(async () => {
+      const value = await client.session.autonomy.get({ sessionID: goalSession.id })
+      return value.goal?.status === "completed" ? value : undefined
+    }, 30_000)
+    if (completedGoal.mode !== "normal") throw new Error(`Completed Goal did not return to normal mode: ${completedGoal.mode}`)
+    if (completedGoal.goal?.iteration !== 2)
+      throw new Error(`Expected two bounded Goal iterations, got ${completedGoal.goal?.iteration ?? "missing"}`)
+    const continuation = requests.find((request) =>
+      request.text.includes("Continue autonomously toward the active user goal."),
+    )
+    if (!continuation) throw new Error("Goal mode did not issue a synthetic continuation request")
+    if (!continuation.text.includes(`Goal: ${goalText}`)) throw new Error("Goal continuation omitted the durable goal text")
+    if (!continuation.text.includes("The assistant is waiting for user input."))
+      throw new Error("Goal continuation did not recognize the assistant question")
+    if (!continuation.text.includes("Answer it on the user's behalf"))
+      throw new Error("Goal continuation did not include user-proxy instructions")
+
+    for (const request of requests) {
+      if (request.authorization !== `Bearer ${KEY}`) throw new Error("OpenRouter request did not contain stored bearer credential")
+    }
+
     phase = "self-improvement status"
     const selfImprovement = await eventually(async () => {
       const value = await client.selfImprovement.status({ location: { directory: project } })
-      return value.data.automation.lastCompletedAt !== undefined && value.data.evidence.count >= 2 ? value.data : undefined
+      return value.data.automation.lastCompletedAt !== undefined ? value.data : undefined
     })
     if (!selfImprovement.enabled || !selfImprovement.autoApprove)
       throw new Error("Self-improvement status does not reflect enabled automatic approval")
@@ -231,11 +305,12 @@ async function main() {
       )
       .get()
     db.close()
-    if (!evidence || evidence.count < 2) throw new Error(`Expected terminal evidence for both turns, got ${evidence?.count ?? 0}`)
+    if (!evidence || evidence.count < 3)
+      throw new Error(`Expected terminal evidence for two standard turns and one Goal busy period, got ${evidence?.count ?? 0}`)
     if (!privateColumns || privateColumns.count !== 0) throw new Error("Evidence schema exposes private content columns")
 
     console.log(
-      `Runtime smoke passed: auth, evidence=${evidence.count}, automation=${selfImprovement.automation.lastCompletedAt}, cache-hit=${diagnostics.cache.hitRatio}`,
+      `Runtime smoke passed: auth, yolo=round-trip, goal=${completedGoal.goal?.status}, evidence=${evidence.count}, automation=${selfImprovement.automation.lastCompletedAt}, cache-hit=${diagnostics.cache.hitRatio}`,
     )
   } catch (error) {
     throw new Error(`Runtime smoke failed during ${phase}`, { cause: error })

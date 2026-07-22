@@ -14,7 +14,7 @@ import {
 } from "../../../src/feature-plugins/system/diff-viewer-file-tree-utils"
 
 describe("DiffViewerFileTree", () => {
-  test.skip("renders sorted hierarchical file rows", async () => {
+  test("renders sorted hierarchical file rows", async () => {
     const lines = visibleLines(
       await renderFrame(() => (
         <DiffViewerFileTree

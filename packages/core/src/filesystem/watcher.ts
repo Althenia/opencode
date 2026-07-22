@@ -8,8 +8,10 @@ import { makeGlobalNode } from "../effect/app-node"
 import { Cause, Context, Effect, Layer, PubSub, Schema, Scope, Stream } from "effect"
 import { KeyedMutex } from "../effect/keyed-mutex"
 import { lazy } from "../util/lazy"
-import { watch as watchFileSystem } from "node:fs"
+import { watch } from "node:fs"
+import { stat } from "node:fs/promises"
 import path from "path"
+import { Glob } from "../util/glob"
 import { createRequire } from "node:module"
 
 declare const OPENCODE_LIBC: string | undefined
@@ -51,6 +53,7 @@ export interface Interface {
 
 export const Options = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
+  native: Schema.optional(Schema.Boolean),
 })
 export type Options = typeof Options.Type
 
@@ -60,7 +63,7 @@ export const layer = (options?: Options) => Layer.effect(
   Service,
   Effect.gen(function* () {
     const backend = getBackend()
-    const native = watcher()
+    const native = options?.native === false ? undefined : watcher()
     if (options?.enabled === false) {
       return Service.of({ subscribe: () => Stream.empty })
     }
@@ -89,7 +92,7 @@ export const layer = (options?: Options) => Layer.effect(
           const pubsub = yield* PubSub.unbounded<Update>()
           const subscription = yield* input.type === "file"
             ? Effect.sync(() => {
-                const subscription = watchFileSystem(directory, { recursive: false }, (_event, file) => {
+                const subscription = watch(directory, { recursive: false }, (_event, file) => {
                   if (file && path.resolve(directory, file.toString()) !== target) return
                   PubSub.publishUnsafe(pubsub, {
                     path: target,
@@ -109,7 +112,7 @@ export const layer = (options?: Options) => Layer.effect(
             yield* Effect.logInfo("watcher started", {
               path: target,
               type: input.type,
-              backend: input.type === "file" ? "node" : backend,
+              backend: input.type === "file" ? "node" : native && backend ? backend : "node-recursive",
               ignores: ignore.length,
             })
             return pubsub
@@ -157,11 +160,7 @@ function subscribeDirectory(
   ignore: string[],
   pubsub: PubSub.PubSub<Update>,
 ) {
-  if (!native || !backend) {
-    return Effect.logError("watcher backend not supported", { directory, platform: process.platform }).pipe(
-      Effect.as(undefined),
-    )
-  }
+  if (!native || !backend) return Effect.sync(() => subscribeDirectoryFallback(directory, ignore, pubsub))
   const callback: ParcelWatcher.SubscribeCallback = (error, updates) => {
     if (error) Effect.runFork(Effect.logError("watcher callback failed", { error }))
     for (const update of updates) PubSub.publishUnsafe(pubsub, update)
@@ -171,10 +170,64 @@ function subscribeDirectory(
     Effect.timeout(SUBSCRIBE_TIMEOUT_MS),
     Effect.catchCause((cause) => {
       pending.then((subscription) => subscription.unsubscribe()).catch(() => {})
-      return Effect.logError("failed to subscribe", {
+      return Effect.logWarning("native watcher failed; using recursive fallback", {
         directory,
         cause: Cause.pretty(cause),
-      }).pipe(Effect.as(undefined))
+      }).pipe(Effect.as(subscribeDirectoryFallback(directory, ignore, pubsub)))
     }),
   )
+}
+
+function subscribeDirectoryFallback(directory: string, ignore: string[], pubsub: PubSub.PubSub<Update>) {
+  const known = new Set<string>()
+
+  const ignored = (target: string) => {
+    const relative = path.relative(directory, target).split(path.sep).join("/")
+    return ignore.some((pattern) => {
+      if (path.isAbsolute(pattern)) return target === pattern || target.startsWith(`${pattern}${path.sep}`)
+      return Glob.match(pattern, relative) || relative.split("/").includes(pattern)
+    })
+  }
+
+  let pending = Promise.resolve()
+  const subscription = watch(directory, { recursive: true }, (event, file) => {
+    if (!file) return
+    const target = path.resolve(directory, file.toString())
+    if (ignored(target)) return
+    pending = pending
+      .then(async () => {
+        if (event === "change") {
+          known.add(target)
+          PubSub.publishUnsafe(pubsub, { path: target, type: "update" } satisfies Update)
+          return
+        }
+
+        const exists = await stat(target).then(
+          () => true,
+          () => false,
+        )
+        if (exists) {
+          const type = known.has(target) ? "update" : "create"
+          known.add(target)
+          PubSub.publishUnsafe(pubsub, { path: target, type } satisfies Update)
+          return
+        }
+
+        known.delete(target)
+        for (const item of known) if (item.startsWith(`${target}${path.sep}`)) known.delete(item)
+        PubSub.publishUnsafe(pubsub, { path: target, type: "delete" } satisfies Update)
+      })
+      .catch((error) => {
+        Effect.runFork(Effect.logError("watcher callback failed", { path: target, error }))
+      })
+  })
+  subscription.on("error", (error) =>
+    Effect.runFork(Effect.logError("watcher callback failed", { path: directory, error })),
+  )
+  return {
+    unsubscribe: async () => {
+      subscription.close()
+      await pending
+    },
+  }
 }

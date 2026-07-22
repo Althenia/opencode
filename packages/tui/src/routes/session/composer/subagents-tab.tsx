@@ -14,7 +14,40 @@ interface SubagentEntry {
   agent: string
   title: string
   status: string
+  model?: string
   current: boolean
+}
+
+export function formatSubagentModel(model: { providerID: string; id: string; variant?: string } | undefined) {
+  if (!model) return
+  return `${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}`
+}
+
+export function SubagentMetadata(props: { model?: string; status?: string; active: boolean }) {
+  const { themeV2 } = useTheme()
+  const color = () => (props.active ? themeV2.text.action.primary.focused : themeV2.text.subdued)
+
+  return (
+    <box flexDirection="row" minWidth={0} gap={1}>
+      <Show when={props.model}>
+        <box minWidth={0} maxWidth={40} flexShrink={1}>
+          <text fg={color()} wrapMode="none">
+            {props.model}
+          </text>
+        </box>
+      </Show>
+      <Show when={props.model && props.status}>
+        <text fg={color()} flexShrink={0}>
+          ·
+        </text>
+      </Show>
+      <Show when={props.status}>
+        <text fg={color()} wrapMode="none" flexShrink={0}>
+          {props.status}
+        </text>
+      </Show>
+    </box>
+  )
 }
 
 export function SubagentsTab(props: { sessionID: string }) {
@@ -49,6 +82,7 @@ export function SubagentsTab(props: { sessionID: string }) {
           agent,
           title: name,
           status: data.session.status(sibling.id),
+          model: formatSubagentModel(sibling.model),
           current: sibling.id === route.sessionID,
         })
       }
@@ -67,6 +101,7 @@ export function SubagentsTab(props: { sessionID: string }) {
           agent,
           title: name,
           status: data.session.status(child.id),
+          model: formatSubagentModel(child.model),
           current: child.id === route.sessionID,
         })
       }
@@ -246,11 +281,7 @@ export function SubagentsTab(props: { sessionID: string }) {
                       {entry.agent}: {entry.title}
                     </text>
                   </box>
-                  <Show when={status()}>
-                    <text fg={active() ? themeV2.text.action.primary.focused : themeV2.text.subdued} wrapMode="none">
-                      {status()}
-                    </text>
-                  </Show>
+                  <SubagentMetadata model={entry.model} status={status()} active={active()} />
                 </box>
               )
             }}

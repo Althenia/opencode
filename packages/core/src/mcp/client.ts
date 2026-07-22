@@ -240,6 +240,8 @@ export const connect = Effect.fnUntraced(function* (
     )
     const catalogTimeout = config.timeout?.catalog ?? DEFAULT_CATALOG_TIMEOUT
     const executionTimeout = config.timeout?.execution ?? DEFAULT_EXECUTION_TIMEOUT
+    let resourceListSupported = !!client.getServerCapabilities()?.resources
+    let resourceTemplateListSupported = resourceListSupported
     return {
       instructions: client.getInstructions()?.trim() || undefined,
       tools: () =>
@@ -304,7 +306,7 @@ export const connect = Effect.fnUntraced(function* (
         }),
       resources: () =>
         Effect.gen(function* () {
-          if (!client.getServerCapabilities()?.resources) return []
+          if (!resourceListSupported) return []
           const resources = yield* Effect.tryPromise({
             try: () =>
               paginate(
@@ -314,6 +316,11 @@ export const connect = Effect.fnUntraced(function* (
               ),
             catch: (error) => (error instanceof Error ? error : new Error(String(error))),
           }).pipe(
+            Effect.catch((error) => {
+              if (!isMethodNotFound(error)) return Effect.fail(error)
+              resourceListSupported = false
+              return Effect.succeed([])
+            }),
             Effect.tapError((error) =>
               Effect.logWarning("failed to list MCP resources", { server, error: error.message }),
             ),
@@ -327,7 +334,7 @@ export const connect = Effect.fnUntraced(function* (
         }),
       resourceTemplates: () =>
         Effect.gen(function* () {
-          if (!client.getServerCapabilities()?.resources) return []
+          if (!resourceTemplateListSupported) return []
           const templates = yield* Effect.tryPromise({
             try: () =>
               paginate(
@@ -339,6 +346,11 @@ export const connect = Effect.fnUntraced(function* (
               ),
             catch: (error) => (error instanceof Error ? error : new Error(String(error))),
           }).pipe(
+            Effect.catch((error) => {
+              if (!isMethodNotFound(error)) return Effect.fail(error)
+              resourceTemplateListSupported = false
+              return Effect.succeed([])
+            }),
             Effect.tapError((error) =>
               Effect.logWarning("failed to list MCP resource templates", { server, error: error.message }),
             ),
@@ -510,3 +522,8 @@ const isOutputSchemaError = (error: Error) =>
   /can't resolve reference|resolves to more than one schema|outputSchema|schema.*reference|reference.*schema/i.test(
     error.message,
   )
+
+const isMethodNotFound = (error: unknown) => {
+  if (typeof error === "object" && error !== null && "code" in error && error.code === -32601) return true
+  return error instanceof Error && /method not found/i.test(error.message)
+}
