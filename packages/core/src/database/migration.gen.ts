@@ -60,5 +60,6 @@ export const migrations = (
     import("./migration/20260718010853_self_improvement_runtime"),
     import("./migration/20260718031203_self_improvement_audit_retention"),
     import("./migration/20260720121056_self_improvement_session_evidence"),
+    import("./migration/20260721235232_add_session_todo"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

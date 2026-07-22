@@ -86,19 +86,52 @@ test("leader bindings dispatch from real terminal input", async () => {
     return <box />
   }
 
-  const app = await testRender(() => (
-    <ConfigProvider config={createTuiResolvedConfig()}>
-      <Keymap.Provider>
-        <Harness />
-      </Keymap.Provider>
-    </ConfigProvider>
-  ), { kittyKeyboard: true })
+  const app = await testRender(
+    () => (
+      <ConfigProvider config={createTuiResolvedConfig()}>
+        <Keymap.Provider>
+          <Harness />
+        </Keymap.Provider>
+      </ConfigProvider>
+    ),
+    { kittyKeyboard: true },
+  )
   app.renderer.start()
   try {
     app.mockInput.pressKey("x", { ctrl: true })
     app.mockInput.pressKey("m")
     await Bun.sleep(10)
     expect(calls).toEqual(["model"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("plain tab dispatches the default agent cycle command", async () => {
+  const calls: string[] = []
+
+  function Harness() {
+    Keymap.createLayer(() => ({
+      commands: [{ id: "agent.cycle", run: () => void calls.push("agent") }],
+    }))
+    return <box />
+  }
+
+  const app = await testRender(
+    () => (
+      <ConfigProvider config={createTuiResolvedConfig()}>
+        <Keymap.Provider>
+          <Harness />
+        </Keymap.Provider>
+      </ConfigProvider>
+    ),
+    { kittyKeyboard: true },
+  )
+  app.renderer.start()
+  try {
+    app.mockInput.pressTab()
+    await Bun.sleep(10)
+    expect(calls).toEqual(["agent"])
   } finally {
     app.renderer.destroy()
   }

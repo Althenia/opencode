@@ -48,6 +48,12 @@ export type SessionAutonomyMode = "normal" | "yolo" | "goal"
 
 export type SessionAutonomyGoalStatus = "active" | "completed" | "stopped" | "exhausted"
 
+export type SessionTodoInfo = {
+  content: string
+  status: "pending" | "in_progress" | "completed" | "cancelled"
+  priority: "high" | "medium" | "low"
+}
+
 export type PromptBase64 = string
 
 export type PromptFileSource = { type: "inline" } | { type: "uri"; uri: string }
@@ -1264,6 +1270,15 @@ export type SessionAutonomyGoal = {
   lastProgressDigest?: string | undefined
 }
 
+export type TodoUpdated = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "todo.updated"
+  location?: LocationRef
+  data: { sessionID: string; todos: Array<SessionTodoInfo> }
+}
+
 export type PromptFileAttachment = {
   data: PromptBase64
   mime: string
@@ -2429,6 +2444,7 @@ export type V2Event =
   | FormCreated
   | FormReplied
   | FormCancelled
+  | TodoUpdated
   | SessionStatus2
   | SessionIdle
   | TuiPromptAppend
@@ -2819,6 +2835,23 @@ export type SessionAutonomySetOutput = { data: SessionAutonomyState }["data"]
 export type SessionRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionRemoveOutput = void
+
+export type SessionTodoListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionTodoListOutput = { data: Array<SessionTodoInfo> }["data"]
+
+export type SessionTodoUpdateInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly todos: {
+    readonly todos: ReadonlyArray<{
+      readonly content: string
+      readonly status: "pending" | "in_progress" | "completed" | "cancelled"
+      readonly priority: "high" | "medium" | "low"
+    }>
+  }["todos"]
+}
+
+export type SessionTodoUpdateOutput = { data: Array<SessionTodoInfo> }["data"]
 
 export type SessionForkInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]

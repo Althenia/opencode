@@ -27,6 +27,7 @@ import { Skill } from "@opencode-ai/schema/skill"
 import { Model } from "@opencode-ai/schema/model"
 import { Location } from "@opencode-ai/schema/location"
 import { SessionEvent } from "@opencode-ai/schema/session-event"
+import { SessionTodo } from "@opencode-ai/schema/session-todo"
 import { EventLog } from "@opencode-ai/schema/event-log"
 
 const ParentIDFilter = Schema.Union([
@@ -279,6 +280,21 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             description: "Delete a session and its child sessions.",
           }),
         ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.todo.list", "/api/session/:sessionID/todo", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Schema.Array(SessionTodo.Info) }),
+        error: SessionNotFoundError,
+      }).middleware(sessionLocationMiddleware),
+    )
+    .add(
+      HttpApiEndpoint.put("session.todo.update", "/api/session/:sessionID/todo", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({ todos: Schema.Array(SessionTodo.Info) }),
+        success: Schema.Struct({ data: Schema.Array(SessionTodo.Info) }),
+        error: SessionNotFoundError,
+      }).middleware(sessionLocationMiddleware),
     )
     .add(
       HttpApiEndpoint.post("session.fork", "/api/session/:sessionID/fork", {

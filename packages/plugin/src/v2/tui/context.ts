@@ -17,6 +17,7 @@ import type {
   SessionDiagnosticsOutput,
   SessionMessageInfo,
   SessionPendingInfo,
+  SessionTodoInfo,
   ShellInfo,
   SkillInfo,
   SelfImprovementStatusInfo,
@@ -52,6 +53,11 @@ export interface Data {
     invalidate(sessionID: string): void
     readonly diagnostics: {
       get(sessionID: string): SessionDiagnosticsOutput
+      sync(sessionID: string): Promise<void>
+      invalidate(sessionID: string): void
+    }
+    readonly todo: {
+      get(sessionID: string): SessionTodoInfo[]
       sync(sessionID: string): Promise<void>
       invalidate(sessionID: string): void
     }

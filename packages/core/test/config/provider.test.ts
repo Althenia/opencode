@@ -204,6 +204,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
                         chat: {
                           modelID: "api-chat",
                           name: "Last",
+                          capabilities: { input: ["text", "image"] },
                           limit: { output: 75 },
                           headers: { last: "last", shared: "last" },
                           variants: [
@@ -251,7 +252,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
         expect(model.id).toBe(modelID)
         expect(model.modelID).toBe(ModelV2.ID.make("api-chat"))
         expect(model.name).toBe("Last")
-        expect(model.capabilities).toEqual({ tools: true, input: ["text"], output: ["text"] })
+        expect(model.capabilities).toEqual({ tools: true, input: ["text", "image"], output: ["text"] })
         expect(model.enabled).toBe(false)
         expect(model.limit).toEqual({ context: 100, output: 75 })
         expect(model.cost).toEqual([

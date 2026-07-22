@@ -658,6 +658,19 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`session_todo\` (
+          \`session_id\` text NOT NULL,
+          \`content\` text NOT NULL,
+          \`status\` text NOT NULL,
+          \`priority\` text NOT NULL,
+          \`position\` integer NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL,
+          CONSTRAINT \`session_todo_pk\` PRIMARY KEY(\`session_id\`, \`position\`),
+          CONSTRAINT \`fk_session_todo_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`session_share\` (
           \`session_id\` text PRIMARY KEY,
           \`id\` text NOT NULL,
@@ -835,6 +848,7 @@ export default {
       yield* tx.run(
         `CREATE INDEX \`session_time_suspended_idx\` ON \`session\` (\`time_suspended\`) WHERE "session"."time_suspended" is not null;`,
       )
+      yield* tx.run(`CREATE INDEX \`session_todo_session_idx\` ON \`session_todo\` (\`session_id\`);`)
     })
   },
 } satisfies Omit<DatabaseMigration.Migration, "id">

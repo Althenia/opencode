@@ -58,6 +58,12 @@ test("resolves host-neutral defaults", () => {
   expect(config.keybinds.has("session.list")).toBe(true)
 })
 
+test("cycles agents with plain tab by default", () => {
+  const config = resolve({}, { terminalSuspend: true })
+
+  expect(config.keybinds.get("agent.cycle")).toMatchObject([{ key: "tab" }])
+})
+
 test("resolves overrides without mutating input", () => {
   const input: TuiConfigInfo = {
     theme: "custom",

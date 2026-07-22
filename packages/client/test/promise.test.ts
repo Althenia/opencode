@@ -332,6 +332,30 @@ test("session.pending.list uses the public HTTP contract", async () => {
   expect(requests).toEqual([{ method: "GET", url: "http://localhost:3000/api/session/ses_test/pending" }])
 })
 
+test("session todo methods use the public HTTP contract", async () => {
+  const requests: Array<{ method: string; url: string; body?: unknown }> = []
+  const todos = [{ content: "Run tests", status: "in_progress" as const, priority: "high" as const }]
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      requests.push({
+        method: request.method,
+        url: request.url,
+        body: request.method === "PUT" ? await request.json() : undefined,
+      })
+      return Response.json({ data: todos })
+    },
+  })
+
+  expect(await client.session.todo.list({ sessionID: "ses_test" })).toEqual(todos)
+  expect(await client.session.todo.update({ sessionID: "ses_test", todos })).toEqual(todos)
+  expect(requests).toEqual([
+    { method: "GET", url: "http://localhost:3000/api/session/ses_test/todo", body: undefined },
+    { method: "PUT", url: "http://localhost:3000/api/session/ses_test/todo", body: { todos } },
+  ])
+})
+
 test("event.subscribe exposes the Promise event stream wire projection", async () => {
   const client = OpenCode.make({
     baseUrl: "http://localhost:3000",

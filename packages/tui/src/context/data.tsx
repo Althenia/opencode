@@ -25,6 +25,7 @@ import type {
   SessionInfo,
   SessionDiagnosticsOutput,
   SessionPendingInfo,
+  SessionTodoInfo,
   ShellInfo,
   SkillInfo,
   SelfImprovementStatusInfo,
@@ -75,6 +76,7 @@ type Store = {
     diagnostics: Record<string, SessionDiagnosticsOutput>
     message: Record<string, SessionMessageInfo[]>
     pending: Record<string, SessionPendingInfo[]>
+    todo: Record<string, SessionTodoInfo[]>
     input: Record<string, string[]>
     permission: Record<string, PermissionV2Request[]>
     // Pending forms keyed by owner: a session ID or the temporary "global" elicitation sentinel.
@@ -136,6 +138,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         diagnostics: {},
         message: {},
         pending: {},
+        todo: {},
         input: {},
         permission: {},
         form: {},
@@ -344,6 +347,9 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               time: { created: event.created },
             })
           })
+          break
+        case "todo.updated":
+          setStore("session", "todo", event.data.sessionID, reconcile(event.data.todos))
           break
         case "session.model.selected":
           if (store.session.info[event.data.sessionID])
@@ -989,6 +995,19 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           },
           invalidate(sessionID: string) {
             sync.invalidate(`session.diagnostics:${sessionID}`)
+          },
+        },
+        todo: {
+          get(sessionID: string) {
+            return store.session.todo[sessionID] ?? []
+          },
+          sync(sessionID: string) {
+            return sync.run(`session.todo:${sessionID}`, async () => {
+              setStore("session", "todo", sessionID, reconcile(await client.api.session.todo.list({ sessionID })))
+            })
+          },
+          invalidate(sessionID: string) {
+            sync.invalidate(`session.todo:${sessionID}`)
           },
         },
         message: {

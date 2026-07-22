@@ -65,11 +65,10 @@ export const Plugin = define({
               if (config.headers !== undefined) model.headers = ProviderV2.mergeHeaders(model.headers, config.headers)
               if (config.body !== undefined) model.body = ProviderV2.mergeOverlay(model.body, config.body)
               if (config.capabilities !== undefined) {
-                model.capabilities = {
-                  tools: config.capabilities.tools,
-                  input: [...config.capabilities.input],
-                  output: [...config.capabilities.output],
-                }
+                if (config.capabilities.tools !== undefined) model.capabilities.tools = config.capabilities.tools
+                if (config.capabilities.input !== undefined) model.capabilities.input = [...config.capabilities.input]
+                if (config.capabilities.output !== undefined)
+                  model.capabilities.output = [...config.capabilities.output]
               }
               if (config.variants !== undefined) {
                 model.variants ??= []
