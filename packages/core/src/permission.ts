@@ -1,7 +1,7 @@
 export * as PermissionV2 from "./permission"
 
 import { makeLocationNode } from "./effect/app-node"
-import { Context, Deferred, Effect, Layer, Schema } from "effect"
+import { Context, Deferred, Effect, Layer, Schema, Stream } from "effect"
 import { Permission } from "@opencode-ai/schema/permission"
 import { EventV2 } from "./event"
 import { Location } from "./location"
@@ -12,6 +12,7 @@ import { SessionAutonomy } from "./session/autonomy"
 import { SessionStore } from "./session/store"
 import { Wildcard } from "./util/wildcard"
 import { PermissionSaved } from "./permission/saved"
+import { SessionEvent } from "./session/event"
 
 const PermissionEffect = Permission.Effect
 export { PermissionEffect as Effect }
@@ -197,6 +198,24 @@ const layer = Layer.effect(
           return item
         }),
       )
+
+    yield* events.subscribe(SessionEvent.AgentSelected).pipe(
+      Stream.runForEach((event) =>
+        Effect.gen(function* () {
+          for (const [id, item] of pending) {
+            if (item.request.sessionID !== event.data.sessionID || item.agent === event.data.agent) continue
+            yield* events.publish(Event.Replied, {
+              sessionID: item.request.sessionID,
+              requestID: item.request.id,
+              reply: "reject",
+            })
+            yield* Deferred.fail(item.deferred, new DeclinedError())
+            pending.delete(id)
+          }
+        }),
+      ),
+      Effect.forkScoped({ startImmediately: true }),
+    )
 
     const autonomy = yield* SessionAutonomy.Service
     const autonomous = Effect.fnUntraced(function* (sessionID: SessionSchema.ID) {
