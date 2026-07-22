@@ -21,6 +21,9 @@ export class SessionLocationMiddleware extends HttpApiMiddleware.Service<
 
 const decodeSessionID = Schema.decodeUnknownEffect(SessionV2.ID)
 
+export const sessionLocationID = (params: Readonly<Record<string, string | undefined>>) =>
+  params.sessionID ?? params.parentID
+
 export const sessionLocationLayer = Layer.effect(
   SessionLocationMiddleware,
   Effect.gen(function* () {
@@ -30,7 +33,7 @@ export const sessionLocationLayer = Layer.effect(
     return SessionLocationMiddleware.of((effect) =>
       Effect.gen(function* () {
         const route = yield* HttpRouter.RouteContext
-        const sessionID = yield* decodeSessionID(route.params.sessionID).pipe(
+        const sessionID = yield* decodeSessionID(sessionLocationID(route.params)).pipe(
           Effect.mapError(
             () =>
               new InvalidRequestError({

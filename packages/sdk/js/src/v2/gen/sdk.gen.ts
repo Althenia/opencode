@@ -111,7 +111,9 @@ import type {
   McpDisconnectErrors,
   McpDisconnectResponses,
   McpLocalConfig,
+  McpLocalConfigV2,
   McpRemoteConfig,
+  McpRemoteConfigV2,
   McpStatusErrors,
   McpStatusResponses,
   ModelRef,
@@ -179,9 +181,14 @@ import type {
   QuestionReplyErrors,
   QuestionReplyResponses,
   QuestionV2Reply,
+  ServerSessionSessionTodoListErrors,
+  ServerSessionSessionTodoListResponses,
+  ServerSessionSessionTodoUpdateErrors,
+  ServerSessionSessionTodoUpdateResponses,
   ServiceStopRequest,
   SessionAbortErrors,
   SessionAbortResponses,
+  SessionAutonomySet,
   SessionChildrenErrors,
   SessionChildrenResponses,
   SessionCommandErrors,
@@ -218,8 +225,12 @@ import type {
   SessionShellResponses,
   SessionStatusErrors,
   SessionStatusResponses,
+  SessionSubagentAnswer,
+  SessionSubagentLaunch,
+  SessionSubagentMessage,
   SessionSummarizeErrors,
   SessionSummarizeResponses,
+  SessionTodoInfo,
   SessionUnrevertErrors,
   SessionUnrevertResponses,
   SessionUnshareErrors,
@@ -318,8 +329,16 @@ import type {
   V2IntegrationOauthStatusResponses,
   V2LocationGetErrors,
   V2LocationGetResponses,
+  V2McpAddErrors,
+  V2McpAddResponses,
+  V2McpConnectErrors,
+  V2McpConnectResponses,
+  V2McpDisconnectErrors,
+  V2McpDisconnectResponses,
   V2McpListErrors,
   V2McpListResponses,
+  V2McpRemoveErrors,
+  V2McpRemoveResponses,
   V2McpResourceCatalogErrors,
   V2McpResourceCatalogResponses,
   V2MessageListErrors,
@@ -370,10 +389,16 @@ import type {
   V2QuestionRequestListResponses,
   V2ReferenceListErrors,
   V2ReferenceListResponses,
+  V2SelfImprovementStatusErrors,
+  V2SelfImprovementStatusResponses,
   V2ServerGetErrors,
   V2ServerGetResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
+  V2SessionAutonomyGetErrors,
+  V2SessionAutonomyGetResponses,
+  V2SessionAutonomySetErrors,
+  V2SessionAutonomySetResponses,
   V2SessionBackgroundErrors,
   V2SessionBackgroundResponses,
   V2SessionCommandErrors,
@@ -384,6 +409,8 @@ import type {
   V2SessionContextResponses,
   V2SessionCreateErrors,
   V2SessionCreateResponses,
+  V2SessionDiagnosticsErrors,
+  V2SessionDiagnosticsResponses,
   V2SessionForkErrors,
   V2SessionForkResponses,
   V2SessionFormCancelErrors,
@@ -450,6 +477,18 @@ import type {
   V2SessionShellResponses,
   V2SessionSkillErrors,
   V2SessionSkillResponses,
+  V2SessionSubagentAnswerErrors,
+  V2SessionSubagentAnswerResponses,
+  V2SessionSubagentCancelErrors,
+  V2SessionSubagentCancelResponses,
+  V2SessionSubagentLaunchErrors,
+  V2SessionSubagentLaunchResponses,
+  V2SessionSubagentListErrors,
+  V2SessionSubagentListResponses,
+  V2SessionSubagentMessageErrors,
+  V2SessionSubagentMessageResponses,
+  V2SessionSubagentResumeErrors,
+  V2SessionSubagentResumeResponses,
   V2SessionSwitchAgentErrors,
   V2SessionSwitchAgentResponses,
   V2SessionSwitchModelErrors,
@@ -5864,6 +5903,278 @@ export class Question2 extends HeyApiClient {
   }
 }
 
+export class Autonomy extends HeyApiClient {
+  /**
+   * Get session autonomy
+   *
+   * Retrieve the durable Normal, YOLO, or Goal execution mode for a session.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<
+      V2SessionAutonomyGetResponses,
+      V2SessionAutonomyGetErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/autonomy",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set session autonomy
+   *
+   * Switch a session to Normal or YOLO mode, or activate a bounded autonomous Goal.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      sessionAutonomySet: SessionAutonomySet
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { key: "sessionAutonomySet", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      V2SessionAutonomySetResponses,
+      V2SessionAutonomySetErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/autonomy",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Subagent extends HeyApiClient {
+  /**
+   * List direct subagents
+   *
+   * List durable task records for direct managed child Sessions.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      parentID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "parentID" }] }])
+    return (options?.client ?? this.client).get<
+      V2SessionSubagentListResponses,
+      V2SessionSubagentListErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{parentID}/subagent",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Launch subagent
+   *
+   * Preflight and durably launch one direct child Session.
+   */
+  public launch<ThrowOnError extends boolean = false>(
+    parameters: {
+      parentID: string
+      sessionSubagentLaunch: SessionSubagentLaunch
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "parentID" },
+            { key: "sessionSubagentLaunch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionSubagentLaunchResponses,
+      V2SessionSubagentLaunchErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{parentID}/subagent",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Message subagent
+   */
+  public message<ThrowOnError extends boolean = false>(
+    parameters: {
+      parentID: string
+      childID: string
+      sessionSubagentMessage: SessionSubagentMessage
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "parentID" },
+            { in: "path", key: "childID" },
+            { key: "sessionSubagentMessage", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionSubagentMessageResponses,
+      V2SessionSubagentMessageErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{parentID}/subagent/{childID}/message",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Answer subagent question
+   */
+  public answer<ThrowOnError extends boolean = false>(
+    parameters: {
+      parentID: string
+      childID: string
+      questionID: string
+      sessionSubagentAnswer: SessionSubagentAnswer
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "parentID" },
+            { in: "path", key: "childID" },
+            { in: "path", key: "questionID" },
+            { key: "sessionSubagentAnswer", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionSubagentAnswerResponses,
+      V2SessionSubagentAnswerErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{parentID}/subagent/{childID}/question/{questionID}/answer",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel subagent
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      parentID: string
+      childID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "parentID" },
+            { in: "path", key: "childID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionSubagentCancelResponses,
+      V2SessionSubagentCancelErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{parentID}/subagent/{childID}/cancel",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Resume subagent
+   */
+  public resume<ThrowOnError extends boolean = false>(
+    parameters: {
+      parentID: string
+      childID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "parentID" },
+            { in: "path", key: "childID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionSubagentResumeResponses,
+      V2SessionSubagentResumeErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{parentID}/subagent/{childID}/resume",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Session3 extends HeyApiClient {
   /**
    * List sessions
@@ -6614,6 +6925,29 @@ export class Session3 extends HeyApiClient {
     })
   }
 
+  /**
+   * Get session cache diagnostics
+   *
+   * Retrieve normalized context occupancy and provider cache usage for the latest assistant step after the last completed compaction.
+   */
+  public diagnostics<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<
+      V2SessionDiagnosticsResponses,
+      V2SessionDiagnosticsErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/diagnostics",
+      ...options,
+      ...params,
+    })
+  }
+
   private _revert?: Revert
   get revert(): Revert {
     return (this._revert ??= new Revert({ client: this.client }))
@@ -6642,6 +6976,16 @@ export class Session3 extends HeyApiClient {
   private _question?: Question2
   get question(): Question2 {
     return (this._question ??= new Question2({ client: this.client }))
+  }
+
+  private _autonomy?: Autonomy
+  get autonomy(): Autonomy {
+    return (this._autonomy ??= new Autonomy({ client: this.client }))
+  }
+
+  private _subagent?: Subagent
+  get subagent(): Subagent {
+    return (this._subagent ??= new Subagent({ client: this.client }))
   }
 }
 
@@ -7352,6 +7696,145 @@ export class Mcp2 extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
     return (options?.client ?? this.client).get<V2McpListResponses, V2McpListErrors, ThrowOnError>({
       url: "/api/mcp",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Remove MCP server
+   *
+   * Stop an MCP server and remove it from the runtime set until restart.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      server: string
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "server" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<V2McpRemoveResponses, V2McpRemoveErrors, ThrowOnError>({
+      url: "/api/mcp/{server}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Add MCP server
+   *
+   * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+   */
+  public add<ThrowOnError extends boolean = false>(
+    parameters: {
+      server: string
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+      config?: McpLocalConfigV2 | McpRemoteConfigV2
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "server" },
+            { in: "query", key: "location" },
+            { in: "body", key: "config" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<V2McpAddResponses, V2McpAddErrors, ThrowOnError>({
+      url: "/api/mcp/{server}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Connect MCP server
+   *
+   * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+   */
+  public connect<ThrowOnError extends boolean = false>(
+    parameters: {
+      server: string
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "server" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2McpConnectResponses, V2McpConnectErrors, ThrowOnError>({
+      url: "/api/mcp/{server}/connect",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Disconnect MCP server
+   *
+   * Disconnect an MCP server at runtime, removing its tools until reconnected.
+   */
+  public disconnect<ThrowOnError extends boolean = false>(
+    parameters: {
+      server: string
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "server" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2McpDisconnectResponses, V2McpDisconnectErrors, ThrowOnError>({
+      url: "/api/mcp/{server}/disconnect",
       ...options,
       ...params,
     })
@@ -8541,6 +9024,34 @@ export class Debug extends HeyApiClient {
   }
 }
 
+export class SelfImprovement extends HeyApiClient {
+  /**
+   * Get self-improvement status
+   *
+   * Retrieve privacy-safe automatic self-improvement settings, aggregate evidence state, automation activity, and generated rollout slots for a location.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<
+      V2SelfImprovementStatusResponses,
+      V2SelfImprovementStatusErrors,
+      ThrowOnError
+    >({
+      url: "/api/self-improvement/status",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class V2 extends HeyApiClient {
   private _health?: Health
   get health(): Health {
@@ -8680,6 +9191,86 @@ export class V2 extends HeyApiClient {
   private _debug?: Debug
   get debug(): Debug {
     return (this._debug ??= new Debug({ client: this.client }))
+  }
+
+  private _selfImprovement?: SelfImprovement
+  get selfImprovement(): SelfImprovement {
+    return (this._selfImprovement ??= new SelfImprovement({ client: this.client }))
+  }
+}
+
+export class Todo extends HeyApiClient {
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<
+      ServerSessionSessionTodoListResponses,
+      ServerSessionSessionTodoListErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/todo",
+      ...options,
+      ...params,
+    })
+  }
+
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      todos?: Array<SessionTodoInfo>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "body", key: "todos" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      ServerSessionSessionTodoUpdateResponses,
+      ServerSessionSessionTodoUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/todo",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Session4 extends HeyApiClient {
+  private _todo?: Todo
+  get todo(): Todo {
+    return (this._todo ??= new Todo({ client: this.client }))
+  }
+}
+
+export class Session5 extends HeyApiClient {
+  private _session?: Session4
+  get session(): Session4 {
+    return (this._session ??= new Session4({ client: this.client }))
+  }
+}
+
+export class Server2 extends HeyApiClient {
+  private _session?: Session5
+  get session(): Session5 {
+    return (this._session ??= new Session5({ client: this.client }))
   }
 }
 
@@ -8824,5 +9415,10 @@ export class OpencodeClient extends HeyApiClient {
   private _v2?: V2
   get v2(): V2 {
     return (this._v2 ??= new V2({ client: this.client }))
+  }
+
+  private _server?: Server2
+  get server(): Server2 {
+    return (this._server ??= new Server2({ client: this.client }))
   }
 }

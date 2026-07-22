@@ -17,6 +17,9 @@ import { Hash } from "../util/hash"
 import { SessionAutonomy } from "./autonomy"
 import { SessionMessage } from "./message"
 import { SessionPending } from "./pending"
+import { SessionTaskTable } from "./sql"
+import { eq } from "drizzle-orm"
+import { SessionOrchestration } from "@opencode-ai/schema/session-orchestration"
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */
@@ -124,6 +127,37 @@ export const layer = Layer.effect(
     const clearSuspensionOnCommit = (sessionID: SessionSchema.ID) => ({
       commit: () => Effect.asVoid(store.consumeSuspended(sessionID)),
     })
+    const settleTask = Effect.fnUntraced(function* (sessionID: SessionSchema.ID, outcome: ReturnType<typeof terminal>) {
+      const task = yield* db
+        .select({ state: SessionTaskTable.state })
+        .from(SessionTaskTable)
+        .where(eq(SessionTaskTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (task?.state !== "running" || outcome.type === "interrupted") return
+      if (outcome.type === "failed") {
+        yield* events.publish(SessionEvent.Task.Updated, {
+          sessionID,
+          change: {
+            type: "failed",
+            error: outcome.error.message,
+            excerpt: SessionOrchestration.truncateUtf8(outcome.error.message, 16 * 1024),
+          },
+        })
+        return
+      }
+      const messages = yield* store.context(sessionID)
+      const assistant = messages.findLast((message) => message.type === "assistant")
+      const text = assistant?.content
+        .filter((part): part is Extract<(typeof assistant.content)[number], { type: "text" }> => part.type === "text")
+        .map((part) => part.text)
+        .join("")
+      const excerpt = text === undefined ? undefined : SessionOrchestration.truncateUtf8(text, 16 * 1024)
+      yield* events.publish(SessionEvent.Task.Updated, {
+        sessionID,
+        change: { type: "completed", excerpt },
+      })
+    })
     let wake: (sessionID: SessionSchema.ID) => Effect.Effect<void> = () => Effect.void
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError, InterruptReason>({
       started: (sessionID) =>
@@ -134,6 +168,13 @@ export const layer = Layer.effect(
       drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
+        const task = yield* db
+          .select({ state: SessionTaskTable.state })
+          .from(SessionTaskTable)
+          .where(eq(SessionTaskTable.session_id, sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        if (task && task.state !== "running") return
         return yield* SessionRunner.Service.use((runner) => runner.drain({ sessionID, force })).pipe(
           Effect.provide(locations.get(session.location)),
           Effect.tapCause((cause) =>
@@ -151,7 +192,11 @@ export const layer = Layer.effect(
             sessionID,
             Effect.gen(function* () {
               if (outcome.type === "succeeded") {
-                yield* events.publish(SessionEvent.Execution.Succeeded, { sessionID }, clearSuspensionOnCommit(sessionID))
+                yield* events.publish(
+                  SessionEvent.Execution.Succeeded,
+                  { sessionID },
+                  clearSuspensionOnCommit(sessionID),
+                )
                 return
               }
               if (outcome.type === "interrupted") {
@@ -167,6 +212,11 @@ export const layer = Layer.effect(
                 clearSuspensionOnCommit(sessionID),
               )
             }),
+          )
+          yield* settleTask(sessionID, outcome).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError("Failed to settle managed child task", cause).pipe(Effect.annotateLogs({ sessionID })),
+            ),
           )
           yield* observeTerminal(
             sessionID,

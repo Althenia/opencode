@@ -7,6 +7,7 @@ import { Job } from "../job"
 import { Location } from "../location"
 import { LocationServiceMap } from "../location-service-map"
 import { SessionV2 } from "../session"
+import { SessionOrchestration } from "../session/orchestration"
 
 export interface Interface {
   readonly session: Pick<
@@ -14,6 +15,7 @@ export interface Interface {
     "get" | "create" | "messages" | "prompt" | "generate" | "command" | "resume" | "interrupt" | "synthetic"
   >
   readonly job: Pick<Job.Interface, "start" | "wait" | "block" | "background" | "cancel">
+  readonly orchestration: SessionOrchestration.Interface
   readonly location: {
     readonly agent: {
       readonly list: (
@@ -63,6 +65,23 @@ export const layerWithCell = (cell: Cell) =>
         background: (id) => require(cell, (runtime) => runtime.job.background(id)),
         cancel: (id) => require(cell, (runtime) => runtime.job.cancel(id)),
       },
+      orchestration: {
+        managed: (childID) => require(cell, (runtime) => runtime.orchestration.managed(childID)),
+        get: (parentID, childID) => require(cell, (runtime) => runtime.orchestration.get(parentID, childID)),
+        launch: (input) => require(cell, (runtime) => runtime.orchestration.launch(input)),
+        list: (parentID) => require(cell, (runtime) => runtime.orchestration.list(parentID)),
+        send: (input) => require(cell, (runtime) => runtime.orchestration.send(input)),
+        answer: (input) => require(cell, (runtime) => runtime.orchestration.answer(input)),
+        cancel: (input) => require(cell, (runtime) => runtime.orchestration.cancel(input)),
+        resume: (input) => require(cell, (runtime) => runtime.orchestration.resume(input)),
+        progress: (childID, text) => require(cell, (runtime) => runtime.orchestration.progress(childID, text)),
+        question: (childID, text, data) =>
+          require(cell, (runtime) => runtime.orchestration.question(childID, text, data)),
+        settle: (childID, result) => require(cell, (runtime) => runtime.orchestration.settle(childID, result)),
+        background: (childID) => require(cell, (runtime) => runtime.orchestration.background(childID)),
+        teamView: (parentID) => require(cell, (runtime) => runtime.orchestration.teamView(parentID)),
+        recover: require(cell, (runtime) => runtime.orchestration.recover),
+      },
       location: {
         agent: {
           list: (ref) => require(cell, (runtime) => runtime.location.agent.list(ref)),
@@ -77,9 +96,11 @@ export const providerLayerWithCell = (cell: Cell) =>
       const sessions = yield* SessionV2.Service
       const jobs = yield* Job.Service
       const locations = yield* LocationServiceMap.Service
+      const orchestration = yield* SessionOrchestration.Service
       const runtime: Interface = {
         session: sessions,
         job: jobs,
+        orchestration,
         location: {
           agent: {
             list: (ref) =>
@@ -118,7 +139,7 @@ export const providerNodeWithCell = (cell: Cell) =>
   makeGlobalNode({
     name: "plugin-runtime-provider",
     layer: providerLayerWithCell(cell),
-    deps: [node, SessionV2.node, Job.node, LocationServiceMap.node],
+    deps: [node, SessionV2.node, Job.node, LocationServiceMap.node, SessionOrchestration.node],
   })
 
 export const providerNode = providerNodeWithCell(defaultCell)

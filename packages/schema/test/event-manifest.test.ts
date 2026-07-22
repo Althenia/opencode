@@ -115,6 +115,7 @@ describe("public event manifest", () => {
         "session.execution.interrupted.1",
         "session.instructions.updated.2",
         "session.synthetic.1",
+        "session.task.updated.1",
         "session.skill.activated.1",
         "session.shell.started.1",
         "session.shell.ended.1",
@@ -147,6 +148,7 @@ describe("public event manifest", () => {
     ])
     expect(SessionEvent.UsageRecorded.durability).toBe("durable")
     expect(EventManifest.Durable.get("session.usage.recorded.1")).toBe(SessionEvent.UsageRecorded)
+    expect(EventManifest.Durable.get("session.task.updated.1")).toBe(SessionEvent.Task.Updated)
     expect(SessionEvent.Definitions).not.toContain(SessionEvent.UsageRecorded)
     expect(EventManifest.Definitions).not.toContain(SessionEvent.UsageRecorded)
     expect(EventManifest.ServerDefinitions).not.toContain(SessionEvent.UsageRecorded)

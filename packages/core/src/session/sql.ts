@@ -16,6 +16,8 @@ import type { Session } from "@opencode-ai/schema/session"
 import type { SyntheticData, UserData } from "@opencode-ai/schema/session-pending"
 import type { RevertV1 } from "@opencode-ai/schema/session-revert"
 import type { Schema } from "effect"
+import type { Model } from "@opencode-ai/schema/model"
+import type { SessionOrchestration } from "@opencode-ai/schema/session-orchestration"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Info)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -168,6 +170,72 @@ export const SessionPendingTable = sqliteTable(
       .on(table.session_id)
       .where(sql`${table.type} = 'compaction'`),
     uniqueIndex("session_pending_session_admitted_seq_idx").on(table.session_id, table.admitted_seq),
+  ],
+)
+
+export const SessionTaskTable = sqliteTable(
+  "session_task",
+  {
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .primaryKey()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    parent_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    parent_assistant_message_id: text().$type<SessionMessage.ID>().notNull(),
+    tool_call_id: text().notNull(),
+    input_id: text().$type<SessionMessage.ID>().notNull().unique(),
+    description: text().notNull(),
+    agent: text().notNull(),
+    model: text({ mode: "json" }).$type<Model.Ref>().notNull(),
+    prompt_digest: text().notNull(),
+    background: integer({ mode: "boolean" }).notNull(),
+    delivery: text().$type<SessionPending.Delivery>().notNull(),
+    state: text().$type<SessionOrchestration.State>().notNull(),
+    progress: text(),
+    progress_time: integer(),
+    question_id: text().$type<SessionOrchestration.QuestionID>(),
+    question: text(),
+    question_data: text({ mode: "json" }).$type<Schema.Json>(),
+    question_time: integer(),
+    attempt_started: integer({ mode: "boolean" }).notNull().default(false),
+    revision: integer().notNull().default(0),
+    ...Timestamps,
+  },
+  (table) => [
+    uniqueIndex("session_task_launch_identity_idx").on(
+      table.parent_id,
+      table.parent_assistant_message_id,
+      table.tool_call_id,
+    ),
+    index("session_task_parent_state_updated_idx").on(table.parent_id, table.state, table.time_updated),
+  ],
+)
+
+export const SessionTaskNotificationTable = sqliteTable(
+  "session_task_notification",
+  {
+    id: text().primaryKey(),
+    task_session_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTaskTable.session_id, { onDelete: "cascade" }),
+    parent_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    type: text().$type<SessionOrchestration.NotificationType>().notNull(),
+    revision: integer().notNull(),
+    excerpt: text(),
+    delivered: integer({ mode: "boolean" }).notNull().default(false),
+    time_created: integer().notNull(),
+    time_delivered: integer(),
+  },
+  (table) => [
+    uniqueIndex("session_task_notification_transition_idx").on(table.task_session_id, table.type, table.revision),
+    index("session_task_notification_delivery_idx").on(table.delivered, table.time_created, table.id),
   ],
 )
 

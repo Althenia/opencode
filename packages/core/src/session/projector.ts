@@ -10,21 +10,34 @@ import { SessionEvent } from "./event"
 import { SessionV1 } from "../v1/session"
 import { WorkspaceTable } from "../control-plane/workspace.sql"
 import { SessionMessage } from "./message"
+import { SessionSchema } from "./schema"
 import { SessionMessageUpdater } from "./message-updater"
 import { SessionPending } from "./pending"
 import { SessionPermissionCeiling } from "./permission-ceiling"
 import { WorkspaceV2 } from "../workspace"
 import { InstructionState } from "./instruction-state"
-import { MessageTable, PartTable, SessionPendingTable, SessionMessageTable, SessionTable } from "./sql"
+import {
+  MessageTable,
+  PartTable,
+  SessionPendingTable,
+  SessionMessageTable,
+  SessionTable,
+  SessionTaskNotificationTable,
+  SessionTaskTable,
+} from "./sql"
 import type { DeepMutable } from "../schema"
 import { Slug } from "../util/slug"
 import { Money } from "@opencode-ai/schema/money"
+import { SessionOrchestration } from "@opencode-ai/schema/session-orchestration"
 
 type DatabaseService = Database.Interface["db"]
 type CurrentDurableEvent = Extract<SessionEvent.Event, { readonly durable: object }>
 type MessageEvent = Exclude<
   CurrentDurableEvent,
-  typeof SessionEvent.Forked.Type | typeof SessionEvent.Deleted.Type | typeof SessionEvent.InstructionsUpdated.Type
+  | typeof SessionEvent.Forked.Type
+  | typeof SessionEvent.Deleted.Type
+  | typeof SessionEvent.InstructionsUpdated.Type
+  | typeof SessionEvent.Task.Updated.Type
 >
 
 const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info)
@@ -460,6 +473,167 @@ function insertMessage(db: DatabaseService, event: SessionEvent.DurableEvent, me
     .pipe(Effect.orDie)
 }
 
+class TaskProjectionConflict extends Error {}
+
+const projectTask = Effect.fn("SessionProjector.projectTask")(function* (
+  db: DatabaseService,
+  event: typeof SessionEvent.Task.Updated.Type,
+) {
+  const change = event.data.change
+  const time = DateTime.toEpochMillis(event.created)
+  if (change.type === "launched") {
+    const stored = yield* db
+      .insert(SessionTaskTable)
+      .values({
+        session_id: event.data.sessionID,
+        parent_id: change.parentID,
+        parent_assistant_message_id: change.parentAssistantMessageID,
+        tool_call_id: change.toolCallID,
+        input_id: change.inputID,
+        description: change.description,
+        agent: change.agent,
+        model: change.model,
+        prompt_digest: change.promptDigest,
+        background: change.background,
+        delivery: change.delivery,
+        state: "starting",
+        attempt_started: false,
+        revision: 0,
+        time_created: time,
+        time_updated: time,
+      })
+      .onConflictDoNothing()
+      .returning({ sessionID: SessionTaskTable.session_id })
+      .get()
+      .pipe(Effect.orDie)
+    if (!stored) return yield* Effect.die(new TaskProjectionConflict("Task launch identity already exists"))
+    return
+  }
+
+  const task = yield* db
+    .select()
+    .from(SessionTaskTable)
+    .where(eq(SessionTaskTable.session_id, event.data.sessionID))
+    .get()
+    .pipe(Effect.orDie)
+  if (!task) return yield* Effect.die(new TaskProjectionConflict("Task does not exist"))
+  const revision = task.revision + 1
+  const update = (value: Partial<typeof SessionTaskTable.$inferInsert>) =>
+    db
+      .update(SessionTaskTable)
+      .set({ ...value, revision, time_updated: time })
+      .where(and(eq(SessionTaskTable.session_id, event.data.sessionID), eq(SessionTaskTable.revision, task.revision)))
+      .run()
+      .pipe(Effect.orDie)
+  const notify = (type: SessionOrchestration.NotificationType, excerpt?: string) =>
+    db
+      .insert(SessionTaskNotificationTable)
+      .values({
+        id: `ntf_${event.data.sessionID}_${revision}_${type}`,
+        task_session_id: event.data.sessionID,
+        parent_id: task.parent_id,
+        type,
+        revision,
+        excerpt,
+        delivered: false,
+        time_created: time,
+      })
+      .run()
+      .pipe(Effect.orDie)
+  const detached = () =>
+    task.background
+      ? Effect.succeed(true)
+      : db
+          .select({ id: SessionTaskNotificationTable.id })
+          .from(SessionTaskNotificationTable)
+          .where(
+            and(
+              eq(SessionTaskNotificationTable.task_session_id, event.data.sessionID),
+              eq(SessionTaskNotificationTable.type, "question"),
+            ),
+          )
+          .get()
+          .pipe(
+            Effect.orDie,
+            Effect.map((row) => row !== undefined),
+          )
+  const conflict = () => Effect.die(new TaskProjectionConflict(`Invalid ${change.type} transition from ${task.state}`))
+
+  if (change.type === "started") {
+    if (task.state !== "starting") return yield* conflict()
+    yield* update({ state: "running" })
+    return
+  }
+  if (change.type === "backgrounded") {
+    if (task.state !== "running" || task.background) return yield* conflict()
+    yield* update({ background: true })
+    return
+  }
+  if (change.type === "progressed") {
+    if (task.state !== "running") return yield* conflict()
+    yield* update({ progress: change.progress.text, progress_time: change.progress.time })
+    return
+  }
+  if (change.type === "question_asked") {
+    if (task.state !== "running" || task.question_id !== null) return yield* conflict()
+    yield* update({
+      state: "waiting",
+      question_id: change.question.id,
+      question: change.question.text,
+      question_data: change.question.data,
+      question_time: change.question.time,
+    })
+    yield* notify("question")
+    return
+  }
+  if (change.type === "question_answered") {
+    if (task.state !== "waiting" || task.question_id !== change.answer.questionID) return yield* conflict()
+    yield* update({
+      state: "running",
+      question_id: null,
+      question: null,
+      question_data: null,
+      question_time: null,
+    })
+    return
+  }
+  if (change.type === "cancel_requested") {
+    if (task.state !== "running" && task.state !== "waiting") return yield* conflict()
+    yield* update({ state: "cancelling" })
+    return
+  }
+  if (change.type === "cancelled") {
+    if (task.state !== "cancelling") return yield* conflict()
+    yield* update({ state: "cancelled" })
+    yield* notify("cancelled")
+    return
+  }
+  if (change.type === "completed") {
+    if (task.state !== "running") return yield* conflict()
+    yield* update({ state: "completed" })
+    if (yield* detached()) yield* notify("completed", change.excerpt)
+    return
+  }
+  if (change.type === "failed") {
+    if (task.state !== "running") return yield* conflict()
+    yield* update({ state: "failed" })
+    if (yield* detached())
+      yield* notify("failed", change.excerpt ?? SessionOrchestration.truncateUtf8(change.error, 16 * 1024))
+    return
+  }
+  if (task.state !== "running") return yield* conflict()
+  yield* update({ state: "lost" })
+  yield* notify("lost", change.excerpt)
+})
+
+const markTaskAttempt = (db: DatabaseService, sessionID: SessionSchema.ID, attemptStarted: boolean) =>
+  db
+    .update(SessionTaskTable)
+    .set({ attempt_started: attemptStarted })
+    .where(eq(SessionTaskTable.session_id, sessionID))
+    .run()
+    .pipe(Effect.orDie)
+
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
@@ -676,20 +850,28 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.InstructionsUpdated, (event) =>
       InstructionState.apply(db, event.data.sessionID, event.durable.seq, event.data.delta),
     )
+    yield* events.project(SessionEvent.Task.Updated, (event) => projectTask(db, event))
     yield* events.project(SessionEvent.Synthetic, (event) => run(db, event))
     yield* events.project(SessionEvent.Skill.Activated, (event) => run(db, event))
     yield* events.project(SessionEvent.Shell.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Shell.Ended, (event) => run(db, event))
-    yield* events.project(SessionEvent.Step.Started, (event) => run(db, event))
+    yield* events.project(SessionEvent.Step.Started, (event) =>
+      Effect.gen(function* () {
+        yield* run(db, event)
+        yield* markTaskAttempt(db, event.data.sessionID, true)
+      }),
+    )
     yield* events.project(SessionEvent.Step.Ended, (event) =>
       Effect.gen(function* () {
         yield* run(db, event)
+        yield* markTaskAttempt(db, event.data.sessionID, false)
         yield* applyUsage(db, event.data.sessionID, event.data)
       }),
     )
     yield* events.project(SessionEvent.Step.Failed, (event) =>
       Effect.gen(function* () {
         yield* run(db, event)
+        yield* markTaskAttempt(db, event.data.sessionID, false)
         if (event.data.cost !== undefined && event.data.tokens !== undefined)
           yield* applyUsage(db, event.data.sessionID, { cost: event.data.cost, tokens: event.data.tokens })
       }),

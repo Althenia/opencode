@@ -16,9 +16,14 @@ import { SessionAutonomy } from "@opencode-ai/core/session/autonomy"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
 import { UserInterruptedError } from "@opencode-ai/core/session/error"
 import { SessionRunner } from "@opencode-ai/core/session/runner"
-import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionTable, SessionTaskTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { AgentV2 } from "@opencode-ai/core/agent"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
+import { SessionOrchestration } from "@opencode-ai/schema/session-orchestration"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Scope } from "effect"
 import { testEffect } from "./lib/effect"
 
@@ -129,6 +134,45 @@ describe("SessionExecution lifecycle", () => {
     }),
   )
 
+  it.effect("does not invoke the runner for a waiting managed child", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const parentID = SessionV2.ID.make("ses_waiting_parent")
+      const childID = SessionV2.ID.make("ses_waiting_child")
+      yield* seedSessions(database, [parentID, childID])
+      yield* database.db
+        .insert(SessionTaskTable)
+        .values({
+          session_id: childID,
+          parent_id: parentID,
+          parent_assistant_message_id: SessionMessage.ID.make("msg_parent"),
+          tool_call_id: "call_waiting",
+          input_id: SessionMessage.ID.make("msg_input"),
+          description: "waiting",
+          agent: AgentV2.ID.make("reviewer"),
+          model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("model") }),
+          prompt_digest: "digest",
+          background: false,
+          delivery: "steer",
+          state: "waiting",
+          question_id: SessionOrchestration.QuestionID.make("qst_waiting"),
+          question: "Proceed?",
+          question_time: 1,
+        })
+        .run()
+      const drained: SessionV2.ID[] = []
+      const scope = yield* Scope.make()
+      const context = yield* buildExecution(scope, ({ sessionID }) =>
+        Effect.sync(() => {
+          drained.push(sessionID)
+        }),
+      )
+      yield* Context.get(context, SessionExecution.Service).resume(childID)
+      expect(drained).toEqual([])
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
   it.effect("records one terminal observation for a completed busy period", () =>
     Effect.gen(function* () {
       const database = yield* Database.Service
@@ -137,8 +181,10 @@ describe("SessionExecution lifecycle", () => {
 
       const observed: Array<{ sessionID: SessionV2.ID; exit: Exit.Exit<void, unknown> }> = []
       const scope = yield* Scope.make()
-      const context = yield* buildExecution(scope, () => Effect.void, (input) =>
-        Effect.sync(() => void observed.push(input)),
+      const context = yield* buildExecution(
+        scope,
+        () => Effect.void,
+        (input) => Effect.sync(() => void observed.push(input)),
       )
       const execution = Context.get(context, SessionExecution.Service)
 
@@ -160,8 +206,10 @@ describe("SessionExecution lifecycle", () => {
 
       const observed: Exit.Exit<void, unknown>[] = []
       const scope = yield* Scope.make()
-      const context = yield* buildExecution(scope, () => Effect.fail(new UserInterruptedError()), (input) =>
-        Effect.sync(() => void observed.push(input.exit)),
+      const context = yield* buildExecution(
+        scope,
+        () => Effect.fail(new UserInterruptedError()),
+        (input) => Effect.sync(() => void observed.push(input.exit)),
       )
       const execution = Context.get(context, SessionExecution.Service)
 

@@ -90,6 +90,46 @@ test("session instructions methods use the public HTTP contract", async () => {
   ])
 })
 
+test("session subagent message exposes the decoded Effect contract", async () => {
+  let request: { method: string; url: string; body?: unknown } | undefined
+  const task = {
+    sessionID: "ses_child",
+    parentID: "ses_parent",
+    description: "Review",
+    agent: "reviewer",
+    model: { providerID: "openai", id: "gpt-5.6" },
+    background: true,
+    state: "running",
+    revision: 2,
+    time: { created: 1, updated: 2 },
+  }
+  const httpClient = HttpClient.make((input) => {
+    request = {
+      method: input.method,
+      url: input.url,
+      body: input.body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(input.body.body)) : undefined,
+    }
+    return Effect.succeed(HttpClientResponse.fromWeb(input, Response.json({ data: task })))
+  })
+  const result = await Effect.gen(function* () {
+    const client = yield* OpenCode.make({ baseUrl: "http://localhost:3000" })
+    return yield* client.session.subagent.message({
+      parentID: Session.ID.make("ses_parent"),
+      childID: Session.ID.make("ses_child"),
+      messageID: SessionMessage.ID.make("msg_control"),
+      text: "Use this context",
+      delivery: "queue",
+    })
+  }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.runPromise)
+
+  expect(result).toMatchObject({ sessionID: "ses_child", state: "running" })
+  expect(request).toEqual({
+    method: "POST",
+    url: "http://localhost:3000/api/session/ses_parent/subagent/ses_child/message",
+    body: { messageID: "msg_control", text: "Use this context", delivery: "queue" },
+  })
+})
+
 test("event.subscribe exposes and decodes the native Effect event stream", async () => {
   const httpClient = HttpClient.make((request) =>
     Effect.succeed(

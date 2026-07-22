@@ -16,15 +16,20 @@ import {
   SessionNotFoundError,
   SkillNotFoundError,
   UnknownError,
+  ForbiddenError,
+  QuestionNotFoundError,
 } from "@opencode-ai/protocol/errors"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
+import { SessionOrchestration } from "@opencode-ai/core/session/orchestration"
+import { AgentV2 } from "@opencode-ai/core/agent"
 
 const DefaultSessionsLimit = 50
 
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* SessionV2.Service
+    const orchestration = yield* SessionOrchestration.Service
 
     return handlers
       .handle(
@@ -161,18 +166,16 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.autonomy.set",
         Effect.fn(function* (ctx) {
           return {
-            data: yield* session.autonomy
-              .set({ sessionID: ctx.params.sessionID, ...ctx.payload })
-              .pipe(
-                Effect.catchTag("Session.NotFoundError", (error) =>
-                  Effect.fail(
-                    new SessionNotFoundError({
-                      sessionID: error.sessionID,
-                      message: `Session not found: ${error.sessionID}`,
-                    }),
-                  ),
+            data: yield* session.autonomy.set({ sessionID: ctx.params.sessionID, ...ctx.payload }).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
                 ),
               ),
+            ),
           }
         }),
       )
@@ -190,6 +193,89 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             ),
           )
           return HttpApiSchema.NoContent.make()
+        }),
+      )
+      .handle(
+        "session.subagent.list",
+        Effect.fn(function* (ctx) {
+          return { data: yield* orchestration.list(ctx.params.parentID).pipe(Effect.mapError(mapSessionNotFound)) }
+        }),
+      )
+      .handle(
+        "session.subagent.launch",
+        Effect.fn(function* (ctx) {
+          const parent = yield* session.get(ctx.params.parentID).pipe(Effect.mapError(mapSessionNotFound))
+          const prepared = yield* SessionOrchestration.preflight(parent, {
+            agent: AgentV2.ID.make(ctx.payload.agent),
+            model: ctx.payload.model,
+          }).pipe(Effect.mapError(mapLaunchError))
+          return {
+            data: yield* orchestration
+              .launch({
+                parentID: ctx.params.parentID,
+                parentAssistantMessageID: ctx.payload.parentAssistantMessageID,
+                toolCallID: ctx.payload.toolCallID,
+                agent: AgentV2.ID.make(ctx.payload.agent),
+                description: ctx.payload.description,
+                prompt: ctx.payload.prompt,
+                background: ctx.payload.background === true,
+                model: ctx.payload.model,
+                prepared,
+              })
+              .pipe(Effect.mapError(mapLaunchError)),
+          }
+        }),
+      )
+      .handle(
+        "session.subagent.message",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* orchestration
+              .send({
+                parentID: ctx.params.parentID,
+                childID: ctx.params.childID,
+                messageID: ctx.payload.messageID,
+                text: ctx.payload.text,
+                delivery: ctx.payload.delivery,
+              })
+              .pipe(Effect.mapError(mapControlError)),
+          }
+        }),
+      )
+      .handle(
+        "session.subagent.answer",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* orchestration
+              .answer({
+                parentID: ctx.params.parentID,
+                childID: ctx.params.childID,
+                questionID: ctx.params.questionID,
+                text: ctx.payload.text,
+                data: ctx.payload.data,
+              })
+              .pipe(Effect.mapError(mapAnswerError)),
+          }
+        }),
+      )
+      .handle(
+        "session.subagent.cancel",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* orchestration
+              .cancel({ parentID: ctx.params.parentID, childID: ctx.params.childID })
+              .pipe(Effect.mapError(mapControlError)),
+          }
+        }),
+      )
+      .handle(
+        "session.subagent.resume",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* orchestration
+              .resume({ parentID: ctx.params.parentID, childID: ctx.params.childID })
+              .pipe(Effect.mapError(mapControlError)),
+          }
         }),
       )
       .handle(
@@ -775,3 +861,35 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       )
   }),
 )
+
+const mapSessionNotFound = (error: SessionV2.NotFoundError) =>
+  new SessionNotFoundError({ sessionID: error.sessionID, message: `Session not found: ${error.sessionID}` })
+
+function mapOwnershipError(error: SessionOrchestration.OwnershipError) {
+  if (error._tag === "Session.NotFoundError") return mapSessionNotFound(error)
+  if (error._tag === "SessionOrchestration.NotFoundError")
+    return new SessionNotFoundError({ sessionID: error.childID, message: `Session not found: ${error.childID}` })
+  return new ForbiddenError({ message: `Session ${error.childID} is not a direct managed child of ${error.parentID}` })
+}
+
+function mapLaunchError(error: SessionOrchestration.LaunchError | SessionOrchestration.InvalidRequestError) {
+  if (error._tag === "Session.NotFoundError") return mapSessionNotFound(error)
+  if (error._tag === "SessionOrchestration.ConflictError") return new ConflictError({ message: error.message })
+  return new InvalidRequestError({ message: error.message })
+}
+
+function mapControlError(error: SessionOrchestration.ControlError) {
+  if (error._tag === "SessionOrchestration.ConflictError") return new ConflictError({ message: error.message })
+  return mapOwnershipError(error)
+}
+
+function mapAnswerError(error: SessionOrchestration.AnswerError) {
+  if (error._tag === "SessionOrchestration.QuestionNotFoundError")
+    return new QuestionNotFoundError({
+      requestID: error.questionID,
+      message: `Question not found: ${error.questionID}`,
+    })
+  if (error._tag === "SessionOrchestration.InvalidRequestError")
+    return new InvalidRequestError({ message: error.message })
+  return mapControlError(error)
+}

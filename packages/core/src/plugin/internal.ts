@@ -29,6 +29,7 @@ import { PermissionV2 } from "../permission"
 import { Reference } from "../reference"
 import { Ripgrep } from "../ripgrep"
 import { SessionInstructions } from "../session/instructions"
+import { SessionRunnerModel } from "../session/runner/model"
 import { SessionTodo } from "../session/todo"
 import { Shell } from "../shell"
 import { SkillV2 } from "../skill"
@@ -42,6 +43,8 @@ import { ReadTool } from "../tool/read"
 import { ShellTool } from "../tool/shell"
 import { SkillTool } from "../tool/skill"
 import { SubagentTool } from "../tool/subagent"
+import { SubagentControlTool } from "../tool/subagent-control"
+import { SubagentReportTool } from "../tool/subagent-report"
 import { TodoWriteTool } from "../tool/todowrite"
 import { Tools } from "../tool/tools"
 import { WebFetchTool } from "../tool/webfetch"
@@ -82,6 +85,7 @@ const services = Effect.fn("PluginInternal.services")(function* () {
   const reference = yield* Reference.Service
   const ripgrep = yield* Ripgrep.Service
   const instructions = yield* SessionInstructions.Service
+  const sessionRunnerModel = yield* SessionRunnerModel.Service
   const todo = yield* SessionTodo.Service
   const shell = yield* Shell.Service
   const skill = yield* SkillV2.Service
@@ -112,6 +116,7 @@ const services = Effect.fn("PluginInternal.services")(function* () {
     Context.make(Reference.Service, reference),
     Context.make(Ripgrep.Service, ripgrep),
     Context.make(SessionInstructions.Service, instructions),
+    Context.make(SessionRunnerModel.Service, sessionRunnerModel),
     Context.make(SessionTodo.Service, todo),
     Context.make(Shell.Service, shell),
     Context.make(SkillV2.Service, skill),
@@ -144,6 +149,8 @@ const pre = [
   ShellTool.Plugin,
   SkillTool.Plugin,
   SubagentTool.Plugin,
+  SubagentControlTool.Plugin,
+  SubagentReportTool.Plugin,
   TodoWriteTool.Plugin,
   WebFetchTool.Plugin,
   WebSearchTool.Plugin,

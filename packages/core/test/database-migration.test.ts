@@ -366,6 +366,11 @@ describe("DatabaseMigration", () => {
             sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('instruction_blob', 'instruction_state') ORDER BY name`,
           ),
         ).toEqual([{ name: "instruction_blob" }, { name: "instruction_state" }])
+        expect(
+          yield* db.all(
+            sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session_task', 'session_task_notification') ORDER BY name`,
+          ),
+        ).toEqual([{ name: "session_task" }, { name: "session_task_notification" }])
         expect(yield* db.get(sql`SELECT count(*) as count FROM migration`)).toEqual({ count: migrations.length })
         expect(
           yield* db.all(
@@ -381,6 +386,50 @@ describe("DatabaseMigration", () => {
           { name: "session_pending_session_compaction_idx" },
           { name: "session_pending_session_delivery_seq_idx" },
         ])
+      }),
+    )
+  })
+
+  test("enforces orchestration ownership, identity, outbox uniqueness, and cascades", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* DatabaseMigration.apply(db)
+        yield* db.run(sql`PRAGMA foreign_keys = ON`)
+        yield* db.run(
+          sql`INSERT INTO project (id, worktree, sandboxes, time_created, time_updated) VALUES ('project', '/project', '[]', 1, 1)`,
+        )
+        for (const id of ["ses_parent", "ses_child", "ses_other"]) {
+          yield* db.run(
+            sql`INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES (${id}, 'project', ${id}, '/project', ${id}, 'test', 1, 1)`,
+          )
+        }
+        const task = sql`INSERT INTO session_task (session_id, parent_id, parent_assistant_message_id, tool_call_id, input_id, description, agent, model, prompt_digest, background, delivery, state, attempt_started, revision, time_created, time_updated) VALUES ('ses_child', 'ses_parent', 'msg_parent', 'call_1', 'msg_input', 'work', 'build', '{"providerID":"openai","id":"gpt"}', 'digest', 1, 'steer', 'starting', 0, 0, 1, 1)`
+        yield* db.run(task)
+        expect(
+          yield* Effect.exit(
+            db.run(
+              sql`INSERT INTO session_task (session_id, parent_id, parent_assistant_message_id, tool_call_id, input_id, description, agent, model, prompt_digest, background, delivery, state, attempt_started, revision, time_created, time_updated) VALUES ('ses_other', 'ses_parent', 'msg_parent', 'call_1', 'msg_other', 'work', 'build', '{"providerID":"openai","id":"gpt"}', 'digest', 1, 'steer', 'starting', 0, 0, 1, 1)`,
+            ),
+          ),
+        ).toMatchObject({ _tag: "Failure" })
+
+        yield* db.run(
+          sql`INSERT INTO session_task_notification (id, task_session_id, parent_id, type, revision, delivered, time_created) VALUES ('notice_1', 'ses_child', 'ses_parent', 'question', 1, 0, 1)`,
+        )
+        expect(
+          yield* Effect.exit(
+            db.run(
+              sql`INSERT INTO session_task_notification (id, task_session_id, parent_id, type, revision, delivered, time_created) VALUES ('notice_2', 'ses_child', 'ses_parent', 'question', 1, 0, 1)`,
+            ),
+          ),
+        ).toMatchObject({ _tag: "Failure" })
+
+        yield* db.run(sql`DELETE FROM session WHERE id = 'ses_child'`)
+        expect(yield* db.get(sql`SELECT session_id FROM session_task WHERE session_id = 'ses_child'`)).toBeUndefined()
+        expect(
+          yield* db.get(sql`SELECT id FROM session_task_notification WHERE task_session_id = 'ses_child'`),
+        ).toBeUndefined()
       }),
     )
   })

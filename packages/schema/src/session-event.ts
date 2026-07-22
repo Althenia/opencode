@@ -23,6 +23,7 @@ import { TokenUsage } from "./token-usage.js"
 import { SessionPending } from "./session-pending.js"
 import { Project } from "./project.js"
 import { SessionCacheDiagnostics } from "./session-cache-diagnostics.js"
+import { SessionOrchestration } from "./session-orchestration.js"
 
 export { FileAttachment }
 
@@ -189,6 +190,15 @@ export const InstructionsUpdated = Event.durable({
   },
 })
 export type InstructionsUpdated = typeof InstructionsUpdated.Type
+
+export namespace Task {
+  export const Updated = Event.durable({
+    type: "session.task.updated",
+    ...options,
+    schema: { sessionID: SessionID, change: SessionOrchestration.Change },
+  })
+  export type Updated = typeof Updated.Type
+}
 
 export const Synthetic = Event.durable({
   type: "session.synthetic",
@@ -557,6 +567,7 @@ export const Definitions = Event.inventory(
   Execution.Failed,
   Execution.Interrupted,
   InstructionsUpdated,
+  Task.Updated,
   Synthetic,
   Skill.Activated,
   Shell.Started,

@@ -180,6 +180,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       "session.execution.failed": () => clearCurrentRetry,
       "session.execution.interrupted": () => clearCurrentRetry,
       "session.instructions.updated": () => Effect.void,
+      "session.task.updated": () => Effect.void,
       "session.synthetic": (event) => {
         return adapter.appendMessage(
           SessionMessage.Synthetic.make({

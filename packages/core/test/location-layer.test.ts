@@ -546,25 +546,28 @@ describe("LocationServiceMap", () => {
               const registry = yield* ToolRegistry.Service
               // Tool plugins register during the forked PluginSupervisor boot; wait for
               // every expected tool rather than relying on batch ordering.
-              yield* Effect.forEach(
-                [
-                  "edit",
-                  "glob",
-                  "grep",
-                  "question",
-                  "read",
-                  "shell",
-                  "skill",
-                  "subagent",
-                  "webfetch",
-                  "websearch",
-                  "write",
-                ],
-                (name) => waitForTool(registry, name),
-              )
+              const expected = [
+                "edit",
+                "glob",
+                "grep",
+                "patch",
+                "question",
+                "read",
+                "shell",
+                "skill",
+                "subagent",
+                "subagent_control",
+                "subagent_report",
+                "todowrite",
+                "webfetch",
+                "websearch",
+                "write",
+              ]
+              yield* Effect.forEach(expected, (name) => waitForTool(registry, name))
               return {
                 providers: yield* catalog.provider.all(),
                 tools: yield* toolDefinitions(registry),
+                expected,
               }
             }).pipe(
               Effect.scoped,
@@ -578,37 +581,11 @@ describe("LocationServiceMap", () => {
           const blockedState = yield* update(blocked.path, blockedID)
           expect(blockedState.providers.some((provider) => provider.id === blockedID)).toBe(true)
           expect(blockedState.providers.some((provider) => provider.id === allowedID)).toBe(false)
-          expect(blockedState.tools.map((tool) => tool.name).sort()).toEqual([
-            "edit",
-            "glob",
-            "grep",
-            "patch",
-            "question",
-            "read",
-            "shell",
-            "skill",
-            "subagent",
-            "webfetch",
-            "websearch",
-            "write",
-          ])
+          expect(blockedState.tools.map((tool) => tool.name).sort()).toEqual(blockedState.expected)
           const allowedState = yield* update(allowed.path, allowedID)
           expect(allowedState.providers.some((provider) => provider.id === allowedID)).toBe(true)
           expect(allowedState.providers.some((provider) => provider.id === blockedID)).toBe(false)
-          expect(allowedState.tools.map((tool) => tool.name).sort()).toEqual([
-            "edit",
-            "glob",
-            "grep",
-            "patch",
-            "question",
-            "read",
-            "shell",
-            "skill",
-            "subagent",
-            "webfetch",
-            "websearch",
-            "write",
-          ])
+          expect(allowedState.tools.map((tool) => tool.name).sort()).toEqual(allowedState.expected)
         }),
       ),
     ),

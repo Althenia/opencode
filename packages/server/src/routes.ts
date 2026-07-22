@@ -25,6 +25,8 @@ import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
+import { SessionOrchestration } from "@opencode-ai/core/session/orchestration"
+import { SessionOrchestrationNotifier } from "@opencode-ai/core/session/orchestration-notifier"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { SdkPlugins } from "@opencode-ai/core/plugin/sdk"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
@@ -63,6 +65,8 @@ const applicationServices = LayerNode.group([
   PtyEnvironment.node,
   LocationServiceMap.node,
   SessionRestart.node,
+  SessionOrchestration.node,
+  SessionOrchestrationNotifier.node,
 ])
 
 export function createRoutes(options: ServerOptions = {}, serviceURLs: () => ReadonlyArray<string> = () => []) {

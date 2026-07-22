@@ -47,6 +47,94 @@ test("exposes every standard HTTP API group", () => {
   expect(Object.keys(client.pty)).toEqual(["list", "create", "get", "update", "remove"])
   expect(Object.keys(client.shell)).toEqual(["list", "create", "get", "timeout", "output", "remove"])
   expect(Object.keys(client.project)).toEqual(["list", "current", "directories"])
+  expect(Object.keys(client.session.subagent)).toEqual(["list", "launch", "message", "answer", "cancel", "resume"])
+})
+
+test("session subagent launch uses the public HTTP contract", async () => {
+  let request: Request | undefined
+  const task = {
+    sessionID: "ses_child",
+    parentID: "ses_parent",
+    description: "Review",
+    agent: "reviewer",
+    model: { providerID: "openai", id: "gpt-5.6", variant: "high" },
+    background: true,
+    state: "running",
+    revision: 1,
+    time: { created: 1, updated: 2 },
+  }
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input, init) => {
+      request = input instanceof Request ? input : new Request(input, init)
+      return Response.json({ data: task })
+    },
+  })
+
+  expect(
+    await client.session.subagent.launch({
+      parentID: "ses_parent",
+      parentAssistantMessageID: "msg_parent",
+      toolCallID: "call_1",
+      agent: "reviewer",
+      description: "Review",
+      prompt: "Review this",
+      background: true,
+      model: { providerID: "openai", id: "gpt-5.6", variant: "high" },
+    }),
+  ).toEqual(task)
+  expect(request?.method).toBe("POST")
+  expect(request?.url).toBe("http://localhost:3000/api/session/ses_parent/subagent")
+  expect(await request?.json()).toEqual({
+    parentAssistantMessageID: "msg_parent",
+    toolCallID: "call_1",
+    agent: "reviewer",
+    description: "Review",
+    prompt: "Review this",
+    background: true,
+    model: { providerID: "openai", id: "gpt-5.6", variant: "high" },
+  })
+})
+
+test("session subagent controls use their public HTTP contracts", async () => {
+  const requests: Request[] = []
+  const task = {
+    sessionID: "ses_child",
+    parentID: "ses_parent",
+    description: "Review",
+    agent: "reviewer",
+    model: { providerID: "openai", id: "gpt-5.6" },
+    background: true,
+    state: "running",
+    revision: 2,
+    time: { created: 1, updated: 2 },
+  }
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      requests.push(request)
+      return Response.json({ data: request.method === "GET" ? [task] : task })
+    },
+  })
+
+  expect(await client.session.subagent.list({ parentID: "ses_parent" })).toEqual([task])
+  expect(
+    await client.session.subagent.answer({
+      parentID: "ses_parent",
+      childID: "ses_child",
+      questionID: "qst_1",
+      text: "Proceed",
+    }),
+  ).toEqual(task)
+  expect(await client.session.subagent.cancel({ parentID: "ses_parent", childID: "ses_child" })).toEqual(task)
+  expect(await client.session.subagent.resume({ parentID: "ses_parent", childID: "ses_child" })).toEqual(task)
+  expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual([
+    "GET /api/session/ses_parent/subagent",
+    "POST /api/session/ses_parent/subagent/ses_child/question/qst_1/answer",
+    "POST /api/session/ses_parent/subagent/ses_child/cancel",
+    "POST /api/session/ses_parent/subagent/ses_child/resume",
+  ])
 })
 
 test("server.get uses the public HTTP contract", async () => {

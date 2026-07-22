@@ -48,6 +48,8 @@ export type SessionAutonomyMode = "normal" | "yolo" | "goal"
 
 export type SessionAutonomyGoalStatus = "active" | "completed" | "stopped" | "exhausted"
 
+export type SessionOrchestrationProgress = { text: string; time: number }
+
 export type SessionTodoInfo = {
   content: string
   status: "pending" | "in_progress" | "completed" | "cancelled"
@@ -156,6 +158,8 @@ export type InstructionEntryKey = string
 export type SessionGenerateResponse = { data: { text: string } }
 
 export type SessionPendingSyntheticData1 = { text: string; description?: string; metadata?: { [x: string]: any } }
+
+export type SessionOrchestrationAnswer = { questionID: string; text?: string; data?: JsonValue }
 
 export type ShellInfo = {
   id: string
@@ -1270,6 +1274,20 @@ export type SessionAutonomyGoal = {
   lastProgressDigest?: string | undefined
 }
 
+export type SessionOrchestrationTask = {
+  sessionID: string
+  parentID: string
+  description: string
+  agent: string
+  model: ModelRef
+  background: boolean
+  state: "starting" | "running" | "waiting" | "cancelling" | "cancelled" | "completed" | "failed" | "lost"
+  progress?: SessionOrchestrationProgress
+  question?: { id: string; text: string; data?: JsonValue; time: number }
+  revision: number
+  time: { created: number; updated: number }
+}
+
 export type TodoUpdated = {
   id: string
   created: number
@@ -1377,6 +1395,42 @@ export type SessionPendingSyntheticMessage = {
   type: "synthetic"
   data: SessionPendingSyntheticData1
   delivery: "steer" | "queue"
+}
+
+export type SessionTaskUpdated = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.task.updated"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    change:
+      | {
+          type: "launched"
+          parentID: string
+          parentAssistantMessageID: string
+          toolCallID: string
+          inputID: string
+          description: string
+          agent: string
+          model: ModelRef
+          promptDigest: string
+          background: boolean
+          delivery: "steer" | "queue"
+        }
+      | { type: "started" }
+      | { type: "backgrounded" }
+      | { type: "progressed"; progress: SessionOrchestrationProgress }
+      | { type: "question_asked"; question: { id: string; text: string; data?: JsonValue; time: number } }
+      | { type: "question_answered"; answer: SessionOrchestrationAnswer }
+      | { type: "cancel_requested" }
+      | { type: "cancelled" }
+      | { type: "completed"; excerpt?: string }
+      | { type: "failed"; error: string; excerpt?: string }
+      | { type: "lost"; excerpt?: string }
+  }
 }
 
 export type SessionShellStarted = {
@@ -2296,6 +2350,7 @@ export type SessionEventDurable =
   | SessionExecutionFailed
   | SessionExecutionInterrupted
   | SessionInstructionsUpdated
+  | SessionTaskUpdated
   | SessionSynthetic
   | SessionSkillActivated
   | SessionShellStarted
@@ -2392,6 +2447,7 @@ export type V2Event =
   | SessionExecutionFailed
   | SessionExecutionInterrupted
   | SessionInstructionsUpdated
+  | SessionTaskUpdated
   | SessionSynthetic
   | SessionSkillActivated
   | SessionShellStarted
@@ -2497,6 +2553,34 @@ export type UnknownError = {
 export const isUnknownError = (value: unknown): value is UnknownError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
 
+export type ConflictError = {
+  readonly _tag: "ConflictError"
+  readonly message: string
+  readonly resource?: string | undefined
+}
+export const isConflictError = (value: unknown): value is ConflictError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
+
+export type ServiceUnavailableError = {
+  readonly _tag: "ServiceUnavailableError"
+  readonly message: string
+  readonly service?: string | undefined
+}
+export const isServiceUnavailableError = (value: unknown): value is ServiceUnavailableError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError"
+
+export type ForbiddenError = { readonly _tag: "ForbiddenError"; readonly message: string }
+export const isForbiddenError = (value: unknown): value is ForbiddenError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ForbiddenError"
+
+export type QuestionNotFoundError = {
+  readonly _tag: "QuestionNotFoundError"
+  readonly requestID: string
+  readonly message: string
+}
+export const isQuestionNotFoundError = (value: unknown): value is QuestionNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "QuestionNotFoundError"
+
 export type MessageNotFoundError = {
   readonly _tag: "MessageNotFoundError"
   readonly sessionID: string
@@ -2505,14 +2589,6 @@ export type MessageNotFoundError = {
 }
 export const isMessageNotFoundError = (value: unknown): value is MessageNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError"
-
-export type ConflictError = {
-  readonly _tag: "ConflictError"
-  readonly message: string
-  readonly resource?: string | undefined
-}
-export const isConflictError = (value: unknown): value is ConflictError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
 
 export type CommandNotFoundError = {
   readonly _tag: "CommandNotFoundError"
@@ -2537,14 +2613,6 @@ export type SkillNotFoundError = {
 }
 export const isSkillNotFoundError = (value: unknown): value is SkillNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SkillNotFoundError"
-
-export type ServiceUnavailableError = {
-  readonly _tag: "ServiceUnavailableError"
-  readonly message: string
-  readonly service?: string | undefined
-}
-export const isServiceUnavailableError = (value: unknown): value is ServiceUnavailableError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError"
 
 export type SessionBusyError = {
   readonly _tag: "SessionBusyError"
@@ -2617,14 +2685,6 @@ export const isPtyNotFoundError = (value: unknown): value is PtyNotFoundError =>
 export type ShellNotFoundError = { readonly _tag: "ShellNotFoundError"; readonly id: string; readonly message: string }
 export const isShellNotFoundError = (value: unknown): value is ShellNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ShellNotFoundError"
-
-export type QuestionNotFoundError = {
-  readonly _tag: "QuestionNotFoundError"
-  readonly requestID: string
-  readonly message: string
-}
-export const isQuestionNotFoundError = (value: unknown): value is QuestionNotFoundError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "QuestionNotFoundError"
 
 export type ProjectCopyError = {
   readonly name: "ProjectCopyError"
@@ -2835,6 +2895,125 @@ export type SessionAutonomySetOutput = { data: SessionAutonomyState }["data"]
 export type SessionRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionRemoveOutput = void
+
+export type SessionSubagentListInput = { readonly parentID: { readonly parentID: string }["parentID"] }
+
+export type SessionSubagentListOutput = { data: Array<SessionOrchestrationTask> }["data"]
+
+export type SessionSubagentLaunchInput = {
+  readonly parentID: { readonly parentID: string }["parentID"]
+  readonly parentAssistantMessageID: {
+    readonly parentAssistantMessageID: string
+    readonly toolCallID: string
+    readonly agent: string
+    readonly description: string
+    readonly prompt: string
+    readonly background?: boolean | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["parentAssistantMessageID"]
+  readonly toolCallID: {
+    readonly parentAssistantMessageID: string
+    readonly toolCallID: string
+    readonly agent: string
+    readonly description: string
+    readonly prompt: string
+    readonly background?: boolean | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["toolCallID"]
+  readonly agent: {
+    readonly parentAssistantMessageID: string
+    readonly toolCallID: string
+    readonly agent: string
+    readonly description: string
+    readonly prompt: string
+    readonly background?: boolean | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["agent"]
+  readonly description: {
+    readonly parentAssistantMessageID: string
+    readonly toolCallID: string
+    readonly agent: string
+    readonly description: string
+    readonly prompt: string
+    readonly background?: boolean | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["description"]
+  readonly prompt: {
+    readonly parentAssistantMessageID: string
+    readonly toolCallID: string
+    readonly agent: string
+    readonly description: string
+    readonly prompt: string
+    readonly background?: boolean | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["prompt"]
+  readonly background?: {
+    readonly parentAssistantMessageID: string
+    readonly toolCallID: string
+    readonly agent: string
+    readonly description: string
+    readonly prompt: string
+    readonly background?: boolean | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["background"]
+  readonly model?: {
+    readonly parentAssistantMessageID: string
+    readonly toolCallID: string
+    readonly agent: string
+    readonly description: string
+    readonly prompt: string
+    readonly background?: boolean | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["model"]
+}
+
+export type SessionSubagentLaunchOutput = { data: SessionOrchestrationTask }["data"]
+
+export type SessionSubagentMessageInput = {
+  readonly parentID: { readonly parentID: string; readonly childID: string }["parentID"]
+  readonly childID: { readonly parentID: string; readonly childID: string }["childID"]
+  readonly messageID: {
+    readonly messageID: string
+    readonly text: string
+    readonly delivery: "steer" | "queue"
+  }["messageID"]
+  readonly text: { readonly messageID: string; readonly text: string; readonly delivery: "steer" | "queue" }["text"]
+  readonly delivery: {
+    readonly messageID: string
+    readonly text: string
+    readonly delivery: "steer" | "queue"
+  }["delivery"]
+}
+
+export type SessionSubagentMessageOutput = { data: SessionOrchestrationTask }["data"]
+
+export type SessionSubagentAnswerInput = {
+  readonly parentID: { readonly parentID: string; readonly childID: string; readonly questionID: string }["parentID"]
+  readonly childID: { readonly parentID: string; readonly childID: string; readonly questionID: string }["childID"]
+  readonly questionID: {
+    readonly parentID: string
+    readonly childID: string
+    readonly questionID: string
+  }["questionID"]
+  readonly text?: { readonly text?: string | undefined; readonly data?: JsonValue | undefined }["text"]
+  readonly data?: { readonly text?: string | undefined; readonly data?: JsonValue | undefined }["data"]
+}
+
+export type SessionSubagentAnswerOutput = { data: SessionOrchestrationTask }["data"]
+
+export type SessionSubagentCancelInput = {
+  readonly parentID: { readonly parentID: string; readonly childID: string }["parentID"]
+  readonly childID: { readonly parentID: string; readonly childID: string }["childID"]
+}
+
+export type SessionSubagentCancelOutput = { data: SessionOrchestrationTask }["data"]
+
+export type SessionSubagentResumeInput = {
+  readonly parentID: { readonly parentID: string; readonly childID: string }["parentID"]
+  readonly childID: { readonly parentID: string; readonly childID: string }["childID"]
+}
+
+export type SessionSubagentResumeOutput = { data: SessionOrchestrationTask }["data"]
 
 export type SessionTodoListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 

@@ -950,6 +950,8 @@ export type GlobalEvent = {
           error: SessionStructuredError
           cost?: MoneyUsd
           tokens?: TokenUsageInfo
+          snapshot?: string
+          files?: Array<string>
         }
       }
     | {
@@ -2919,6 +2921,44 @@ export type ProviderNotFoundError = {
   message: string
 }
 
+export type McpLocalConfig2 = {
+  type: "local"
+  command: Array<string>
+  cwd?: string
+  environment?: {
+    [key: string]: string
+  }
+  disabled?: boolean
+  codemode?: boolean
+  timeout?: McpTimeoutConfig
+}
+
+export type McpOAuthConfig2 = {
+  client_id?: string
+  client_secret?: string
+  scope?: string
+  callback_port?: number
+  redirect_uri?: string
+}
+
+export type McpRemoteConfig2 = {
+  type: "remote"
+  url: string
+  headers?: {
+    [key: string]: string
+  }
+  oauth?: McpOAuthConfig2 | false
+  disabled?: boolean
+  codemode?: boolean
+  timeout?: McpTimeoutConfig
+}
+
+export type McpServerNotFoundError1 = {
+  _tag: "McpServerNotFoundError"
+  server: string
+  message: string
+}
+
 export type McpResource2 = {
   server: string
   name: string
@@ -4032,6 +4072,8 @@ export type SyncEventSessionStepFailed = {
       error: SessionStructuredError
       cost?: MoneyUsd
       tokens?: TokenUsageInfo
+      snapshot?: string
+      files?: Array<string>
     }
   }
 }
@@ -5170,6 +5212,8 @@ export type SessionStepFailed = {
     error: SessionStructuredError
     cost?: MoneyUsd
     tokens?: TokenUsageInfo
+    snapshot?: string
+    files?: Array<string>
   }
 }
 
@@ -5897,6 +5941,12 @@ export type McpServer = {
     | McpStatusNeedsAuth2
     | McpStatusNeedsClientRegistration2
   integrationID?: string
+}
+
+export type McpTimeoutConfig = {
+  startup?: number
+  catalog?: number
+  execution?: number
 }
 
 export type McpResourceTemplate = {
@@ -7402,6 +7452,8 @@ export type EventSessionStepFailed = {
     error: SessionStructuredError
     cost?: MoneyUsd
     tokens?: TokenUsageInfo
+    snapshot?: string
+    files?: Array<string>
   }
 }
 
@@ -8230,6 +8282,52 @@ export type InvalidRequestError1 = {
   field?: string | null
 }
 
+export type UnknownErrorV2 = {
+  _tag: "UnknownError"
+  message: string
+  ref?: string | null
+}
+
+export type SessionAutonomyMode = "normal" | "yolo" | "goal"
+
+export type SessionAutonomyGoalStatus = "active" | "completed" | "stopped" | "exhausted"
+
+export type SessionAutonomyGoal = {
+  text: string
+  status: SessionAutonomyGoalStatus
+  iteration: number
+  maxIterations: number
+  noProgress: number
+  maxNoProgress: number
+  lastProgressDigest?: string | null
+}
+
+export type SessionAutonomyState = {
+  mode: SessionAutonomyMode
+  goal?: SessionAutonomyGoal | null
+}
+
+export type SessionAutonomySet =
+  | {
+      mode: "normal" | "yolo"
+    }
+  | {
+      mode: "goal"
+      goal: string
+      maxIterations?: number | null
+      maxNoProgress?: number | null
+    }
+
+export type SessionSubagentLaunch = {
+  parentAssistantMessageID: string
+  toolCallID: string
+  agent: string
+  description: string
+  prompt: string
+  background?: boolean | null
+  model?: ModelRef | null
+}
+
 export type ConflictErrorV2 = {
   _tag: "ConflictError"
   message: string
@@ -8242,10 +8340,15 @@ export type ServiceUnavailableErrorV2 = {
   service?: string | null
 }
 
-export type UnknownErrorV2 = {
-  _tag: "UnknownError"
-  message: string
-  ref?: string | null
+export type SessionSubagentMessage = {
+  messageID: string
+  text: string
+  delivery: "steer" | "queue"
+}
+
+export type SessionSubagentAnswer = {
+  text?: string | null
+  data?: unknown | null
 }
 
 export type SessionMessagesResponseV2 = {
@@ -8254,6 +8357,12 @@ export type SessionMessagesResponseV2 = {
     previous?: string | null
     next?: string | null
   }
+}
+
+export type McpServerNotFoundErrorV2 = {
+  _tag: "McpServerNotFoundError"
+  server: string
+  message: string
 }
 
 export type OutputFormatV2 =
@@ -8704,6 +8813,7 @@ export type V2EventV2 =
   | SessionExecutionFailedV2
   | SessionExecutionInterruptedV2
   | SessionInstructionsUpdatedV2
+  | SessionTaskUpdated
   | SessionSyntheticV2
   | SessionSkillActivatedV2
   | SessionShellStartedV2
@@ -8756,6 +8866,7 @@ export type V2EventV2 =
   | FormCreatedV2
   | FormRepliedV2
   | FormCancelledV2
+  | TodoUpdated
   | SessionStatusV22
   | SessionIdleV2
   | TuiPromptAppendV2
@@ -8838,6 +8949,7 @@ export type SessionInfoV2 = {
   projectID: string
   agent?: string
   model?: ModelRef
+  permissionCeiling?: PermissionV2Ruleset
   cost: MoneyUsd
   tokens: TokenUsageInfo
   time: {
@@ -8849,6 +8961,82 @@ export type SessionInfoV2 = {
   location: LocationRefV2
   subpath?: string
   revert?: SessionRevertV2
+}
+
+export type SessionCacheMechanism =
+  | "openai-prompt-cache"
+  | "openrouter-sticky-prefix"
+  | "anthropic-cache-control"
+  | "bedrock-cache-point"
+  | "gemini-implicit-prefix"
+  | "provider-reported"
+  | "none"
+
+export type SessionCacheDiagnostics = {
+  model: ModelRef
+  context: {
+    total: number
+    limit?: number
+    remaining?: number
+    percent?: number
+  }
+  tokens: {
+    uncachedInput: number
+    output: number
+    reasoning: number
+    cacheRead: number
+    cacheWrite: number
+  }
+  cache: {
+    eligible: number
+    hitRatio?: number
+    mechanism: SessionCacheMechanism
+  }
+  estimatedCost: MoneyUsd
+}
+
+export type SessionOrchestrationProgress = {
+  text: string
+  time: number
+}
+
+export type SessionOrchestrationQuestion = {
+  id: string
+  text: string
+  data?: unknown
+  time: number
+}
+
+export type SessionOrchestrationTask = {
+  sessionID: string
+  parentID: string
+  description: string
+  agent: string
+  model: ModelRef
+  background: boolean
+  state: "starting" | "running" | "waiting" | "cancelling" | "cancelled" | "completed" | "failed" | "lost"
+  progress?: SessionOrchestrationProgress
+  question?: SessionOrchestrationQuestion
+  revision: number
+  time: {
+    created: number
+    updated: number
+  }
+}
+
+export type SessionTodoInfo = {
+  /**
+   * Brief description of the task
+   */
+  content: string
+  /**
+   * Current task status
+   */
+  status: "pending" | "in_progress" | "completed" | "cancelled"
+  /**
+   * Task priority
+   */
+  priority: "high" | "medium" | "low"
 }
 
 export type PromptBase64V2 = string
@@ -9008,6 +9196,10 @@ export type SessionMessageAssistantV2 = {
   finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
   cost?: MoneyUsd
   tokens?: TokenUsageInfo
+  diagnostics?: {
+    contextLimit?: number
+    cacheMechanism: SessionCacheMechanism
+  }
   error?: SessionStructuredError
   retry?: SessionMessageAssistantRetryV2
 }
@@ -9341,6 +9533,86 @@ export type SessionInstructionsUpdatedV2 = {
   }
 }
 
+export type SessionOrchestrationAnswer = {
+  questionID: string
+  text?: string
+  data?: unknown
+}
+
+export type SessionTaskUpdated = {
+  id: string
+  created: number
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.task.updated"
+  durable: {
+    aggregateID: string
+    seq: number
+    version: 1
+  }
+  location?: LocationRefV2
+  data: {
+    sessionID: string
+    change:
+      | {
+          type: "launched"
+          parentID: string
+          parentAssistantMessageID: string
+          toolCallID: string
+          inputID: string
+          description: string
+          agent: string
+          model: ModelRef
+          promptDigest: string
+          background: boolean
+          delivery: "steer" | "queue"
+        }
+      | {
+          type: "started"
+        }
+      | {
+          type: "backgrounded"
+        }
+      | {
+          type: "progressed"
+          progress: SessionOrchestrationProgress
+        }
+      | {
+          type: "question_asked"
+          question: {
+            id: string
+            text: string
+            data?: unknown
+            time: number
+          }
+        }
+      | {
+          type: "question_answered"
+          answer: SessionOrchestrationAnswer
+        }
+      | {
+          type: "cancel_requested"
+        }
+      | {
+          type: "cancelled"
+        }
+      | {
+          type: "completed"
+          excerpt?: string
+        }
+      | {
+          type: "failed"
+          error: string
+          excerpt?: string
+        }
+      | {
+          type: "lost"
+          excerpt?: string
+        }
+  }
+}
+
 export type SessionSyntheticV2 = {
   id: string
   created: number
@@ -9488,6 +9760,8 @@ export type SessionStepEndedV2 = {
     finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
     cost: MoneyUsd
     tokens: TokenUsageInfo
+    contextLimit?: number
+    cacheMechanism?: SessionCacheMechanism
     snapshot?: string
     files?: Array<string>
   }
@@ -9512,6 +9786,10 @@ export type SessionStepFailedV2 = {
     error: SessionStructuredError
     cost?: MoneyUsd
     tokens?: TokenUsageInfo
+    contextLimit?: number
+    cacheMechanism?: SessionCacheMechanism
+    snapshot?: string
+    files?: Array<string>
   }
 }
 
@@ -9942,6 +10220,48 @@ export type SessionUsageRecordedV2 = {
   }
 }
 
+export type SessionEventDurableV2 =
+  | SessionAgentSelectedV2
+  | SessionModelSelectedV2
+  | SessionMovedV2
+  | SessionRenamedV2
+  | SessionDeletedV2
+  | SessionForkedV2
+  | SessionInputPromotedV2
+  | SessionInputAdmittedV2
+  | SessionExecutionStartedV2
+  | SessionExecutionSucceededV2
+  | SessionExecutionFailedV2
+  | SessionExecutionInterruptedV2
+  | SessionInstructionsUpdatedV2
+  | SessionTaskUpdated
+  | SessionSyntheticV2
+  | SessionSkillActivatedV2
+  | SessionShellStartedV2
+  | SessionShellEndedV2
+  | SessionStepStartedV2
+  | SessionStepEndedV2
+  | SessionStepFailedV2
+  | SessionTextStartedV2
+  | SessionTextEndedV2
+  | SessionReasoningStartedV2
+  | SessionReasoningEndedV2
+  | SessionToolInputStartedV2
+  | SessionToolInputEndedV2
+  | SessionToolCalledV2
+  | SessionToolProgressV2
+  | SessionToolSuccessV2
+  | SessionToolFailedV2
+  | SessionRetryScheduledV2
+  | SessionCompactionAdmittedV2
+  | SessionCompactionStartedV2
+  | SessionCompactionEndedV2
+  | SessionCompactionFailedV2
+  | SessionRevertStagedV2
+  | SessionRevertClearedV2
+  | SessionRevertCommittedV2
+  | SessionUsageRecordedV2
+
 /**
  * Marker emitted once when a log read reaches its captured watermark. The reader holds every event committed at or below seq.
  */
@@ -9949,6 +10269,62 @@ export type EventLogSyncedV2 = {
   type: "log.synced"
   aggregateID: string
   seq?: number
+}
+
+export type McpTimeoutConfigV2 = {
+  /**
+   * Maximum time in milliseconds to establish and initialize the MCP server.
+   */
+  startup?: number | null
+  /**
+   * Maximum time in milliseconds to wait for MCP discovery requests such as tools/list and prompts/list.
+   */
+  catalog?: number | null
+  /**
+   * Maximum time in milliseconds to wait for MCP tool and prompt execution.
+   */
+  execution?: number | null
+}
+
+export type McpLocalConfigV2 = {
+  type: "local"
+  command: Array<string>
+  /**
+   * Working directory for the MCP server process. Relative paths resolve from the workspace directory.
+   */
+  cwd?: string | null
+  environment?: {
+    [key: string]: string
+  } | null
+  disabled?: boolean | null
+  /**
+   * Expose this server's tools through Code Mode. Defaults to true.
+   */
+  codemode?: boolean | null
+  timeout?: McpTimeoutConfigV2 | null
+}
+
+export type McpOAuthConfigV2 = {
+  client_id?: string | null
+  client_secret?: string | null
+  scope?: string | null
+  callback_port?: number | null
+  redirect_uri?: string | null
+}
+
+export type McpRemoteConfigV2 = {
+  type: "remote"
+  url: string
+  headers?: {
+    [key: string]: string
+  } | null
+  oauth?: McpOAuthConfigV2 | false | null
+  disabled?: boolean | null
+  /**
+   * Expose this server's tools through Code Mode. Defaults to true.
+   */
+  codemode?: boolean | null
+  timeout?: McpTimeoutConfigV2 | null
 }
 
 export type McpResourceV2 = {
@@ -10794,6 +11170,20 @@ export type FormCancelledV2 = {
   }
 }
 
+export type TodoUpdated = {
+  id: string
+  created: number
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "todo.updated"
+  location?: LocationRefV2
+  data: {
+    sessionID: string
+    todos: Array<SessionTodoInfo>
+  }
+}
+
 export type SessionIdleV2 = {
   id: string
   created: number
@@ -11110,6 +11500,50 @@ export type VcsFileStatusV2 = {
   additions: number
   deletions: number
   status: "added" | "deleted" | "modified"
+}
+
+export type SelfImprovementStatusEmptyReasonCode = "automatic-disabled" | "no-terminal-evidence"
+
+export type SelfImprovementStatusEmptyReason = {
+  code: SelfImprovementStatusEmptyReasonCode
+  message: string
+}
+
+export type SelfImprovementStatusTickResult = {
+  eligiblePatterns: number
+  generated: number
+  prepared: number
+  runsCreated: number
+  runsDecided: number
+  reconciled: number
+  failures: number
+}
+
+export type SelfImprovementStatusGeneratedSlot = {
+  slot: "active" | "shadow" | "canary"
+  artifactID: string
+  versionID: string
+  name: string
+  desiredRevision: number
+}
+
+export type SelfImprovementStatusInfo = {
+  enabled: boolean
+  autoApprove: boolean
+  intervalSeconds: number
+  evaluationWindowMinutes: number
+  evidence: {
+    count: number
+    lastObservedAt?: number
+    reason?: SelfImprovementStatusEmptyReason
+  }
+  automation: {
+    running: boolean
+    lastStartedAt?: number
+    lastCompletedAt?: number
+    lastResult?: SelfImprovementStatusTickResult
+  }
+  generatedSlots: Array<SelfImprovementStatusGeneratedSlot>
 }
 
 export type AuthRemoveData = {
@@ -15990,7 +16424,7 @@ export type V2SessionShellErrors = {
   /**
    * InvalidRequestError
    */
-  400: InvalidRequestErrorV2
+  400: InvalidRequestError1 | InvalidRequestErrorV2
   /**
    * UnauthorizedError
    */
@@ -15999,6 +16433,10 @@ export type V2SessionShellErrors = {
    * SessionNotFoundError
    */
   404: SessionNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableErrorV2
 }
 
 export type V2SessionShellError = V2SessionShellErrors[keyof V2SessionShellErrors]
@@ -17352,6 +17790,164 @@ export type V2McpListResponses = {
 
 export type V2McpListResponse = V2McpListResponses[keyof V2McpListResponses]
 
+export type V2McpRemoveData = {
+  body?: never
+  path: {
+    server: string
+  }
+  query?: {
+    location?: {
+      directory?: string | null
+      workspace?: string | null
+    } | null
+  }
+  url: "/api/mcp/{server}"
+}
+
+export type V2McpRemoveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * McpServerNotFoundError
+   */
+  404: McpServerNotFoundErrorV2
+}
+
+export type V2McpRemoveError = V2McpRemoveErrors[keyof V2McpRemoveErrors]
+
+export type V2McpRemoveResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2McpRemoveResponse = V2McpRemoveResponses[keyof V2McpRemoveResponses]
+
+export type V2McpAddData = {
+  body: {
+    config: McpLocalConfigV2 | McpRemoteConfigV2
+  }
+  path: {
+    server: string
+  }
+  query?: {
+    location?: {
+      directory?: string | null
+      workspace?: string | null
+    } | null
+  }
+  url: "/api/mcp/{server}"
+}
+
+export type V2McpAddErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2McpAddError = V2McpAddErrors[keyof V2McpAddErrors]
+
+export type V2McpAddResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2McpAddResponse = V2McpAddResponses[keyof V2McpAddResponses]
+
+export type V2McpConnectData = {
+  body?: never
+  path: {
+    server: string
+  }
+  query?: {
+    location?: {
+      directory?: string | null
+      workspace?: string | null
+    } | null
+  }
+  url: "/api/mcp/{server}/connect"
+}
+
+export type V2McpConnectErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * McpServerNotFoundError
+   */
+  404: McpServerNotFoundErrorV2
+}
+
+export type V2McpConnectError = V2McpConnectErrors[keyof V2McpConnectErrors]
+
+export type V2McpConnectResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2McpConnectResponse = V2McpConnectResponses[keyof V2McpConnectResponses]
+
+export type V2McpDisconnectData = {
+  body?: never
+  path: {
+    server: string
+  }
+  query?: {
+    location?: {
+      directory?: string | null
+      workspace?: string | null
+    } | null
+  }
+  url: "/api/mcp/{server}/disconnect"
+}
+
+export type V2McpDisconnectErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * McpServerNotFoundError
+   */
+  404: McpServerNotFoundErrorV2
+}
+
+export type V2McpDisconnectError = V2McpDisconnectErrors[keyof V2McpDisconnectErrors]
+
+export type V2McpDisconnectResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2McpDisconnectResponse = V2McpDisconnectResponses[keyof V2McpDisconnectResponses]
+
 export type V2McpResourceCatalogData = {
   body?: never
   path?: never
@@ -18680,11 +19276,15 @@ export type V2ShellCreateErrors = {
   /**
    * InvalidRequestError
    */
-  400: InvalidRequestErrorV2
+  400: InvalidRequestError1 | InvalidRequestErrorV2
   /**
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableErrorV2
 }
 
 export type V2ShellCreateError = V2ShellCreateErrors[keyof V2ShellCreateErrors]
@@ -19351,3 +19951,503 @@ export type PtyConnectResponses = {
 }
 
 export type PtyConnectResponse = PtyConnectResponses[keyof PtyConnectResponses]
+
+export type V2SessionDiagnosticsData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/diagnostics"
+}
+
+export type V2SessionDiagnosticsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * UnknownError
+   */
+  500: UnknownErrorV2
+}
+
+export type V2SessionDiagnosticsError = V2SessionDiagnosticsErrors[keyof V2SessionDiagnosticsErrors]
+
+export type V2SessionDiagnosticsResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data?: SessionCacheDiagnostics | null
+  }
+}
+
+export type V2SessionDiagnosticsResponse = V2SessionDiagnosticsResponses[keyof V2SessionDiagnosticsResponses]
+
+export type V2SessionAutonomyGetData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/autonomy"
+}
+
+export type V2SessionAutonomyGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionAutonomyGetError = V2SessionAutonomyGetErrors[keyof V2SessionAutonomyGetErrors]
+
+export type V2SessionAutonomyGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionAutonomyState
+  }
+}
+
+export type V2SessionAutonomyGetResponse = V2SessionAutonomyGetResponses[keyof V2SessionAutonomyGetResponses]
+
+export type V2SessionAutonomySetData = {
+  body: SessionAutonomySet
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/autonomy"
+}
+
+export type V2SessionAutonomySetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionAutonomySetError = V2SessionAutonomySetErrors[keyof V2SessionAutonomySetErrors]
+
+export type V2SessionAutonomySetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionAutonomyState
+  }
+}
+
+export type V2SessionAutonomySetResponse = V2SessionAutonomySetResponses[keyof V2SessionAutonomySetResponses]
+
+export type V2SessionSubagentListData = {
+  body?: never
+  path: {
+    parentID: string
+  }
+  query?: never
+  url: "/api/session/{parentID}/subagent"
+}
+
+export type V2SessionSubagentListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionSubagentListError = V2SessionSubagentListErrors[keyof V2SessionSubagentListErrors]
+
+export type V2SessionSubagentListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<SessionOrchestrationTask>
+  }
+}
+
+export type V2SessionSubagentListResponse = V2SessionSubagentListResponses[keyof V2SessionSubagentListResponses]
+
+export type V2SessionSubagentLaunchData = {
+  body: SessionSubagentLaunch
+  path: {
+    parentID: string
+  }
+  query?: never
+  url: "/api/session/{parentID}/subagent"
+}
+
+export type V2SessionSubagentLaunchErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError1 | InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictErrorV2
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableErrorV2
+}
+
+export type V2SessionSubagentLaunchError = V2SessionSubagentLaunchErrors[keyof V2SessionSubagentLaunchErrors]
+
+export type V2SessionSubagentLaunchResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOrchestrationTask
+  }
+}
+
+export type V2SessionSubagentLaunchResponse = V2SessionSubagentLaunchResponses[keyof V2SessionSubagentLaunchResponses]
+
+export type V2SessionSubagentMessageData = {
+  body: SessionSubagentMessage
+  path: {
+    parentID: string
+    childID: string
+  }
+  query?: never
+  url: "/api/session/{parentID}/subagent/{childID}/message"
+}
+
+export type V2SessionSubagentMessageErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictErrorV2
+}
+
+export type V2SessionSubagentMessageError = V2SessionSubagentMessageErrors[keyof V2SessionSubagentMessageErrors]
+
+export type V2SessionSubagentMessageResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOrchestrationTask
+  }
+}
+
+export type V2SessionSubagentMessageResponse =
+  V2SessionSubagentMessageResponses[keyof V2SessionSubagentMessageResponses]
+
+export type V2SessionSubagentAnswerData = {
+  body: SessionSubagentAnswer
+  path: {
+    parentID: string
+    childID: string
+    questionID: string
+  }
+  query?: never
+  url: "/api/session/{parentID}/subagent/{childID}/question/{questionID}/answer"
+}
+
+export type V2SessionSubagentAnswerErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError1 | InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * SessionNotFoundError | QuestionNotFoundError
+   */
+  404: QuestionNotFoundError | SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictErrorV2
+}
+
+export type V2SessionSubagentAnswerError = V2SessionSubagentAnswerErrors[keyof V2SessionSubagentAnswerErrors]
+
+export type V2SessionSubagentAnswerResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOrchestrationTask
+  }
+}
+
+export type V2SessionSubagentAnswerResponse = V2SessionSubagentAnswerResponses[keyof V2SessionSubagentAnswerResponses]
+
+export type V2SessionSubagentCancelData = {
+  body?: never
+  path: {
+    parentID: string
+    childID: string
+  }
+  query?: never
+  url: "/api/session/{parentID}/subagent/{childID}/cancel"
+}
+
+export type V2SessionSubagentCancelErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictErrorV2
+}
+
+export type V2SessionSubagentCancelError = V2SessionSubagentCancelErrors[keyof V2SessionSubagentCancelErrors]
+
+export type V2SessionSubagentCancelResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOrchestrationTask
+  }
+}
+
+export type V2SessionSubagentCancelResponse = V2SessionSubagentCancelResponses[keyof V2SessionSubagentCancelResponses]
+
+export type V2SessionSubagentResumeData = {
+  body?: never
+  path: {
+    parentID: string
+    childID: string
+  }
+  query?: never
+  url: "/api/session/{parentID}/subagent/{childID}/resume"
+}
+
+export type V2SessionSubagentResumeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictErrorV2
+}
+
+export type V2SessionSubagentResumeError = V2SessionSubagentResumeErrors[keyof V2SessionSubagentResumeErrors]
+
+export type V2SessionSubagentResumeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOrchestrationTask
+  }
+}
+
+export type V2SessionSubagentResumeResponse = V2SessionSubagentResumeResponses[keyof V2SessionSubagentResumeResponses]
+
+export type ServerSessionSessionTodoListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/todo"
+}
+
+export type ServerSessionSessionTodoListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type ServerSessionSessionTodoListError =
+  ServerSessionSessionTodoListErrors[keyof ServerSessionSessionTodoListErrors]
+
+export type ServerSessionSessionTodoListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<SessionTodoInfo>
+  }
+}
+
+export type ServerSessionSessionTodoListResponse =
+  ServerSessionSessionTodoListResponses[keyof ServerSessionSessionTodoListResponses]
+
+export type ServerSessionSessionTodoUpdateData = {
+  body: {
+    todos: Array<SessionTodoInfo>
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/todo"
+}
+
+export type ServerSessionSessionTodoUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type ServerSessionSessionTodoUpdateError =
+  ServerSessionSessionTodoUpdateErrors[keyof ServerSessionSessionTodoUpdateErrors]
+
+export type ServerSessionSessionTodoUpdateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<SessionTodoInfo>
+  }
+}
+
+export type ServerSessionSessionTodoUpdateResponse =
+  ServerSessionSessionTodoUpdateResponses[keyof ServerSessionSessionTodoUpdateResponses]
+
+export type V2SelfImprovementStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string | null
+      workspace?: string | null
+    } | null
+  }
+  url: "/api/self-improvement/status"
+}
+
+export type V2SelfImprovementStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2SelfImprovementStatusError = V2SelfImprovementStatusErrors[keyof V2SelfImprovementStatusErrors]
+
+export type V2SelfImprovementStatusResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfoV2
+    data: SelfImprovementStatusInfo
+  }
+}
+
+export type V2SelfImprovementStatusResponse = V2SelfImprovementStatusResponses[keyof V2SelfImprovementStatusResponses]

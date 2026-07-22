@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "ed076a87-440c-4deb-924e-9d6a88e076a2",
+  "id": "74503632-767e-4345-bb14-b111bccbcae6",
   "prevIds": [
-    "7a7dab55-c1cb-475d-97a2-ce6bcb5f0c81"
+    "ed076a87-440c-4deb-924e-9d6a88e076a2"
   ],
   "ddl": [
     {
@@ -192,6 +192,14 @@
     },
     {
       "name": "session",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_task_notification",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_task",
       "entityType": "tables"
     },
     {
@@ -4404,6 +4412,316 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_session_id",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_id",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "type",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "excerpt",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "delivered",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_delivered",
+      "entityType": "columns",
+      "table": "session_task_notification"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_id",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_assistant_message_id",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "tool_call_id",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "input_id",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "description",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "agent",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "prompt_digest",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "background",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "delivery",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "progress",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "progress_time",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "question_id",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "question",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "question_data",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "question_time",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "attempt_started",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "session_task"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -4939,6 +5257,66 @@
     },
     {
       "columns": [
+        "task_session_id"
+      ],
+      "tableTo": "session_task",
+      "columnsTo": [
+        "session_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_task_notification_task_session_id_session_task_session_id_fk",
+      "entityType": "fks",
+      "table": "session_task_notification"
+    },
+    {
+      "columns": [
+        "parent_id"
+      ],
+      "tableTo": "session",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_task_notification_parent_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_task_notification"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "tableTo": "session",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_task_session_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_task"
+    },
+    {
+      "columns": [
+        "parent_id"
+      ],
+      "tableTo": "session",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_task_parent_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_task"
+    },
+    {
+      "columns": [
         "session_id"
       ],
       "tableTo": "session",
@@ -5387,6 +5765,24 @@
       "nameExplicit": false,
       "name": "session_pk",
       "table": "session",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "session_task_notification_pk",
+      "table": "session_task_notification",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "nameExplicit": false,
+      "name": "session_task_pk",
+      "table": "session_task",
       "entityType": "pks"
     },
     {
@@ -6615,6 +7011,94 @@
     {
       "columns": [
         {
+          "value": "task_session_id",
+          "isExpression": false
+        },
+        {
+          "value": "type",
+          "isExpression": false
+        },
+        {
+          "value": "revision",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "session_task_notification_transition_idx",
+      "entityType": "indexes",
+      "table": "session_task_notification"
+    },
+    {
+      "columns": [
+        {
+          "value": "delivered",
+          "isExpression": false
+        },
+        {
+          "value": "time_created",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_task_notification_delivery_idx",
+      "entityType": "indexes",
+      "table": "session_task_notification"
+    },
+    {
+      "columns": [
+        {
+          "value": "parent_id",
+          "isExpression": false
+        },
+        {
+          "value": "parent_assistant_message_id",
+          "isExpression": false
+        },
+        {
+          "value": "tool_call_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "session_task_launch_identity_idx",
+      "entityType": "indexes",
+      "table": "session_task"
+    },
+    {
+      "columns": [
+        {
+          "value": "parent_id",
+          "isExpression": false
+        },
+        {
+          "value": "state",
+          "isExpression": false
+        },
+        {
+          "value": "time_updated",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_task_parent_state_updated_idx",
+      "entityType": "indexes",
+      "table": "session_task"
+    },
+    {
+      "columns": [
+        {
           "value": "session_id",
           "isExpression": false
         }
@@ -6625,6 +7109,15 @@
       "name": "session_todo_session_idx",
       "entityType": "indexes",
       "table": "session_todo"
+    },
+    {
+      "columns": [
+        "input_id"
+      ],
+      "nameExplicit": false,
+      "name": "session_task_input_id_unique",
+      "entityType": "uniques",
+      "table": "session_task"
     },
     {
       "value": "\"shadow_evidence_expires_at\" = \"requested_at\" + 15552000000",

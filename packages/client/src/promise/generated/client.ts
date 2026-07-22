@@ -24,6 +24,18 @@ import type {
   SessionAutonomySetOutput,
   SessionRemoveInput,
   SessionRemoveOutput,
+  SessionSubagentListInput,
+  SessionSubagentListOutput,
+  SessionSubagentLaunchInput,
+  SessionSubagentLaunchOutput,
+  SessionSubagentMessageInput,
+  SessionSubagentMessageOutput,
+  SessionSubagentAnswerInput,
+  SessionSubagentAnswerOutput,
+  SessionSubagentCancelInput,
+  SessionSubagentCancelOutput,
+  SessionSubagentResumeInput,
+  SessionSubagentResumeOutput,
   SessionTodoListInput,
   SessionTodoListOutput,
   SessionTodoUpdateInput,
@@ -535,6 +547,85 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      subagent: {
+        list: (input: SessionSubagentListInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionSubagentListOutput }>(
+            {
+              method: "GET",
+              path: `/api/session/${encodeURIComponent(input.parentID)}/subagent`,
+              successStatus: 200,
+              declaredStatuses: [404, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        launch: (input: SessionSubagentLaunchInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionSubagentLaunchOutput }>(
+            {
+              method: "POST",
+              path: `/api/session/${encodeURIComponent(input.parentID)}/subagent`,
+              body: {
+                parentAssistantMessageID: input["parentAssistantMessageID"],
+                toolCallID: input["toolCallID"],
+                agent: input["agent"],
+                description: input["description"],
+                prompt: input["prompt"],
+                background: input["background"],
+                model: input["model"],
+              },
+              successStatus: 200,
+              declaredStatuses: [404, 400, 409, 503, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        message: (input: SessionSubagentMessageInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionSubagentMessageOutput }>(
+            {
+              method: "POST",
+              path: `/api/session/${encodeURIComponent(input.parentID)}/subagent/${encodeURIComponent(input.childID)}/message`,
+              body: { messageID: input["messageID"], text: input["text"], delivery: input["delivery"] },
+              successStatus: 200,
+              declaredStatuses: [404, 403, 409, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        answer: (input: SessionSubagentAnswerInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionSubagentAnswerOutput }>(
+            {
+              method: "POST",
+              path: `/api/session/${encodeURIComponent(input.parentID)}/subagent/${encodeURIComponent(input.childID)}/question/${encodeURIComponent(input.questionID)}/answer`,
+              body: { text: input["text"], data: input["data"] },
+              successStatus: 200,
+              declaredStatuses: [404, 403, 409, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        cancel: (input: SessionSubagentCancelInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionSubagentCancelOutput }>(
+            {
+              method: "POST",
+              path: `/api/session/${encodeURIComponent(input.parentID)}/subagent/${encodeURIComponent(input.childID)}/cancel`,
+              successStatus: 200,
+              declaredStatuses: [404, 403, 409, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        resume: (input: SessionSubagentResumeInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionSubagentResumeOutput }>(
+            {
+              method: "POST",
+              path: `/api/session/${encodeURIComponent(input.parentID)}/subagent/${encodeURIComponent(input.childID)}/resume`,
+              successStatus: 200,
+              declaredStatuses: [404, 403, 409, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+      },
       todo: {
         list: (input: SessionTodoListInput, requestOptions?: RequestOptions) =>
           request<{ readonly data: SessionTodoListOutput }>(

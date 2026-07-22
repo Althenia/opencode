@@ -7,6 +7,8 @@ import { Project } from "@opencode-ai/schema/project"
 import { AbsolutePath, PositiveInt, RelativePath, statics } from "@opencode-ai/schema/schema"
 import { Event } from "@opencode-ai/schema/event"
 import { Workspace } from "@opencode-ai/schema/workspace"
+import { SessionOrchestration } from "@opencode-ai/schema/session-orchestration"
+import { SessionDelivery } from "@opencode-ai/schema/session-delivery"
 import { Context, Effect, Encoding, Result, Schema, SchemaGetter, Struct } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import {
@@ -21,6 +23,8 @@ import {
   SessionNotFoundError,
   SkillNotFoundError,
   UnknownError,
+  ForbiddenError,
+  QuestionNotFoundError,
 } from "../errors.js"
 import { Agent } from "@opencode-ai/schema/agent"
 import { Skill } from "@opencode-ai/schema/skill"
@@ -140,6 +144,27 @@ export const SessionAutonomySet = Schema.Union([
     maxNoProgress: PositiveInt.pipe(Schema.optional),
   }),
 ]).annotate({ identifier: "SessionAutonomySet" })
+
+export const SessionSubagentLaunch = Schema.Struct({
+  parentAssistantMessageID: SessionMessage.ID,
+  toolCallID: Schema.String,
+  agent: Agent.ID,
+  description: Schema.String,
+  prompt: Schema.String,
+  background: Schema.Boolean.pipe(Schema.optional),
+  model: Model.Ref.pipe(Schema.optional),
+}).annotate({ identifier: "SessionSubagentLaunch" })
+
+export const SessionSubagentMessage = Schema.Struct({
+  messageID: SessionMessage.ID,
+  text: Schema.String,
+  delivery: SessionDelivery.Delivery,
+}).annotate({ identifier: "SessionSubagentMessage" })
+
+export const SessionSubagentAnswer = Schema.Struct({
+  text: Schema.String.pipe(Schema.optional),
+  data: Schema.Json.pipe(Schema.optional),
+}).annotate({ identifier: "SessionSubagentAnswer" })
 
 const SessionsQueryCursor = SessionsCursor.annotate({
   description: "Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response.",
@@ -280,6 +305,81 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             description: "Delete a session and its child sessions.",
           }),
         ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.subagent.list", "/api/session/:parentID/subagent", {
+        params: { parentID: Session.ID },
+        success: Schema.Struct({ data: Schema.Array(SessionOrchestration.Task) }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.subagent.list",
+            summary: "List direct subagents",
+            description: "List durable task records for direct managed child Sessions.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.subagent.launch", "/api/session/:parentID/subagent", {
+        params: { parentID: Session.ID },
+        payload: SessionSubagentLaunch,
+        success: Schema.Struct({ data: SessionOrchestration.Task }),
+        error: [SessionNotFoundError, InvalidRequestError, ConflictError, ServiceUnavailableError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.subagent.launch",
+            summary: "Launch subagent",
+            description: "Preflight and durably launch one direct child Session.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.subagent.message", "/api/session/:parentID/subagent/:childID/message", {
+        params: { parentID: Session.ID, childID: Session.ID },
+        payload: SessionSubagentMessage,
+        success: Schema.Struct({ data: SessionOrchestration.Task }),
+        error: [SessionNotFoundError, ForbiddenError, ConflictError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(OpenApi.annotations({ identifier: "v2.session.subagent.message", summary: "Message subagent" })),
+    )
+    .add(
+      HttpApiEndpoint.post(
+        "session.subagent.answer",
+        "/api/session/:parentID/subagent/:childID/question/:questionID/answer",
+        {
+          params: { parentID: Session.ID, childID: Session.ID, questionID: SessionOrchestration.QuestionID },
+          payload: SessionSubagentAnswer,
+          success: Schema.Struct({ data: SessionOrchestration.Task }),
+          error: [SessionNotFoundError, QuestionNotFoundError, ForbiddenError, ConflictError, InvalidRequestError],
+        },
+      )
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({ identifier: "v2.session.subagent.answer", summary: "Answer subagent question" }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.subagent.cancel", "/api/session/:parentID/subagent/:childID/cancel", {
+        params: { parentID: Session.ID, childID: Session.ID },
+        success: Schema.Struct({ data: SessionOrchestration.Task }),
+        error: [SessionNotFoundError, ForbiddenError, ConflictError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(OpenApi.annotations({ identifier: "v2.session.subagent.cancel", summary: "Cancel subagent" })),
+    )
+    .add(
+      HttpApiEndpoint.post("session.subagent.resume", "/api/session/:parentID/subagent/:childID/resume", {
+        params: { parentID: Session.ID, childID: Session.ID },
+        success: Schema.Struct({ data: SessionOrchestration.Task }),
+        error: [SessionNotFoundError, ForbiddenError, ConflictError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(OpenApi.annotations({ identifier: "v2.session.subagent.resume", summary: "Resume subagent" })),
     )
     .add(
       HttpApiEndpoint.get("session.todo.list", "/api/session/:sessionID/todo", {
