@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises"
+import { fileURLToPath } from "node:url"
+import { readModelsSnapshot } from "./models-snapshot"
 
-const modelsUrl = process.env.OPENCODE_MODELS_URL || "https://models.dev"
+const bundled = fileURLToPath(new URL("./models-dev.snapshot.json", import.meta.url))
+const source = process.env.MODELS_DEV_API_JSON || bundled
 
-export const modelsData = process.env.MODELS_DEV_API_JSON
-  ? await readFile(process.env.MODELS_DEV_API_JSON, "utf8")
-  : await fetch(`${modelsUrl}/api.json`).then((response) => response.text())
+export const modelsData = await readModelsSnapshot(source)
 
-console.log("Loaded models.dev snapshot")
+console.log(`Loaded models.dev snapshot: ${source}`)

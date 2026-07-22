@@ -21,6 +21,7 @@
     "smoke:tui": "bun run script/tui-smoke.ts",
     "smoke:runtime": "bun run script/runtime-smoke.ts",
     "build:node": "bun run script/build-node.ts",
+    "refresh:models": "bun run script/refresh-models.ts",
     "dev": "bun run src/index.ts",
     "test": "bun test --timeout 30000 --only-failures",
     "typecheck": "tsgo --noEmit"
