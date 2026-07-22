@@ -24,34 +24,40 @@ const input = {
   fields: [{ key: "name", type: "string", required: true }],
 } satisfies Form.CreateInput
 
+const setupAutonomy = Effect.fn("FormTest.setupAutonomy")(function* (mode: "yolo" | "goal") {
+  const autonomy = yield* SessionAutonomy.Service
+  const { db } = yield* Database.Service
+  const directory = AbsolutePath.make("/tmp/opencode-form-autonomy")
+  yield* db
+    .insert(ProjectTable)
+    .values({ id: ProjectV2.ID.global, worktree: directory, sandboxes: [] })
+    .onConflictDoNothing()
+    .run()
+    .pipe(Effect.orDie)
+  yield* db
+    .insert(SessionTable)
+    .values({
+      id: input.sessionID,
+      project_id: ProjectV2.ID.global,
+      slug: "form-autonomy",
+      directory,
+      path: "",
+      title: "Form autonomy",
+      version: "test",
+    })
+    .onConflictDoNothing()
+    .run()
+    .pipe(Effect.orDie)
+  yield* mode === "goal"
+    ? autonomy.setGoal({ sessionID: input.sessionID, text: "Finish safely" })
+    : autonomy.setMode({ sessionID: input.sessionID, mode })
+})
+
 describe("Form", () => {
   it.effect("auto answers deterministic forms in yolo mode", () =>
     Effect.gen(function* () {
       const service = yield* Form.Service
-      const autonomy = yield* SessionAutonomy.Service
-      const { db } = yield* Database.Service
-      const directory = AbsolutePath.make("/tmp/opencode-form-autonomy")
-      yield* db
-        .insert(ProjectTable)
-        .values({ id: ProjectV2.ID.global, worktree: directory, sandboxes: [] })
-        .onConflictDoNothing()
-        .run()
-        .pipe(Effect.orDie)
-      yield* db
-        .insert(SessionTable)
-        .values({
-          id: input.sessionID,
-          project_id: ProjectV2.ID.global,
-          slug: "form-autonomy",
-          directory,
-          path: "",
-          title: "Form autonomy",
-          version: "test",
-        })
-        .onConflictDoNothing()
-        .run()
-        .pipe(Effect.orDie)
-      yield* autonomy.setMode({ sessionID: input.sessionID, mode: "yolo" })
+      yield* setupAutonomy("yolo")
 
       const result = yield* service.ask({
         sessionID: input.sessionID,
@@ -83,6 +89,48 @@ describe("Form", () => {
         status: "answered",
         answer: { branch: "main", attempts: 1, confirm: true, features: ["tests"], setup: true },
       })
+      expect(yield* service.list({ sessionID: input.sessionID })).toEqual([])
+    }),
+  )
+
+  it.effect("auto answers deterministic forms in goal mode", () =>
+    Effect.gen(function* () {
+      const service = yield* Form.Service
+      yield* setupAutonomy("goal")
+
+      expect(
+        yield* service.ask({
+          id: Form.ID.create("frm_goal_auto"),
+          sessionID: input.sessionID,
+          title: "Goal settings",
+          fields: [
+            {
+              key: "branch",
+              type: "string",
+              required: true,
+              options: [{ value: "main", label: "Main" }],
+            },
+            { key: "confirm", type: "boolean", required: true, default: true },
+          ],
+        }),
+      ).toEqual({ status: "answered", answer: { branch: "main", confirm: true } })
+      expect(yield* service.list({ sessionID: input.sessionID })).toEqual([])
+    }),
+  )
+
+  it.effect("auto answers required free-text forms with a safe default in goal mode", () =>
+    Effect.gen(function* () {
+      const service = yield* Form.Service
+      yield* setupAutonomy("goal")
+
+      expect(
+        yield* service.ask({
+          id: Form.ID.create("frm_goal_text"),
+          sessionID: input.sessionID,
+          title: "Required input",
+          fields: [{ key: "name", type: "string", required: true }],
+        }),
+      ).toEqual({ status: "answered", answer: { name: "Continue" } })
       expect(yield* service.list({ sessionID: input.sessionID })).toEqual([])
     }),
   )

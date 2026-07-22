@@ -14,6 +14,7 @@ import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionAutonomy } from "@opencode-ai/core/session/autonomy"
 import { SessionPermissionCeiling } from "@opencode-ai/core/session/permission-ceiling"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionTable } from "@opencode-ai/core/session/sql"
@@ -32,6 +33,7 @@ const it = testEffect(
       Database.node,
       EventV2.node,
       SessionStore.node,
+      SessionAutonomy.node,
       PermissionSaved.node,
       AgentV2.node,
       PermissionV2.node,
@@ -118,6 +120,56 @@ describe("PermissionV2", () => {
       yield* setRules([])
       expect(yield* service.ask(assertion())).toEqual({ id: PermissionV2.ID.create("per_test"), effect: "ask" })
       expect(yield* service.get(PermissionV2.ID.create("per_test"))).toBeDefined()
+    }),
+  )
+
+  it.effect("auto allows ask decisions in yolo mode without queuing a request", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const autonomy = yield* SessionAutonomy.Service
+      const service = yield* PermissionV2.Service
+      yield* autonomy.setMode({ sessionID: SessionV2.ID.make("ses_test"), mode: "yolo" })
+
+      expect(yield* service.ask(assertion())).toEqual({ id: PermissionV2.ID.create("per_test"), effect: "allow" })
+      yield* service.assert(assertion())
+      expect(yield* service.list()).toEqual([])
+    }),
+  )
+
+  it.effect("preserves explicit deny rules in yolo mode", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "read", resource: "*", effect: "deny" }])
+      const autonomy = yield* SessionAutonomy.Service
+      const service = yield* PermissionV2.Service
+      yield* autonomy.setMode({ sessionID: SessionV2.ID.make("ses_test"), mode: "yolo" })
+
+      expect(yield* service.ask(assertion())).toMatchObject({ effect: "deny" })
+      expect(yield* service.assert(assertion()).pipe(Effect.flip)).toBeInstanceOf(PermissionV2.BlockedError)
+      expect(yield* service.list()).toEqual([])
+    }),
+  )
+
+  it.effect("preserves the session permission ceiling in goal mode", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "read", resource: "*", effect: "allow" }])
+      const { db } = yield* Database.Service
+      const autonomy = yield* SessionAutonomy.Service
+      const service = yield* PermissionV2.Service
+      yield* db
+        .update(SessionTable)
+        .set({
+          metadata: SessionPermissionCeiling.write(undefined, [
+            { action: "read", resource: "src/*", effect: "deny" },
+          ]),
+        })
+        .where(eq(SessionTable.id, SessionV2.ID.make("ses_test")))
+        .run()
+        .pipe(Effect.orDie)
+      yield* autonomy.setGoal({ sessionID: SessionV2.ID.make("ses_test"), text: "Ship safely" })
+
+      expect(yield* service.ask(assertion())).toMatchObject({ effect: "deny" })
+      expect(yield* service.ask(assertion({ resources: ["README.md"] }))).toMatchObject({ effect: "allow" })
+      expect(yield* service.list()).toEqual([])
     }),
   )
 
