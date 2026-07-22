@@ -98,8 +98,8 @@ async function main() {
       const maxTokens = typeof body?.max_tokens === "number" ? body.max_tokens : undefined
       requests.push({ authorization: request.headers.get("authorization"), model: body?.model, text, maxTokens })
       const continuation = text.includes("Continue autonomously toward the active user goal.")
-      const goalStart =
-        text.includes("Begin autonomous goal") && (maxTokens === undefined || maxTokens > 100)
+      const goalStart = text.includes("Begin autonomous goal") && (maxTokens === undefined || maxTokens > 100)
+      if (text.includes("runtime-smoke-subagent-block")) await sleep(5_000)
       const content = continuation
         ? "Goal verified and complete. <goal-complete/>"
         : goalStart
@@ -128,6 +128,14 @@ async function main() {
           auto_approve: true,
           interval_seconds: 5,
           evaluation_window_minutes: 60,
+        },
+      },
+      agents: {
+        reviewer: {
+          description: "Runtime smoke managed subagent",
+          mode: "subagent",
+          model: `${PROVIDER_ID}/${MODEL_ID}`,
+          system: "Complete the delegated task and report the final result.",
         },
       },
       providers: {
@@ -187,13 +195,11 @@ async function main() {
   const ready = JSON.parse(line) as { url?: unknown }
   if (typeof ready.url !== "string") throw new Error(`Invalid readiness payload: ${line}`)
 
-  const client = OpenCode.make({
-    baseUrl: ready.url,
-    headers: {
-      authorization: `Basic ${Buffer.from(`opencode:${PASSWORD}`).toString("base64")}`,
-      "x-opencode-directory": project,
-    },
-  })
+  const clientHeaders = {
+    authorization: `Basic ${Buffer.from(`opencode:${PASSWORD}`).toString("base64")}`,
+    "x-opencode-directory": project,
+  }
+  const client = OpenCode.make({ baseUrl: ready.url, headers: clientHeaders })
 
   let phase = "integration readiness"
   try {
@@ -282,6 +288,56 @@ async function main() {
     if (!continuation.text.includes("Answer it on the user's behalf"))
       throw new Error("Goal continuation did not include user-proxy instructions")
 
+    phase = "durable subagent orchestration"
+    const subagentParent = await client.session.create({
+      model: { providerID: PROVIDER_ID, id: MODEL_ID },
+      location: { directory: project },
+    })
+    const oversizedSubagent = await fetch(new URL(`/api/session/${subagentParent.id}/subagent`, ready.url), {
+      method: "POST",
+      headers: { ...clientHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        parentAssistantMessageID: "msg_runtime_smoke_oversized",
+        toolCallID: "call_runtime_smoke_oversized",
+        agent: "reviewer",
+        description: "d".repeat(4 * 1024 + 1),
+        prompt: "must be rejected before persistence",
+        background: true,
+      }),
+    })
+    if (oversizedSubagent.status !== 400)
+      throw new Error(`Oversized subagent payload returned ${oversizedSubagent.status}, expected 400`)
+    if ((await client.session.subagent.list({ parentID: subagentParent.id })).length !== 0)
+      throw new Error("Oversized subagent payload persisted a task")
+
+    const launchedSubagent = await client.session.subagent.launch({
+      parentID: subagentParent.id,
+      parentAssistantMessageID: "msg_runtime_smoke_parent",
+      toolCallID: "call_runtime_smoke_child",
+      agent: "reviewer",
+      description: "Runtime smoke child",
+      prompt: "runtime-smoke-subagent-block",
+      background: true,
+    })
+    await eventually(async () => {
+      const task = (await client.session.subagent.list({ parentID: subagentParent.id })).find(
+        (item) => item.sessionID === launchedSubagent.sessionID,
+      )
+      return task?.state === "running" ? task : undefined
+    })
+    const cancelledSubagent = await client.session.subagent.cancel({
+      parentID: subagentParent.id,
+      childID: launchedSubagent.sessionID,
+    })
+    if (cancelledSubagent.state !== "cancelled")
+      throw new Error(`Subagent cancellation did not settle durably: ${cancelledSubagent.state}`)
+    const persistedSubagent = await eventually(async () => {
+      const task = (await client.session.subagent.list({ parentID: subagentParent.id })).find(
+        (item) => item.sessionID === launchedSubagent.sessionID,
+      )
+      return task?.state === "cancelled" ? task : undefined
+    })
+
     for (const request of requests) {
       if (request.authorization !== `Bearer ${KEY}`) throw new Error("OpenRouter request did not contain stored bearer credential")
     }
@@ -310,7 +366,7 @@ async function main() {
     if (!privateColumns || privateColumns.count !== 0) throw new Error("Evidence schema exposes private content columns")
 
     console.log(
-      `Runtime smoke passed: auth, yolo=round-trip, goal=${completedGoal.goal?.status}, evidence=${evidence.count}, automation=${selfImprovement.automation.lastCompletedAt}, cache-hit=${diagnostics.cache.hitRatio}`,
+      `Runtime smoke passed: auth, yolo=round-trip, goal=${completedGoal.goal?.status}, subagent=${persistedSubagent.state}, evidence=${evidence.count}, automation=${selfImprovement.automation.lastCompletedAt}, cache-hit=${diagnostics.cache.hitRatio}`,
     )
   } catch (error) {
     throw new Error(`Runtime smoke failed during ${phase}`, { cause: error })
