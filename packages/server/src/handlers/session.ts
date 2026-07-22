@@ -18,6 +18,7 @@ import {
   UnknownError,
 } from "@opencode-ai/protocol/errors"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { SessionTodo } from "@opencode-ai/core/session/todo"
 
 const DefaultSessionsLimit = 50
 
@@ -153,6 +154,21 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             ),
           )
           return HttpApiSchema.NoContent.make()
+        }),
+      )
+      .handle(
+        "session.todo.list",
+        Effect.fn(function* (ctx) {
+          const todo = yield* SessionTodo.Service
+          return { data: yield* todo.get(ctx.params.sessionID) }
+        }),
+      )
+      .handle(
+        "session.todo.update",
+        Effect.fn(function* (ctx) {
+          const todo = yield* SessionTodo.Service
+          yield* todo.update({ sessionID: ctx.params.sessionID, todos: ctx.payload.todos })
+          return { data: ctx.payload.todos }
         }),
       )
       .handle(

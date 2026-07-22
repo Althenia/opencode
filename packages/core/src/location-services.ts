@@ -63,6 +63,7 @@ import { SessionInstructions } from "./session/instructions"
 import { SessionRunnerLLM } from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
 import { SessionTitle } from "./session/title"
+import { SessionTodo } from "./session/todo"
 import { SkillV2 } from "./skill"
 import { SkillInstructions } from "./skill/instructions"
 import { Snapshot } from "./snapshot"
@@ -139,6 +140,7 @@ const locationServiceNodes = [
   SessionRunnerModel.node,
   SessionCompaction.node,
   SessionTitle.node,
+  SessionTodo.node,
   Snapshot.node,
   SelfImprovementSessionObserver.node,
   SessionRunnerLLM.node,

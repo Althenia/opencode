@@ -52,6 +52,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Server.get("mcp.status.changed")).toBe(McpEvent.StatusChanged)
     expect(EventManifest.Server.get("mcp.resources.changed")).toBe(McpEvent.ResourcesChanged)
     expect(EventManifest.Server.get("session.deleted")).toBe(SessionEvent.Deleted)
+    expect(EventManifest.Server.has("todo.updated")).toBe(true)
     expect(EventManifest.Server.has("mcp.tools.changed")).toBe(false)
     expect(Agent.Event.Updated.durable).toBeUndefined()
     expect(EventManifest.Durable.has("agent.updated")).toBe(false)

@@ -100,6 +100,29 @@ const provider = {
 }
 
 describe("Config", () => {
+  it.effect("accepts partial model capabilities without discarding unrelated settings", () =>
+    Effect.sync(() => {
+      const info = Schema.decodeUnknownSync(Config.Info)({
+        experimental: { self_improvement: { automatic: true } },
+        mcp: { servers: { memory: { type: "local", command: ["memory"] } } },
+        providers: {
+          openai: {
+            models: {
+              custom: {
+                capabilities: { input: ["text"], output: ["text"] },
+                limit: { context: 400_000 },
+              },
+            },
+          },
+        },
+      })
+
+      expect(info.experimental?.self_improvement?.automatic).toBe(true)
+      expect(info.mcp?.servers?.memory).toBeDefined()
+      expect(info.providers?.openai?.models?.custom?.limit?.context).toBe(400_000)
+    }),
+  )
+
   it.live("loads explicit file and content overrides in priority order", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
@@ -121,23 +144,15 @@ describe("Config", () => {
               const config = yield* Config.Service
               const entries = yield* config.entries()
               expect(
-                entries.flatMap((entry) =>
-                  entry.type === "document" && entry.info.shell ? [entry.info.shell] : [],
-                ),
+                entries.flatMap((entry) => (entry.type === "document" && entry.info.shell ? [entry.info.shell] : [])),
               ).toEqual(["global", "explicit", "project", "content"])
               expect(Config.latest(entries, "shell")).toBe("content")
             }).pipe(
               Effect.provide(
-                testLayer(
-                  project,
-                  global,
-                  project,
-                  undefined,
-                  undefined,
-                  emptyCredentialNode,
-                  emptyWellknownNode,
-                  { file: explicit, content: JSON.stringify({ shell: "content" }) },
-                ),
+                testLayer(project, global, project, undefined, undefined, emptyCredentialNode, emptyWellknownNode, {
+                  file: explicit,
+                  content: JSON.stringify({ shell: "content" }),
+                }),
               ),
             ),
           ),
@@ -155,31 +170,24 @@ describe("Config", () => {
         const global = path.join(tmp.path, "global")
         const project = path.join(tmp.path, "project")
         return Effect.promise(async () => {
-            await fs.mkdir(global, { recursive: true })
-            await fs.mkdir(project, { recursive: true })
-            await fs.writeFile(path.join(global, "opencode.json"), JSON.stringify({ shell: "global" }))
-            await fs.writeFile(path.join(project, "opencode.json"), JSON.stringify({ shell: "project" }))
-          }).pipe(
-            Effect.andThen(
-              Effect.gen(function* () {
-                const config = yield* Config.Service
-                expect(Config.latest(yield* config.entries(), "shell")).toBe("global")
-              }).pipe(
-                Effect.provide(
-                  testLayer(
-                    project,
-                    global,
-                    project,
-                    undefined,
-                    undefined,
-                    emptyCredentialNode,
-                    emptyWellknownNode,
-                    { project: false },
-                  ),
-                ),
+          await fs.mkdir(global, { recursive: true })
+          await fs.mkdir(project, { recursive: true })
+          await fs.writeFile(path.join(global, "opencode.json"), JSON.stringify({ shell: "global" }))
+          await fs.writeFile(path.join(project, "opencode.json"), JSON.stringify({ shell: "project" }))
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              expect(Config.latest(yield* config.entries(), "shell")).toBe("global")
+            }).pipe(
+              Effect.provide(
+                testLayer(project, global, project, undefined, undefined, emptyCredentialNode, emptyWellknownNode, {
+                  project: false,
+                }),
               ),
             ),
-          )
+          ),
+        )
       }),
     ),
   )

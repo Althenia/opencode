@@ -20,6 +20,10 @@ import type {
   SessionDiagnosticsOutput,
   SessionRemoveInput,
   SessionRemoveOutput,
+  SessionTodoListInput,
+  SessionTodoListOutput,
+  SessionTodoUpdateInput,
+  SessionTodoUpdateOutput,
   SessionForkInput,
   SessionForkOutput,
   SessionSwitchAgentInput,
@@ -502,6 +506,31 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      todo: {
+        list: (input: SessionTodoListInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionTodoListOutput }>(
+            {
+              method: "GET",
+              path: `/api/session/${encodeURIComponent(input.sessionID)}/todo`,
+              successStatus: 200,
+              declaredStatuses: [404, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        update: (input: SessionTodoUpdateInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionTodoUpdateOutput }>(
+            {
+              method: "PUT",
+              path: `/api/session/${encodeURIComponent(input.sessionID)}/todo`,
+              body: { todos: input["todos"] },
+              successStatus: 200,
+              declaredStatuses: [404, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+      },
       fork: (input: SessionForkInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: SessionForkOutput }>(
           {
