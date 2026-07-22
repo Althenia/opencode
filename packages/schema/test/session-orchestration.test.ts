@@ -48,6 +48,42 @@ describe("SessionOrchestration", () => {
     expect(Schema.is(SessionOrchestration.TerminalExcerpt)("x".repeat(16 * 1024 + 1))).toBe(false)
   })
 
+  test("bounds every durable orchestration payload by UTF-8 bytes", () => {
+    expect(Schema.is(SessionOrchestration.DescriptionText)("d".repeat(4 * 1024))).toBe(true)
+    expect(Schema.is(SessionOrchestration.DescriptionText)("d".repeat(4 * 1024 + 1))).toBe(false)
+    expect(Schema.is(SessionOrchestration.DescriptionText)("€".repeat(1365))).toBe(true)
+    expect(Schema.is(SessionOrchestration.DescriptionText)("€".repeat(1366))).toBe(false)
+    expect(Schema.is(SessionOrchestration.ToolCallID)("c".repeat(512))).toBe(true)
+    expect(Schema.is(SessionOrchestration.ToolCallID)("c".repeat(513))).toBe(false)
+    expect(Schema.is(SessionOrchestration.PromptText)("p".repeat(64 * 1024))).toBe(true)
+    expect(Schema.is(SessionOrchestration.PromptText)("p".repeat(64 * 1024 + 1))).toBe(false)
+    expect(Schema.is(SessionOrchestration.ControlText)("m".repeat(64 * 1024))).toBe(true)
+    expect(Schema.is(SessionOrchestration.ControlText)("m".repeat(64 * 1024 + 1))).toBe(false)
+    expect(Schema.is(SessionOrchestration.FailureText)("e".repeat(16 * 1024))).toBe(true)
+    expect(Schema.is(SessionOrchestration.FailureText)("e".repeat(16 * 1024 + 1))).toBe(false)
+    expect(Schema.is(SessionOrchestration.AnswerData)({ value: "x".repeat(8 * 1024 - 12) })).toBe(true)
+    expect(Schema.is(SessionOrchestration.AnswerData)({ value: "x".repeat(8 * 1024) })).toBe(false)
+
+    expect(
+      Schema.is(SessionOrchestration.Change)({
+        type: "launched",
+        parentID,
+        parentAssistantMessageID: "msg_parent",
+        toolCallID: "c".repeat(513),
+        inputID: "msg_input",
+        description: "Review",
+        agent: "build",
+        model,
+        promptDigest: "digest",
+        background: true,
+        delivery: "steer",
+      }),
+    ).toBe(false)
+    expect(
+      Schema.is(SessionOrchestration.Change)({ type: "failed", error: "e".repeat(16 * 1024 + 1) }),
+    ).toBe(false)
+  })
+
   test("models parent controls and child reports as discriminated unions", () => {
     const control = Schema.decodeUnknownSync(SessionOrchestration.Control)
     expect(control({ action: "list" })).toEqual({ action: "list" })

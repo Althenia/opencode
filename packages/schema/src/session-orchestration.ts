@@ -27,18 +27,23 @@ const maxBytes = (bytes: number) =>
     meta: { _tag: "isMaxLength", maxLength: bytes },
     arbitrary: { constraint: { maxLength: bytes } },
   })
-const questionDataBytes = Schema.makeFilter<{ readonly data?: Schema.Json }>(
-  (input) => input.data === undefined || encoder.encode(JSON.stringify(input.data)).byteLength <= 8 * 1024,
-  {
-    expected: "question data totaling at most 8192 UTF-8 bytes",
-    meta: { _tag: "isMaxLength", maxLength: 8 * 1024 },
+const boundedText = (bytes: number) => Schema.String.check(Schema.isMaxLength(bytes), maxBytes(bytes))
+const jsonBytes = (bytes: number) =>
+  Schema.makeFilter<Schema.Json>((input) => encoder.encode(JSON.stringify(input)).byteLength <= bytes, {
+    expected: `JSON totaling at most ${bytes} UTF-8 bytes`,
+    meta: { _tag: "isMaxLength", maxLength: bytes },
     arbitrary: { constraint: {} },
-  },
-)
+  })
 
-export const ProgressText = Schema.String.check(Schema.isMaxLength(4 * 1024), maxBytes(4 * 1024))
-export const QuestionText = Schema.String.check(Schema.isMaxLength(8 * 1024), maxBytes(8 * 1024))
-export const TerminalExcerpt = Schema.String.check(Schema.isMaxLength(16 * 1024), maxBytes(16 * 1024))
+export const DescriptionText = boundedText(4 * 1024)
+export const PromptText = boundedText(64 * 1024)
+export const ControlText = boundedText(64 * 1024)
+export const ToolCallID = boundedText(512)
+export const FailureText = boundedText(16 * 1024)
+export const AnswerData = Schema.Json.check(jsonBytes(8 * 1024))
+export const ProgressText = boundedText(4 * 1024)
+export const QuestionText = boundedText(8 * 1024)
+export const TerminalExcerpt = boundedText(16 * 1024)
 
 export const State = Schema.Literals([
   "starting",
@@ -67,24 +72,22 @@ export interface Progress extends Schema.Schema.Type<typeof Progress> {}
 export const Question = Schema.Struct({
   id: QuestionID,
   text: QuestionText,
-  data: Schema.Json.pipe(optional),
+  data: AnswerData.pipe(optional),
   time: NonNegativeInt,
-})
-  .check(questionDataBytes)
-  .annotate({ identifier: "SessionOrchestration.Question" })
+}).annotate({ identifier: "SessionOrchestration.Question" })
 export interface Question extends Schema.Schema.Type<typeof Question> {}
 
 export const Answer = Schema.Struct({
   questionID: QuestionID,
-  text: Schema.String.pipe(optional),
-  data: Schema.Json.pipe(optional),
+  text: ControlText.pipe(optional),
+  data: AnswerData.pipe(optional),
 }).annotate({ identifier: "SessionOrchestration.Answer" })
 export interface Answer extends Schema.Schema.Type<typeof Answer> {}
 
 export const Task = Schema.Struct({
   sessionID: SessionID,
   parentID: SessionID,
-  description: Schema.String,
+  description: DescriptionText,
   agent: Agent.ID,
   model: Model.Ref,
   background: Schema.Boolean,
@@ -110,15 +113,15 @@ export const Control = Schema.Union([
   Schema.Struct({
     action: Schema.Literal("send"),
     sessionID: SessionID,
-    text: Schema.String,
+    text: ControlText,
     delivery: SessionDelivery.Delivery,
   }),
   Schema.Struct({
     action: Schema.Literal("answer"),
     sessionID: SessionID,
     questionID: QuestionID,
-    text: Schema.String.pipe(optional),
-    data: Schema.Json.pipe(optional),
+    text: ControlText.pipe(optional),
+    data: AnswerData.pipe(optional),
   }),
   Schema.Struct({ action: Schema.Literal("cancel"), sessionID: SessionID }),
   Schema.Struct({ action: Schema.Literal("resume"), sessionID: SessionID }),
@@ -127,9 +130,7 @@ export type Control = typeof Control.Type
 
 export const Report = Schema.Union([
   Schema.Struct({ action: Schema.Literal("progress"), text: ProgressText }),
-  Schema.Struct({ action: Schema.Literal("question"), text: QuestionText, data: Schema.Json.pipe(optional) }).check(
-    questionDataBytes,
-  ),
+  Schema.Struct({ action: Schema.Literal("question"), text: QuestionText, data: AnswerData.pipe(optional) }),
 ]).pipe(Schema.toTaggedUnion("action"))
 export type Report = typeof Report.Type
 
@@ -151,9 +152,9 @@ export const Change = Schema.Union([
     type: Schema.Literal("launched"),
     parentID: SessionID,
     parentAssistantMessageID: SessionMessage.ID,
-    toolCallID: Schema.String,
+    toolCallID: ToolCallID,
     inputID: SessionMessage.ID,
-    description: Schema.String,
+    description: DescriptionText,
     agent: Agent.ID,
     model: Model.Ref,
     promptDigest: Schema.String,
@@ -170,7 +171,7 @@ export const Change = Schema.Union([
   Schema.Struct({ type: Schema.Literal("completed"), excerpt: TerminalExcerpt.pipe(optional) }),
   Schema.Struct({
     type: Schema.Literal("failed"),
-    error: Schema.String,
+    error: FailureText,
     excerpt: TerminalExcerpt.pipe(optional),
   }),
   Schema.Struct({ type: Schema.Literal("lost"), excerpt: TerminalExcerpt.pipe(optional) }),

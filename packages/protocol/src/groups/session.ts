@@ -147,23 +147,23 @@ export const SessionAutonomySet = Schema.Union([
 
 export const SessionSubagentLaunch = Schema.Struct({
   parentAssistantMessageID: SessionMessage.ID,
-  toolCallID: Schema.String,
+  toolCallID: SessionOrchestration.ToolCallID,
   agent: Agent.ID,
-  description: Schema.String,
-  prompt: Schema.String,
+  description: SessionOrchestration.DescriptionText,
+  prompt: SessionOrchestration.PromptText,
   background: Schema.Boolean.pipe(Schema.optional),
   model: Model.Ref.pipe(Schema.optional),
 }).annotate({ identifier: "SessionSubagentLaunch" })
 
 export const SessionSubagentMessage = Schema.Struct({
   messageID: SessionMessage.ID,
-  text: Schema.String,
+  text: SessionOrchestration.ControlText,
   delivery: SessionDelivery.Delivery,
 }).annotate({ identifier: "SessionSubagentMessage" })
 
 export const SessionSubagentAnswer = Schema.Struct({
-  text: Schema.String.pipe(Schema.optional),
-  data: Schema.Json.pipe(Schema.optional),
+  text: SessionOrchestration.ControlText.pipe(Schema.optional),
+  data: SessionOrchestration.AnswerData.pipe(Schema.optional),
 }).annotate({ identifier: "SessionSubagentAnswer" })
 
 const SessionsQueryCursor = SessionsCursor.annotate({

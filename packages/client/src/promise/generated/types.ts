@@ -50,6 +50,8 @@ export type SessionAutonomyGoalStatus = "active" | "completed" | "stopped" | "ex
 
 export type SessionOrchestrationProgress = { text: string; time: number }
 
+export type SessionOrchestrationQuestion = { id: string; text: string; data?: JsonValue; time: number }
+
 export type SessionTodoInfo = {
   content: string
   status: "pending" | "in_progress" | "completed" | "cancelled"
@@ -158,6 +160,8 @@ export type InstructionEntryKey = string
 export type SessionGenerateResponse = { data: { text: string } }
 
 export type SessionPendingSyntheticData1 = { text: string; description?: string; metadata?: { [x: string]: any } }
+
+export type SessionOrchestrationQuestion1 = { id: string; text: string; data?: JsonValue; time: number }
 
 export type SessionOrchestrationAnswer = { questionID: string; text?: string; data?: JsonValue }
 
@@ -1283,7 +1287,7 @@ export type SessionOrchestrationTask = {
   background: boolean
   state: "starting" | "running" | "waiting" | "cancelling" | "cancelled" | "completed" | "failed" | "lost"
   progress?: SessionOrchestrationProgress
-  question?: { id: string; text: string; data?: JsonValue; time: number }
+  question?: SessionOrchestrationQuestion
   revision: number
   time: { created: number; updated: number }
 }
@@ -1423,7 +1427,7 @@ export type SessionTaskUpdated = {
       | { type: "started" }
       | { type: "backgrounded" }
       | { type: "progressed"; progress: SessionOrchestrationProgress }
-      | { type: "question_asked"; question: { id: string; text: string; data?: JsonValue; time: number } }
+      | { type: "question_asked"; question: SessionOrchestrationQuestion1 }
       | { type: "question_answered"; answer: SessionOrchestrationAnswer }
       | { type: "cancel_requested" }
       | { type: "cancelled" }

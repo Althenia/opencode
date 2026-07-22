@@ -30,4 +30,32 @@ test("validates Session subagent launch and control payloads", () => {
   expect(() =>
     Schema.decodeUnknownSync(SessionSubagentMessage)({ messageID, text: "later", delivery: "later" }),
   ).toThrow()
+  expect(() =>
+    Schema.decodeUnknownSync(SessionSubagentLaunch)({
+      parentAssistantMessageID: "msg_parent",
+      toolCallID: "c".repeat(513),
+      agent: "reviewer",
+      description: "Review implementation",
+      prompt: "Review the changed files",
+    }),
+  ).toThrow()
+  expect(() =>
+    Schema.decodeUnknownSync(SessionSubagentLaunch)({
+      parentAssistantMessageID: "msg_parent",
+      toolCallID: "call_1",
+      agent: "reviewer",
+      description: "d".repeat(4 * 1024 + 1),
+      prompt: "Review the changed files",
+    }),
+  ).toThrow()
+  expect(() =>
+    Schema.decodeUnknownSync(SessionSubagentMessage)({
+      messageID,
+      text: "m".repeat(64 * 1024 + 1),
+      delivery: "steer",
+    }),
+  ).toThrow()
+  expect(() =>
+    Schema.decodeUnknownSync(SessionSubagentAnswer)({ data: { value: "x".repeat(8 * 1024) } }),
+  ).toThrow()
 })
