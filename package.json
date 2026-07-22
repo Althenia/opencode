@@ -10,6 +10,7 @@
     "dev": "bun run --cwd packages/cli --conditions=browser src/index.ts",
     "build:tui": "bun run --cwd packages/cli build:tui --single --skip-install --outdir=../../dist/tui",
     "smoke:tui": "bun run --cwd packages/cli smoke:tui -- --dir=../../dist/tui",
+    "smoke:runtime": "bun run --cwd packages/cli smoke:runtime -- --dir=../../dist/tui",
     "dev:desktop": "bun --cwd packages/desktop dev",
     "dev:web": "bun --cwd packages/app dev",
     "dev:console": "ulimit -n 10240 2>/dev/null; bun run --cwd packages/console/app dev",
