@@ -1,11 +1,24 @@
 import { describe, expect, test } from "bun:test"
-import { action, decodePolicy } from "./updater"
+import { action, decodePolicy, updateCheckSkipReason } from "./updater"
 
 describe("updater", () => {
   test("reads autoupdate from JSONC", () => {
     expect(decodePolicy('{ // preference\n "autoupdate": "notify",\n}')).toBe("notify")
     expect(decodePolicy('{ "autoupdate": false }')).toBe(false)
     expect(decodePolicy('{ "autoupdate": "invalid" }')).toBeUndefined()
+  })
+
+  test("skips local, disabled, and preview update checks", () => {
+    expect(updateCheckSkipReason({ local: true, disabled: false, version: "1.2.3" })).toBe("local-install")
+    expect(updateCheckSkipReason({ local: false, disabled: true, version: "1.2.3" })).toBe("disabled")
+    expect(updateCheckSkipReason({ local: false, disabled: false, version: "0.0.0-main-20260722034528845" })).toBe(
+      "preview-build",
+    )
+    expect(updateCheckSkipReason({ local: false, disabled: false, version: "0.0.0-feature-123" })).toBe(
+      "preview-build",
+    )
+    expect(updateCheckSkipReason({ local: false, disabled: false, version: "1.2.3" })).toBeUndefined()
+    expect(updateCheckSkipReason({ local: false, disabled: false, version: "1.2.3-beta.1" })).toBeUndefined()
   })
 
   test("automatically updates patches and minors", () => {

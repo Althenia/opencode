@@ -47,6 +47,18 @@ export function action(current: string, latest: string, policy: Policy): Action 
   return "upgrade"
 }
 
+export type UpdateCheckSkipReason = "local-install" | "disabled" | "preview-build"
+
+export function updateCheckSkipReason(input: {
+  readonly local: boolean
+  readonly disabled: boolean
+  readonly version: string
+}): UpdateCheckSkipReason | undefined {
+  if (input.local) return "local-install"
+  if (input.disabled) return "disabled"
+  if (input.version.startsWith("0.0.0-")) return "preview-build"
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -138,12 +150,14 @@ export const layer = Layer.effect(
     })
 
     const check = Effect.fn("cli.updater.check")(function* () {
-      if (
-        InstallationLocal ||
-        ["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")
-      )
+      const reason = updateCheckSkipReason({
+        local: InstallationLocal,
+        disabled: ["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? ""),
+        version: InstallationVersion,
+      })
+      if (reason)
         return yield* Effect.logInfo("update check skipped", {
-          reason: InstallationLocal ? "local-install" : "disabled",
+          reason,
           version: InstallationVersion,
           channel: InstallationChannel,
         })
