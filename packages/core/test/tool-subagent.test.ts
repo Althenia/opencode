@@ -184,6 +184,20 @@ describe("SubagentTool", () => {
         action: "progress",
         text: "halfway",
       })
+      expect(() =>
+        Schema.decodeUnknownSync(SubagentTool.Input)({
+          agent: "reviewer",
+          description: "d".repeat(4 * 1024 + 1),
+          prompt: "review",
+        }),
+      ).toThrow()
+      expect(() =>
+        Schema.decodeUnknownSync(SubagentTool.Input)({
+          agent: "reviewer",
+          description: "review",
+          prompt: "p".repeat(64 * 1024 + 1),
+        }),
+      ).toThrow()
     }),
   )
 
@@ -222,6 +236,61 @@ describe("SubagentTool", () => {
         }),
       ),
     ),
+  )
+
+  it.live("advertises only subagents allowed by the effective Session permission", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          const sessions = yield* SessionV2.Service
+          const parent = yield* sessions.create({
+            location,
+            model: parentModel,
+            permissionCeiling: [{ action: "subagent", resource: "reviewer", effect: "deny" }],
+          })
+          yield* withSubagent(parent.location)
+          const locations = yield* LocationServiceMap.Service
+          const available = yield* Effect.gen(function* () {
+            const agents = yield* AgentV2.Service
+            const permission = yield* PermissionV2.Service
+            return yield* SubagentTool.availableAgents({
+              permission,
+              sessionID: parent.id,
+              agent: toolIdentity.agent,
+              candidates: yield* agents.list(),
+            })
+          }).pipe(Effect.provide(locations.get(parent.location)))
+
+          expect(available.map((agent) => agent.id)).toContain(AgentV2.ID.make("fallback"))
+          expect(available.map((agent) => agent.id)).not.toContain(AgentV2.ID.make("reviewer"))
+        }),
+      ),
+    ),
+  )
+
+  it.live("reports child-only identity for missing managed task operations", () =>
+    Effect.gen(function* () {
+      const orchestration = (yield* PluginRuntime.Service).orchestration
+      const childID = SessionV2.ID.make("ses_missing_managed_task")
+      const errors = [
+        yield* orchestration.progress(childID, "halfway").pipe(Effect.flip),
+        yield* orchestration.question(childID, "Proceed?").pipe(Effect.flip),
+        yield* orchestration.settle(childID, { type: "completed", excerpt: "done" }).pipe(Effect.flip),
+        yield* orchestration.background(childID).pipe(Effect.flip),
+      ]
+
+      for (const error of errors) {
+        expect(error).toMatchObject({
+          _tag: "SessionOrchestration.TaskNotFoundError",
+          childID,
+        })
+        expect(error).not.toHaveProperty("parentID")
+      }
+    }),
   )
 
   it.live("prevents subagents from launching subagents by default", () =>

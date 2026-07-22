@@ -22,6 +22,7 @@ import { SessionPendingTable, SessionTable, SessionTaskTable } from "./sql"
 
 const TeamViewBytes = 32 * 1024
 export const truncateUtf8 = SessionOrchestrationSchema.truncateUtf8
+export const failureText = (input: string) => truncateUtf8(input, 16 * 1024)
 
 export const selectModel = (
   spawn: Model.Ref | undefined,
@@ -82,6 +83,11 @@ export class ForbiddenError extends Schema.TaggedErrorClass<ForbiddenError>()("S
   parentID: SessionSchema.ID,
   childID: SessionSchema.ID,
 }) {}
+
+export class TaskNotFoundError extends Schema.TaggedErrorClass<TaskNotFoundError>()(
+  "SessionOrchestration.TaskNotFoundError",
+  { childID: SessionSchema.ID },
+) {}
 
 export class ConflictError extends Schema.TaggedErrorClass<ConflictError>()("SessionOrchestration.ConflictError", {
   message: Schema.String,
@@ -195,22 +201,22 @@ export interface Interface {
   readonly progress: (
     childID: SessionSchema.ID,
     text: string,
-  ) => Effect.Effect<SessionOrchestrationSchema.Task, NotFoundError | ConflictError>
+  ) => Effect.Effect<SessionOrchestrationSchema.Task, TaskNotFoundError | ConflictError>
   readonly question: (
     childID: SessionSchema.ID,
     text: string,
     data?: Schema.Json,
-  ) => Effect.Effect<SessionOrchestrationSchema.Question, NotFoundError | ConflictError>
+  ) => Effect.Effect<SessionOrchestrationSchema.Question, TaskNotFoundError | ConflictError>
   readonly settle: (
     childID: SessionSchema.ID,
     result:
       | { readonly type: "completed"; readonly excerpt?: string }
       | { readonly type: "failed"; readonly error: string; readonly excerpt?: string }
       | { readonly type: "lost"; readonly excerpt?: string },
-  ) => Effect.Effect<SessionOrchestrationSchema.Task, NotFoundError | ConflictError>
+  ) => Effect.Effect<SessionOrchestrationSchema.Task, TaskNotFoundError | ConflictError>
   readonly background: (
     childID: SessionSchema.ID,
-  ) => Effect.Effect<SessionOrchestrationSchema.Task, NotFoundError | ConflictError>
+  ) => Effect.Effect<SessionOrchestrationSchema.Task, TaskNotFoundError | ConflictError>
   readonly teamView: (
     parentID: SessionSchema.ID,
   ) => Effect.Effect<ReturnType<typeof renderTeamView>, SessionV2.NotFoundError>
@@ -220,6 +226,7 @@ export interface Interface {
 export type Error =
   | SessionV2.NotFoundError
   | NotFoundError
+  | TaskNotFoundError
   | ForbiddenError
   | ConflictError
   | InvalidRequestError
@@ -506,7 +513,7 @@ const layer = Layer.effect(
         locks.withLock(childID)(
           Effect.gen(function* () {
             const row = yield* task(childID)
-            if (!row) return yield* new NotFoundError({ parentID: childID, childID })
+            if (!row) return yield* new TaskNotFoundError({ childID })
             if (row.state !== "running")
               return yield* new ConflictError({ message: `Cannot report progress in ${row.state}` })
             yield* publish(childID, {
@@ -521,7 +528,7 @@ const layer = Layer.effect(
         locks.withLock(childID)(
           Effect.gen(function* () {
             const row = yield* task(childID)
-            if (!row) return yield* new NotFoundError({ parentID: childID, childID })
+            if (!row) return yield* new TaskNotFoundError({ childID })
             if (row.state !== "running" || row.question_id !== null)
               return yield* new ConflictError({ message: `Cannot ask a question in ${row.state}` })
             const question = SessionOrchestrationSchema.Question.make({
@@ -541,7 +548,7 @@ const layer = Layer.effect(
         locks.withLock(childID)(
           Effect.gen(function* () {
             const row = yield* task(childID)
-            if (!row) return yield* new NotFoundError({ parentID: childID, childID })
+            if (!row) return yield* new TaskNotFoundError({ childID })
             if (["cancelled", "completed", "failed", "lost"].includes(row.state)) return taskFromRow(row)
             if (row.state !== "running")
               return yield* new ConflictError({ message: `Cannot settle task in ${row.state}` })
@@ -550,7 +557,7 @@ const layer = Layer.effect(
               settlement.type === "failed"
                 ? {
                     type: "failed",
-                    error: settlement.error,
+                    error: failureText(settlement.error),
                     excerpt: settlement.excerpt ? truncateUtf8(settlement.excerpt, 16 * 1024) : undefined,
                   }
                 : {
@@ -566,7 +573,7 @@ const layer = Layer.effect(
         locks.withLock(childID)(
           Effect.gen(function* () {
             const row = yield* task(childID)
-            if (!row) return yield* new NotFoundError({ parentID: childID, childID })
+            if (!row) return yield* new TaskNotFoundError({ childID })
             if (row.background) return taskFromRow(row)
             if (row.state !== "running")
               return yield* new ConflictError({ message: `Cannot background task in ${row.state}` })

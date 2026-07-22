@@ -100,7 +100,37 @@ export function merge(...rulesets: Permission.Ruleset[]): Permission.Ruleset {
   return rulesets.flat()
 }
 
+function denied(input: Pick<AssertInput, "action" | "resources">, rules: Permission.Ruleset) {
+  return input.resources.some((resource) => evaluate(input.action, resource, rules).effect === "deny")
+}
+
+function relevant(input: Pick<AssertInput, "action">, rules: Permission.Ruleset) {
+  return rules.filter((rule) => Wildcard.match(input.action, rule.action))
+}
+
+function decision(
+  input: Pick<AssertInput, "action" | "resources">,
+  configured: Permission.Ruleset,
+  remembered: Permission.Ruleset,
+) {
+  if (denied(input, configured)) return { effect: "deny" as const, rules: configured }
+  const rules = [...configured, ...remembered]
+  const effects = input.resources.map((resource) => evaluate(input.action, resource, rules).effect)
+  const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
+  return { effect, rules }
+}
+
+export interface EvaluateEffectiveInput {
+  readonly sessionID: SessionSchema.ID
+  readonly agent?: AgentV2.ID
+  readonly action: string
+  readonly resource: string
+}
+
 export interface Interface {
+  readonly evaluateEffective: (
+    input: EvaluateEffectiveInput,
+  ) => Effect.Effect<Permission.Effect, SessionErrors.NotFoundError>
   readonly ask: (input: AssertInput) => Effect.Effect<AskResult, SessionErrors.NotFoundError>
   readonly assert: (input: AssertInput) => Effect.Effect<void, Error | SessionErrors.NotFoundError>
   readonly reply: (input: ReplyInput) => Effect.Effect<void, NotFoundError>
@@ -110,6 +140,11 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Permission") {}
+
+export const evaluateEffective = Effect.fn("PermissionV2.evaluateEffective")(function* (input: EvaluateEffectiveInput) {
+  const service = yield* Service
+  return yield* service.evaluateEffective(input)
+})
 
 interface Pending {
   readonly request: Request
@@ -155,21 +190,23 @@ const layer = Layer.effect(
       return [...(agent?.permissions ?? missingAgentPermissions), ...(session.permissionCeiling ?? [])]
     })
 
-    function denied(input: AssertInput, rules: Permission.Ruleset) {
-      return input.resources.some((resource) => evaluate(input.action, resource, rules).effect === "deny")
-    }
-
-    function relevant(input: AssertInput, rules: Permission.Ruleset) {
-      return rules.filter((rule) => Wildcard.match(input.action, rule.action))
-    }
-
     const evaluateInput = Effect.fnUntraced(function* (input: AssertInput) {
       const rules = yield* configured(input.sessionID, input.agent)
-      if (denied(input, rules)) return { effect: "deny" as const, rules }
-      const all = [...rules, ...(yield* savedRules())]
-      const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)
-      const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
-      return { effect, rules: all }
+      if (denied(input, rules)) return decision(input, rules, [])
+      return decision(input, rules, yield* savedRules())
+    })
+
+    const evaluateEffective = Effect.fn("PermissionV2.evaluateEffectiveService")(function* (
+      input: EvaluateEffectiveInput,
+    ) {
+      return (
+        yield* evaluateInput({
+          sessionID: input.sessionID,
+          agent: input.agent,
+          action: input.action,
+          resources: [input.resource],
+        })
+      ).effect
     })
 
     function request(input: AssertInput): Request {
@@ -339,7 +376,7 @@ const layer = Layer.effect(
       return Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID)
     })
 
-    return Service.of({ ask, assert, reply, get, forSession, list })
+    return Service.of({ evaluateEffective, ask, assert, reply, get, forSession, list })
   }),
 )
 

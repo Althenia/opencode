@@ -2,6 +2,7 @@ export * as SubagentTool from "./subagent"
 
 import { ToolFailure } from "@opencode-ai/ai"
 import type { Context as PluginContext } from "@opencode-ai/plugin/v2/effect/plugin"
+import { DescriptionText, PromptText } from "@opencode-ai/schema/session-orchestration"
 import { Cause, Effect, Schema } from "effect"
 import { AgentV2 } from "../agent"
 import { Config } from "../config"
@@ -21,8 +22,8 @@ const backgroundStarted = (sessionID: SessionSchema.ID) =>
 
 export const Input = Schema.Struct({
   agent: Schema.String.annotate({ description: "The configured agent to run as the subagent" }),
-  description: Schema.String.annotate({ description: "A short description of the subagent's task" }),
-  prompt: Schema.String.annotate({ description: "The task for the subagent to perform" }),
+  description: DescriptionText.annotate({ description: "A short description of the subagent's task" }),
+  prompt: PromptText.annotate({ description: "The task for the subagent to perform" }),
   background: Schema.Boolean.pipe(Schema.optional).annotate({
     description:
       "Run the subagent in the background and return immediately. You will be notified when it completes. DO NOT poll its progress.",
@@ -44,6 +45,26 @@ export const description = [
   "Background mode (background=true) launches it asynchronously and returns immediately; you are notified when it finishes.",
   "Use background only for independent work that can run while you continue elsewhere.",
 ].join("\n")
+
+export const availableAgents = Effect.fn("SubagentTool.availableAgents")(function* (input: {
+  readonly permission: Pick<PermissionV2.Interface, "evaluateEffective">
+  readonly sessionID: SessionSchema.ID
+  readonly agent: AgentV2.ID
+  readonly candidates: ReadonlyArray<AgentV2.Info>
+}) {
+  const evaluated = yield* Effect.forEach(input.candidates, (candidate) => {
+    if (candidate.mode === "primary" || candidate.hidden) return Effect.succeed(undefined)
+    return input.permission.evaluateEffective({
+      sessionID: input.sessionID,
+      agent: input.agent,
+      action: name,
+      resource: candidate.id,
+    }).pipe(Effect.map((effect) => (effect === "deny" ? undefined : candidate)))
+  })
+  return evaluated
+    .filter((candidate): candidate is AgentV2.Info => candidate !== undefined)
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+})
 
 export const Plugin = {
   id: "opencode.tool.subagent",
@@ -232,14 +253,12 @@ export const Plugin = {
         if (!tool) return
         const selected = yield* agents.resolve(event.agent)
         if (!selected) return
-        const available = (yield* agents.list())
-          .filter(
-            (agent) =>
-              agent.mode !== "primary" &&
-              !agent.hidden &&
-              PermissionV2.evaluate(name, agent.id, selected.permissions).effect !== "deny",
-          )
-          .toSorted((a, b) => a.id.localeCompare(b.id))
+        const available = yield* availableAgents({
+          permission,
+          sessionID: event.sessionID,
+          agent: selected.id,
+          candidates: yield* agents.list(),
+        }).pipe(Effect.catchTag("Session.NotFoundError", () => Effect.succeed([])))
         if (available.length === 0) return
         tool.description = [
           tool.description,

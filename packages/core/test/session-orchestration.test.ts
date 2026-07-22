@@ -248,11 +248,14 @@ describe("Session orchestration helpers", () => {
     }),
   )
 
-  it.effect("truncates bounded excerpts on UTF-8 code point boundaries", () =>
+  it.effect("truncates bounded excerpts and failures on UTF-8 code point boundaries", () =>
     Effect.sync(() => {
       const truncated = SessionOrchestration.truncateUtf8("€".repeat(4096), 4 * 1024)
       expect(Buffer.byteLength(truncated)).toBeLessThanOrEqual(4 * 1024)
       expect(truncated.endsWith("€")).toBe(true)
+      const failure = SessionOrchestration.failureText("€".repeat(16 * 1024))
+      expect(Buffer.byteLength(failure)).toBeLessThanOrEqual(16 * 1024)
+      expect(failure.endsWith("€")).toBe(true)
     }),
   )
 

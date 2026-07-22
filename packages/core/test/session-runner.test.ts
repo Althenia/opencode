@@ -229,6 +229,7 @@ const permissionFail = Tool.make({
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
+    evaluateEffective: () => Effect.die(new Error("unused PermissionV2.evaluateEffective")),
     assert: () => Effect.die("unused"),
     ask: () => Effect.die("unused"),
     reply: () => Effect.die("unused"),

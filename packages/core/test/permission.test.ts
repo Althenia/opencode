@@ -231,6 +231,61 @@ describe("PermissionV2", () => {
     }),
   )
 
+  it.effect("exposes the same effective decision used by permission enforcement", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "subagent", resource: "reviewer", effect: "allow" }])
+      const sessionID = SessionV2.ID.make("ses_test")
+
+      expect(
+        yield* PermissionV2.evaluateEffective({
+          sessionID,
+          agent: AgentV2.ID.make("test"),
+          action: "subagent",
+          resource: "reviewer",
+        }),
+      ).toBe("allow")
+      expect(
+        yield* PermissionV2.evaluateEffective({
+          sessionID,
+          agent: AgentV2.ID.make("test"),
+          action: "subagent",
+          resource: "analyst",
+        }),
+      ).toBe("ask")
+
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({ projectID: Project.ID.global, action: "subagent", resources: ["analyst"] })
+      expect(
+        yield* PermissionV2.evaluateEffective({
+          sessionID,
+          agent: AgentV2.ID.make("test"),
+          action: "subagent",
+          resource: "analyst",
+        }),
+      ).toBe("allow")
+
+      const { db } = yield* Database.Service
+      yield* db
+        .update(SessionTable)
+        .set({
+          metadata: SessionPermissionCeiling.write(undefined, [
+            { action: "subagent", resource: "reviewer", effect: "deny" },
+          ]),
+        })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      expect(
+        yield* PermissionV2.evaluateEffective({
+          sessionID,
+          agent: AgentV2.ID.make("test"),
+          action: "subagent",
+          resource: "reviewer",
+        }),
+      ).toBe("deny")
+    }),
+  )
+
   it.effect("allows managed output reads without granting external directory access", () =>
     Effect.gen(function* () {
       yield* setup([

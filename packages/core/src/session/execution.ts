@@ -140,7 +140,7 @@ export const layer = Layer.effect(
           sessionID,
           change: {
             type: "failed",
-            error: outcome.error.message,
+            error: SessionOrchestration.truncateUtf8(outcome.error.message, 16 * 1024),
             excerpt: SessionOrchestration.truncateUtf8(outcome.error.message, 16 * 1024),
           },
         })
