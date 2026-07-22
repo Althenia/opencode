@@ -8,7 +8,8 @@ import { makeGlobalNode } from "../effect/app-node"
 import { Cause, Context, Effect, Layer, PubSub, Schema, Scope, Stream } from "effect"
 import { KeyedMutex } from "../effect/keyed-mutex"
 import { lazy } from "../util/lazy"
-import { readdirSync, statSync, watch } from "node:fs"
+import { watch } from "node:fs"
+import { stat } from "node:fs/promises"
 import path from "path"
 import { Glob } from "../util/glob"
 import { createRequire } from "node:module"
@@ -179,9 +180,6 @@ function subscribeDirectory(
 
 function subscribeDirectoryFallback(directory: string, ignore: string[], pubsub: PubSub.PubSub<Update>) {
   const known = new Set<string>()
-  try {
-    for (const item of readdirSync(directory, { recursive: true })) known.add(path.resolve(directory, item.toString()))
-  } catch {}
 
   const ignored = (target: string) => {
     const relative = path.relative(directory, target).split(path.sep).join("/")
@@ -192,24 +190,30 @@ function subscribeDirectoryFallback(directory: string, ignore: string[], pubsub:
   }
 
   let pending = Promise.resolve()
-  const subscription = watch(directory, { recursive: true }, (_event, file) => {
+  const subscription = watch(directory, { recursive: true }, (event, file) => {
     if (!file) return
     const target = path.resolve(directory, file.toString())
     if (ignored(target)) return
     pending = pending
-      .then(() => {
-        let exists = false
-        try {
-          statSync(target)
-          exists = true
-        } catch {}
+      .then(async () => {
+        if (event === "change") {
+          known.add(target)
+          PubSub.publishUnsafe(pubsub, { path: target, type: "update" } satisfies Update)
+          return
+        }
+
+        const exists = await stat(target).then(
+          () => true,
+          () => false,
+        )
         if (exists) {
           const type = known.has(target) ? "update" : "create"
           known.add(target)
           PubSub.publishUnsafe(pubsub, { path: target, type } satisfies Update)
           return
         }
-        if (!known.delete(target)) return
+
+        known.delete(target)
         for (const item of known) if (item.startsWith(`${target}${path.sep}`)) known.delete(item)
         PubSub.publishUnsafe(pubsub, { path: target, type: "delete" } satisfies Update)
       })
