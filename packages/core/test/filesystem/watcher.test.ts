@@ -127,6 +127,30 @@ function noUpdate<E>(check: (event: WatcherEvent) => boolean, trigger: Effect.Ef
   )
 }
 
+it.live("publishes directory changes through the recursive fallback", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (value) => Effect.promise(() => value[Symbol.asyncDispose]()),
+    )
+    const fs = yield* FSUtil.Service
+    const watcher = yield* Watcher.Service
+    const file = path.join(tmp.path, "fallback.txt")
+    const update = yield* watcher
+      .subscribe({ path: tmp.path, type: "directory" })
+      .pipe(
+        Stream.filter((event) => event.path === file),
+        Stream.take(1),
+        Stream.runHead,
+        Effect.forkScoped({ startImmediately: true }),
+      )
+    yield* Effect.sleep("50 millis")
+    yield* fs.writeFileString(file, "fallback")
+    const event = yield* Fiber.join(update).pipe(Effect.timeout("5 seconds"))
+    expect(event.valueOrUndefined).toEqual({ path: file, type: "create" })
+  }).pipe(Effect.provide(AppNodeBuilder.build(Watcher.configured({ native: false })))),
+)
+
 function ready(directory: string) {
   const file = path.join(directory, `.watcher-${Math.random().toString(36).slice(2)}`)
   return Effect.gen(function* () {

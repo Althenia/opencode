@@ -124,7 +124,11 @@ const resolve = Effect.fn("PluginSupervisor.resolve")(function* (
   const packages = new Map<string, PluginV2.Versioned>()
   const plugins = () => [...definitions, ...packages.values()]
 
+  const seen = new Set<string>()
   for (const operation of operations) {
+    const signature = JSON.stringify(operation)
+    if (seen.has(signature)) continue
+    seen.add(signature)
     if (operation.type === "remove") {
       plugins()
         .filter((plugin) => matches(operation.target, plugin.id))
@@ -177,7 +181,15 @@ const load = Effect.fn("PluginSupervisor.load")(function* (operation: Extract<Op
         : `${entrypoint}?mtime=${operation.mtime}`
   yield* Effect.log({ msg: "loading plugin", id: operation.target, entrypoint: source })
   const mod = yield* Effect.promise(() => importModule(source))
-  const value = (yield* Schema.decodeUnknownEffect(PluginModule)(mod)).default
+  const decoded = Schema.decodeUnknownOption(PluginModule)(mod)
+  if (Option.isNone(decoded)) {
+    return yield* Effect.fail(
+      new Error(
+        `Plugin does not implement the V2 contract: ${operation.target}. Export Plugin.define({ id, setup }) or Plugin.define({ id, effect }); V1 plugins must be migrated.`,
+      ),
+    )
+  }
+  const value = decoded.value.default
   const plugin = "effect" in value ? value : PluginPromise.fromPromise(value)
   return {
     id: plugin.id,

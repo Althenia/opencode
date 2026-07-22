@@ -222,6 +222,7 @@ test("concurrent service processes elect one server", async () => {
   try {
     const info = await waitForInfo(registration)
     const winner = processes.find((process) => process.pid === info.pid)
+    if (!winner) throw new Error(`Registered service process ${info.pid} was not one of the contenders`)
     const losers = processes.filter((process) => process.pid !== info.pid)
     const exited = await Promise.all(
       losers.map((process) => Promise.race([process.exited.then(() => true), Bun.sleep(60_000).then(() => false)])),
@@ -233,11 +234,10 @@ test("concurrent service processes elect one server", async () => {
         async (process) => (await new Response(process.stdout).text()) + (await new Response(process.stderr).text()),
       ),
     )
-    expect(
-      losers.map((process) => process.exitCode),
-      errors.filter(Boolean).join("\n"),
-    ).toEqual(losers.map(() => 0))
-    expect(winner?.exitCode).toBe(null)
+    const loserOutput = errors.filter(Boolean).join("\n")
+    expect(losers.map((process) => process.exitCode), loserOutput).toEqual(losers.map(() => 0))
+    expect(loserOutput).not.toContain("database is locked")
+    expect(winner.exitCode).toBe(null)
     expect(new URL(info.url).port).toBe(String(port))
     expect((await Bun.file(config).json()).password).toBe(info.password)
     expect(await Bun.file(registration + ".lock").exists()).toBe(false)
@@ -278,7 +278,9 @@ test("concurrent service processes elect one server", async () => {
     ).toEqual({ timeSuspended: null })
     expect(await waitForExecutionStart(database, sessionID)).toBe(1)
     await Effect.runPromise(Service.stop({ file: registration }).pipe(Effect.provide(NodeFileSystem.layer)))
-    await winner?.exited
+    await winner.exited
+    const winnerOutput = (await new Response(winner.stdout).text()) + (await new Response(winner.stderr).text())
+    expect(winnerOutput).not.toContain("database is locked")
     expect(await Bun.file(registration).exists()).toBe(false)
   } finally {
     processes.forEach((process) => process.kill("SIGTERM"))

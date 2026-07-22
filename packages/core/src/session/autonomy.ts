@@ -84,11 +84,31 @@ export function isCompleted(progress: string) {
   return progress.includes(CompletionMarker)
 }
 
-export function continuationPrompt(goal: Goal) {
+export function requestsUserInput(value: string) {
+  const text = value.trim()
+  if (!text) return false
+  const tail = text.slice(-2_000)
+  if (/\?\s*$/.test(tail)) return true
+  return /(?:^|[\n.!?]\s*)(?:please\s+)?(?:choose|select|provide|confirm|clarify|decide)\b[^.!?]*[.!]?\s*$/i.test(
+    tail,
+  )
+}
+
+export function continuationPrompt(goal: Goal, input: { readonly latestAssistantText?: string } = {}) {
+  const latestAssistantText = input.latestAssistantText?.trim()
+  const proxy =
+    latestAssistantText && requestsUserInput(latestAssistantText)
+      ? [
+          "The assistant is waiting for user input.",
+          `Latest assistant request: ${latestAssistantText.slice(-2_000)}`,
+          "Answer it on the user's behalf using the active goal, conversation context, and safest reasonable default before continuing.",
+        ]
+      : []
   return [
     "Continue autonomously toward the active user goal.",
     `Goal: ${goal.text}`,
     `Continuation: ${goal.iteration + 1}/${goal.maxIterations}`,
+    ...proxy,
     "Use the conversation and current repository state to choose the next useful action.",
     "Answer routine blockers yourself using the safest reasonable default.",
     `When the goal is actually achieved, include exactly ${CompletionMarker} in the final response.`,

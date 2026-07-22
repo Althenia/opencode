@@ -105,7 +105,7 @@ export const layer = Layer.effect(
       const input = SessionPending.Message.make({
         type: "synthetic",
         data: {
-          text: SessionAutonomy.continuationPrompt(advanced.goal),
+          text: SessionAutonomy.continuationPrompt(advanced.goal, { latestAssistantText: progress }),
           description: "Autonomous goal continuation",
           metadata: { autonomy: { mode: "goal", iteration: advanced.goal.iteration } },
         },

@@ -724,23 +724,24 @@ test("direct queued prompt panel renders pending prompt actions", async () => {
   }
 })
 
-// OpenTUI currently crashes Bun in the full `test/cli/run` directory run here.
-// Re-enable after the upstream OpenTUI fix lands in this repo.
-test.skip("direct footer recreates the frame across command panel transitions", async () => {
+test("direct footer recreates the frame across command panel transitions", async () => {
   const app = await renderFooter()
 
   try {
     await app.renderOnce()
 
     for (let index = 0; index < 3; index++) {
-      const composerFrame = footerComposerFrame(app.renderer.root)
+      const composer = app.renderer.currentFocusedEditor
+      expect(composer).toBeDefined()
       app.mockInput.pressKey("p", { ctrl: true })
       await app.renderOnce()
 
       expect(app.captureCharFrame()).toContain("Commands")
-      expect(footerComposerFrame(app.renderer.root)).not.toBe(composerFrame)
+      expect(app.renderer.currentFocusedEditor).not.toBe(composer)
       app.mockInput.pressKey("c", { ctrl: true })
       await app.renderOnce()
+      expect(app.renderer.currentFocusedEditor).toBeDefined()
+      expect(app.renderer.currentFocusedEditor).not.toBe(composer)
       expect(app.captureCharFrame()).not.toContain("Commands")
       expect(app.captureCharFrame()).not.toContain("┃")
       expect(app.captureCharFrame()).not.toContain("█")
@@ -750,7 +751,7 @@ test.skip("direct footer recreates the frame across command panel transitions", 
   }
 })
 
-test.skip("direct footer dispatches leader variant binding only when leader is registered", async () => {
+test("direct footer dispatches leader variant binding only when leader is registered", async () => {
   const calls: string[] = []
   const app = await renderFooter({
     tuiConfig: createTuiResolvedConfig({ keybinds: { leader: "ctrl+x", variant_cycle: "<leader>t" } }),
@@ -926,9 +927,7 @@ test("direct footer tags skill slash submissions with their catalog source", asy
   }
 })
 
-// OpenTUI currently segfaults Bun while tearing down this composer-to-skill-panel transition.
-// Re-enable after the upstream renderer teardown fix lands.
-test.skip("direct footer skill picker inserts an editable bound skill command", async () => {
+test("direct footer skill picker inserts an editable bound skill command", async () => {
   const submits: RunPrompt[] = []
   const app = await renderFooter({
     commands: [command({ name: "new", description: "Skill named new", source: "skill" })],
@@ -966,9 +965,7 @@ test.skip("direct footer skill picker inserts an editable bound skill command", 
   }
 })
 
-// OpenTUI currently segfaults Bun while tearing down this skill-panel close transition.
-// Re-enable after the upstream renderer teardown fix lands.
-test.skip("direct footer clears the synthetic skills draft when the panel closes", async () => {
+test("direct footer clears the synthetic skills draft when the panel closes", async () => {
   const submits: RunPrompt[] = []
   const app = await renderFooter({
     commands: [command({ name: "formatter", description: "Apply formatter fixes", source: "skill" })],

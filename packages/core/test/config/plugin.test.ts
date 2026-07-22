@@ -18,7 +18,7 @@ import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
-import { Effect, Logger } from "effect"
+import { Cause, Effect, Logger } from "effect"
 import { Database } from "../../src/database/database"
 import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
@@ -111,13 +111,15 @@ describe("PluginSupervisor config", () => {
     ),
   )
 
-  it.live("logs invalid packages and continues loading", () => {
+  it.live("logs concise invalid plugin diagnostics and continues loading", () => {
     const output: string[] = []
+    const diagnostics: string[] = []
     const logger = Logger.map(Logger.formatStructured, (entry) => {
       if (!Array.isArray(entry.message) || entry.message[0] !== "failed to load plugin") return
       const details = entry.message[1]
       if (typeof details !== "object" || details === null || !("target" in details)) return
       if (typeof details.target === "string") output.push(details.target)
+      if ("cause" in details) diagnostics.push(Cause.pretty(details.cause as Cause.Cause<unknown>))
     })
     return withLocation(
       {
@@ -141,6 +143,24 @@ describe("PluginSupervisor config", () => {
           path.join(import.meta.dir, "../plugin/fixtures/missing-plugin.ts"),
           path.join(import.meta.dir, "../plugin/fixtures/invalid-plugin.ts"),
         ])
+        expect(diagnostics.some((message) => message.includes("does not implement the V2 contract"))).toBe(true)
+        expect(diagnostics.join("\n")).not.toContain("Expected readonly")
+      }),
+    ).pipe(Effect.provide(Logger.layer([logger])))
+  })
+
+  it.live("loads identical configured plugin targets once", () => {
+    const plugin = path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts")
+    let loads = 0
+    const logger = Logger.map(Logger.formatStructured, (entry) => {
+      const text = JSON.stringify(entry.message)
+      if (text.includes("loading plugin") && text.includes(plugin)) loads++
+    })
+    return withLocation(
+      { plugins: ["-*", plugin, plugin] },
+      Effect.gen(function* () {
+        yield* ready()
+        expect(loads).toBe(1)
       }),
     ).pipe(Effect.provide(Logger.layer([logger])))
   })
