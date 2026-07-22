@@ -1,3 +1,4 @@
+import type { SessionOrchestrationTask } from "@opencode-ai/client"
 import { createMemo, For, Show, createEffect, onMount, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { TextAttributes, ScrollBoxRenderable } from "@opentui/core"
@@ -13,14 +14,61 @@ interface SubagentEntry {
   sessionID: string
   agent: string
   title: string
-  status: string
+  detail?: string
+  status: SessionOrchestrationTask["state"]
   model?: string
   current: boolean
+}
+
+type CancelClient = {
+  readonly api: {
+    readonly session: {
+      readonly subagent: {
+        readonly cancel: (input: { parentID: string; childID: string }) => Promise<unknown>
+      }
+    }
+  }
 }
 
 export function formatSubagentModel(model: { providerID: string; id: string; variant?: string } | undefined) {
   if (!model) return
   return `${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}`
+}
+
+export function entriesFromTasks(
+  tasks: ReadonlyArray<SessionOrchestrationTask>,
+  currentSessionID: string,
+): SubagentEntry[] {
+  return tasks.map((task) => ({
+    sessionID: task.sessionID,
+    agent: Locale.titlecase(task.agent),
+    title: task.description,
+    detail: task.question?.text ?? task.progress?.text,
+    status: task.state,
+    model: formatSubagentModel(task.model),
+    current: task.sessionID === currentSessionID,
+  }))
+}
+
+export function taskStatusLabel(state: SessionOrchestrationTask["state"]) {
+  return {
+    starting: "Starting",
+    running: "Running",
+    waiting: "Waiting",
+    cancelling: "Cancelling",
+    cancelled: "Cancelled",
+    completed: "Completed",
+    failed: "Failed",
+    lost: "Lost",
+  }[state]
+}
+
+export function canCancelSubagent(state: SessionOrchestrationTask["state"]) {
+  return state === "running" || state === "waiting"
+}
+
+export function cancelManagedSubagent(client: CancelClient, parentID: string, childID: string) {
+  return client.api.session.subagent.cancel({ parentID, childID })
 }
 
 export function SubagentMetadata(props: { model?: string; status?: string; active: boolean }) {
@@ -60,54 +108,13 @@ export function SubagentsTab(props: { sessionID: string }) {
   const shortcuts = Keymap.useShortcuts()
 
   const session = createMemo(() => data.session.get(props.sessionID))
+  const parentID = createMemo(() => session()?.parentID ?? props.sessionID)
+  const entries = createMemo(() => entriesFromTasks(data.session.subagent.list(parentID()), route.sessionID))
 
-  const entries = createMemo<SubagentEntry[]>(() => {
-    const current = session()
-    if (!current) return []
-
-    const result: SubagentEntry[] = []
-
-    if (current.parentID) {
-      const siblings = data.session.list().filter((s) => s.parentID === current.parentID)
-      for (const sibling of siblings) {
-        const agentMatch = sibling.title.match(/@(\w+) subagent/)
-        const agent = sibling.agent
-          ? Locale.titlecase(sibling.agent)
-          : agentMatch
-            ? Locale.titlecase(agentMatch[1])
-            : "Subagent"
-        const name = agentMatch ? sibling.title.replace(agentMatch[0], "").trim() || sibling.title : sibling.title
-        result.push({
-          sessionID: sibling.id,
-          agent,
-          title: name,
-          status: data.session.status(sibling.id),
-          model: formatSubagentModel(sibling.model),
-          current: sibling.id === route.sessionID,
-        })
-      }
-    } else {
-      const children = data.session.list().filter((s) => s.parentID === props.sessionID)
-      for (const child of children) {
-        const agentMatch = child.title.match(/@(\w+) subagent/)
-        const agent = child.agent
-          ? Locale.titlecase(child.agent)
-          : agentMatch
-            ? Locale.titlecase(agentMatch[1])
-            : "Subagent"
-        const name = agentMatch ? child.title.replace(agentMatch[0], "").trim() || child.title : child.title
-        result.push({
-          sessionID: child.id,
-          agent,
-          title: name,
-          status: data.session.status(child.id),
-          model: formatSubagentModel(child.model),
-          current: child.id === route.sessionID,
-        })
-      }
-    }
-
-    return result
+  createEffect(() => {
+    if (!composer.active("subagents")) return
+    const id = parentID()
+    void data.session.subagent.sync(id).catch((error) => console.error("Failed to load durable subagent tasks", error))
   })
 
   const [store, setStore] = createStore({ selected: 0 })
@@ -115,9 +122,7 @@ export function SubagentsTab(props: { sessionID: string }) {
   let wasActive = false
   let scroll: ScrollBoxRenderable | undefined
 
-  const selected = createMemo(() => {
-    return store.selected
-  })
+  const selected = createMemo(() => store.selected)
   const selectedEntry = createMemo(() => entries()[selected()])
 
   createEffect(() => {
@@ -132,7 +137,7 @@ export function SubagentsTab(props: { sessionID: string }) {
     }
     const list = entries()
     if (selectedSessionID !== route.sessionID && list.length > 0) {
-      const currentIdx = list.findIndex((e) => e.current)
+      const currentIdx = list.findIndex((entry) => entry.current)
       const next = currentIdx >= 0 ? currentIdx : 0
       selectedSessionID = route.sessionID
       setStore("selected", next)
@@ -146,11 +151,7 @@ export function SubagentsTab(props: { sessionID: string }) {
 
   function moveTo(next: number, center = false) {
     setStore("selected", next)
-    scrollToSelection(center)
-  }
-
-  function scrollToSelection(center: boolean) {
-    scrollToIndex(selected(), center)
+    scrollToIndex(next, center)
   }
 
   function scrollToIndex(index: number, center: boolean) {
@@ -159,13 +160,8 @@ export function SubagentsTab(props: { sessionID: string }) {
       scroll.scrollTo(Math.max(0, index - Math.floor(scroll.viewport.height / 2)))
       return
     }
-    if (index >= scroll.scrollTop + scroll.viewport.height) {
-      scroll.scrollTo(index - scroll.viewport.height + 1)
-    }
-    if (index < scroll.scrollTop) {
-      scroll.scrollTo(index)
-      if (index === 0) scroll.scrollTo(0)
-    }
+    if (index >= scroll.scrollTop + scroll.viewport.height) scroll.scrollTo(index - scroll.viewport.height + 1)
+    if (index < scroll.scrollTop) scroll.scrollTo(index)
   }
 
   onMount(() => {
@@ -174,12 +170,12 @@ export function SubagentsTab(props: { sessionID: string }) {
       label: "Subagents",
       hints: () => {
         const entry = selectedEntry()
-        if (!entry || entry.status !== "running") return []
-        return [{ label: "interrupt", shortcut: shortcuts.get("composer.subagent.interrupt") ?? "" }]
+        if (!entry || !canCancelSubagent(entry.status)) return []
+        return [{ label: "cancel", shortcut: shortcuts.get("composer.subagent.interrupt") ?? "" }]
       },
       onClose: () => {
-        const parentID = session()?.parentID
-        if (parentID) navigate({ type: "session", sessionID: parentID })
+        const id = session()?.parentID
+        if (id) navigate({ type: "session", sessionID: id })
       },
     })
     onCleanup(cleanup)
@@ -225,13 +221,19 @@ export function SubagentsTab(props: { sessionID: string }) {
       },
       {
         id: "composer.subagent.interrupt",
-        title: "Interrupt subagent",
+        title: "Cancel subagent",
         group: "Composer",
         bind: "ctrl+d",
         run() {
           const entry = selectedEntry()
-          if (!entry || entry.status !== "running") return
-          void client.api.session.interrupt({ sessionID: entry.sessionID })
+          if (!entry || !canCancelSubagent(entry.status)) return
+          const id = parentID()
+          void cancelManagedSubagent(client, id, entry.sessionID)
+            .then(() => {
+              data.session.subagent.invalidate(id)
+              return data.session.subagent.sync(id)
+            })
+            .catch((error) => console.error("Failed to cancel durable subagent task", error))
         },
       },
     ],
@@ -239,15 +241,11 @@ export function SubagentsTab(props: { sessionID: string }) {
 
   return (
     <Show when={composer.active("subagents")}>
-      <scrollbox scrollbarOptions={{ visible: false }} maxHeight={5} ref={(r: ScrollBoxRenderable) => (scroll = r)}>
+      <scrollbox scrollbarOptions={{ visible: false }} maxHeight={5} ref={(value: ScrollBoxRenderable) => (scroll = value)}>
         <Show when={entries().length > 0} fallback={<text fg={themeV2.text.subdued}> No subagents</text>}>
           <For each={entries()}>
             {(entry, index) => {
               const active = createMemo(() => index() === selected())
-              const status = createMemo(() => {
-                if (entry.status === "running") return "Running"
-                return ""
-              })
               return (
                 <box
                   flexDirection="row"
@@ -279,9 +277,10 @@ export function SubagentsTab(props: { sessionID: string }) {
                       wrapMode="none"
                     >
                       {entry.agent}: {entry.title}
+                      <Show when={entry.detail}> — {entry.detail}</Show>
                     </text>
                   </box>
-                  <SubagentMetadata model={entry.model} status={status()} active={active()} />
+                  <SubagentMetadata model={entry.model} status={taskStatusLabel(entry.status)} active={active()} />
                 </box>
               )
             }}

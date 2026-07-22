@@ -25,6 +25,7 @@ import type {
   SessionInfo,
   SessionDiagnosticsOutput,
   SessionPendingInfo,
+  SessionOrchestrationTask,
   SessionTodoInfo,
   ShellInfo,
   SkillInfo,
@@ -76,6 +77,7 @@ type Store = {
     diagnostics: Record<string, SessionDiagnosticsOutput>
     message: Record<string, SessionMessageInfo[]>
     pending: Record<string, SessionPendingInfo[]>
+    subagent: Record<string, SessionOrchestrationTask[]>
     todo: Record<string, SessionTodoInfo[]>
     input: Record<string, string[]>
     permission: Record<string, PermissionV2Request[]>
@@ -138,6 +140,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         diagnostics: {},
         message: {},
         pending: {},
+        subagent: {},
         todo: {},
         input: {},
         permission: {},
@@ -279,6 +282,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       messageIndex.delete(sessionID)
       sync.invalidate(`session:${sessionID}`)
       sync.invalidate(`session.pending:${sessionID}`)
+      sync.invalidate(`session.subagent:${sessionID}`)
       sync.invalidate(`session.message:${sessionID}`)
       sync.invalidate(`session.diagnostics:${sessionID}`)
       sync.invalidate(`session.permission:${sessionID}`)
@@ -291,6 +295,12 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           delete draft.message[sessionID]
           delete draft.diagnostics[sessionID]
           delete draft.pending[sessionID]
+          delete draft.subagent[sessionID]
+          for (const [parentID, tasks] of Object.entries(draft.subagent)) {
+            const next = tasks.filter((task) => task.sessionID !== sessionID)
+            if (next.length === 0) delete draft.subagent[parentID]
+            else draft.subagent[parentID] = next
+          }
           delete draft.input[sessionID]
           delete draft.permission[sessionID]
           delete draft.form[sessionID]
@@ -312,6 +322,20 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         case "session.deleted":
           removeSession(event.data.sessionID)
           break
+        case "session.task.updated": {
+          const parentID =
+            event.data.change.type === "launched"
+              ? event.data.change.parentID
+              : Object.entries(store.session.subagent).find(([, tasks]) =>
+                  tasks.some((task) => task.sessionID === event.data.sessionID),
+                )?.[0] ?? store.session.info[event.data.sessionID]?.parentID
+          if (!parentID || store.session.subagent[parentID] === undefined) break
+          result.session.subagent.invalidate(parentID)
+          void result.session.subagent.sync(parentID).catch((error) =>
+            console.error("Failed to refresh durable subagent tasks", error),
+          )
+          break
+        }
         case "session.usage.updated":
           if (store.session.info[event.data.sessionID])
             setStore("session", "info", event.data.sessionID, {
@@ -973,6 +997,24 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           },
           invalidate(sessionID: string) {
             sync.invalidate(`session.pending:${sessionID}`)
+          },
+        },
+        subagent: {
+          list(parentID: string) {
+            return store.session.subagent[parentID] ?? []
+          },
+          sync(parentID: string) {
+            return sync.run(`session.subagent:${parentID}`, async () => {
+              setStore(
+                "session",
+                "subagent",
+                parentID,
+                reconcile(await client.api.session.subagent.list({ parentID })),
+              )
+            })
+          },
+          invalidate(parentID: string) {
+            sync.invalidate(`session.subagent:${parentID}`)
           },
         },
         sync(sessionID: string) {

@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
+import type { SessionOrchestrationTask } from "@opencode-ai/client"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 
@@ -42,6 +43,71 @@ test("formats provider, model, and optional variant", () => {
     "openai/gpt-5.6-sol",
   )
   expect(module.formatSubagentModel(undefined)).toBeUndefined()
+})
+
+test("derives rows only from durable managed tasks", () => {
+  const tasks: SessionOrchestrationTask[] = [
+    {
+      sessionID: "ses_waiting",
+      parentID: "ses_parent",
+      description: "Review implementation",
+      agent: "reviewer",
+      model: { providerID: "openai", id: "gpt-5.6", variant: "high" },
+      background: true,
+      state: "waiting",
+      question: { id: "qst_review", text: "Proceed?", time: 1 },
+      revision: 2,
+      time: { created: 1, updated: 2 },
+    },
+    {
+      sessionID: "ses_lost",
+      parentID: "ses_parent",
+      description: "Inspect runtime",
+      agent: "explore",
+      model: { providerID: "openai", id: "gpt-5.6-luna" },
+      background: true,
+      state: "lost",
+      revision: 3,
+      time: { created: 2, updated: 3 },
+    },
+  ]
+
+  expect(module.entriesFromTasks(tasks, "ses_waiting")).toEqual([
+    expect.objectContaining({ sessionID: "ses_waiting", title: "Review implementation", status: "waiting", current: true }),
+    expect.objectContaining({ sessionID: "ses_lost", title: "Inspect runtime", status: "lost", current: false }),
+  ])
+  expect(module.taskStatusLabel("waiting")).toBe("Waiting")
+  expect(module.taskStatusLabel("failed")).toBe("Failed")
+  expect(module.taskStatusLabel("lost")).toBe("Lost")
+  expect(module.taskStatusLabel("cancelled")).toBe("Cancelled")
+})
+
+test("cancels waiting managed tasks through the durable endpoint", async () => {
+  const calls: Array<{ parentID: string; childID: string }> = []
+  let interrupted = false
+  const client = {
+    api: {
+      session: {
+        interrupt: async () => {
+          interrupted = true
+        },
+        subagent: {
+          cancel: async (input: { parentID: string; childID: string }) => {
+            calls.push(input)
+            return { state: "cancelled" }
+          },
+        },
+      },
+    },
+  }
+
+  expect(module.canCancelSubagent("waiting")).toBe(true)
+  expect(module.canCancelSubagent("running")).toBe(true)
+  expect(module.canCancelSubagent("completed")).toBe(false)
+  await module.cancelManagedSubagent(client, "ses_parent", "ses_child")
+
+  expect(calls).toEqual([{ parentID: "ses_parent", childID: "ses_child" }])
+  expect(interrupted).toBe(false)
 })
 
 test("renders model and running status on one row", async () => {

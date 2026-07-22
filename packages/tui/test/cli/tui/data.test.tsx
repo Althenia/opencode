@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import type { OpenCodeEvent } from "@opencode-ai/client"
+import type { OpenCodeEvent, SessionOrchestrationTask } from "@opencode-ai/client"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { EventV2 } from "@opencode-ai/core/event"
 import { createEffect, onMount, type ParentProps } from "solid-js"
@@ -2833,6 +2833,72 @@ test("loads and manually refreshes privacy-safe self-improvement status", async 
     expect(data.location.selfImprovement.get(location)?.evidence).toEqual({ count: 2, lastObservedAt: 1_000 })
     expect(requests).toBe(2)
     expect(JSON.stringify(data.location.selfImprovement.get(location))).not.toContain("metrics")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("syncs durable subagent tasks and refreshes them from task events", async () => {
+  const events = createEventStream()
+  let requests = 0
+  let state: SessionOrchestrationTask["state"] = "waiting"
+  const task = (): SessionOrchestrationTask => ({
+    sessionID: "ses_child",
+    parentID: "ses_parent",
+    description: "Review implementation",
+    agent: "reviewer",
+    model: { providerID: "openai", id: "gpt-5.6", variant: "high" },
+    background: true,
+    state,
+    question:
+      state === "waiting"
+        ? { id: "qst_review", text: "Proceed?", data: { risk: "low" }, time: 1 }
+        : undefined,
+    revision: requests,
+    time: { created: 1, updated: requests + 1 },
+  })
+  const calls = createFetch((url) => {
+    if (url.pathname !== "/api/session/ses_parent/subagent") return undefined
+    requests++
+    return json({ data: [task()] })
+  }, events)
+  let data!: ReturnType<typeof useData>
+
+  function Probe() {
+    data = useData()
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <ClientProvider api={createApi(calls.fetch)}>
+        <ProjectProvider>
+          <DataProvider>
+            <Probe />
+          </DataProvider>
+        </ProjectProvider>
+      </ClientProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    await data.session.subagent.sync("ses_parent")
+    const waiting = data.session.subagent.list("ses_parent")[0]
+    expect(waiting?.sessionID).toBe("ses_child")
+    expect(waiting?.state).toBe("waiting")
+    expect(waiting?.question?.text).toBe("Proceed?")
+
+    state = "failed"
+    emitEvent(events, {
+      id: "evt_task_failed",
+      created: 3,
+      type: "session.task.updated",
+      durable: durable("ses_child", 3),
+      data: { sessionID: "ses_child", change: { type: "failed", error: "review failed", excerpt: "failed" } },
+    })
+
+    await wait(() => data.session.subagent.list("ses_parent")[0]?.state === "failed")
+    expect(requests).toBe(2)
   } finally {
     app.renderer.destroy()
   }
