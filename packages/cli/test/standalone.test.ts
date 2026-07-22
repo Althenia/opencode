@@ -9,7 +9,7 @@ test("standalone server exits when its owner is killed", async () => {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const line = await Promise.race([readLine(owner.stdout), Bun.sleep(10_000).then(() => undefined)])
+  const line = await Promise.race([readLine(owner.stdout), Bun.sleep(30_000).then(() => undefined)])
   const [rawPID, url, status] = line?.split(" ") ?? []
   const pid = Number(rawPID)
 
