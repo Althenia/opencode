@@ -217,6 +217,7 @@ describe("ModelsDevPlugin", () => {
           connections: [],
         }),
       ])
+      expect((yield* catalog.provider.get(ProviderV2.ID.make("acme")))?.package).toBe("")
     }).pipe(Effect.provide(models(path.join(import.meta.dir, "fixtures", "models-dev.json")))),
   )
 
@@ -550,5 +551,13 @@ describe("ModelsDevPlugin", () => {
         },
       ])
     }).pipe(Effect.provide(models(path.join(import.meta.dir, "fixtures", "models-dev-reasoning.json")))),
+  )
+
+  it.effect("ignores parseable models.dev files with an invalid shape", () =>
+    Effect.gen(function* () {
+      const service = yield* ModelsDev.Service
+
+      expect(yield* service.get()).toEqual([])
+    }).pipe(Effect.provide(models(path.join(import.meta.dir, "fixtures", "models-dev-invalid.json")))),
   )
 })

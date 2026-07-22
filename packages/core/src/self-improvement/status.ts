@@ -2,14 +2,15 @@ export * as SelfImprovementStatus from "./status"
 
 import { and, asc, count, eq, max } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
-import { SelfImprovementStatus as StatusSchema, SelfImprovementLifecycle } from "@opencode-ai/schema"
+import { SelfImprovementLifecycle } from "@opencode-ai/schema"
+import { EmptyReason, GeneratedSlot, Info } from "@opencode-ai/schema/self-improvement-status"
 import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { Location } from "../location"
 import { SelfImprovementAutomation } from "./automation"
 import { SelfImprovementArtifactTable, SelfImprovementArtifactVersionTable } from "./artifact.sql"
 import { SelfImprovementContextDesiredStateTable } from "./context.sql"
-import { locationID as makeLocationID } from "./contracts"
+import { SelfImprovementContracts } from "./contracts"
 import { SelfImprovementSessionEvidenceTable } from "./session-evidence.sql"
 
 export interface EvidenceSummary {
@@ -20,16 +21,16 @@ export interface EvidenceSummary {
 export interface Dependencies {
   readonly automation: Effect.Effect<SelfImprovementAutomation.RuntimeStatus>
   readonly evidence: Effect.Effect<EvidenceSummary>
-  readonly slots: Effect.Effect<ReadonlyArray<StatusSchema.GeneratedSlot>>
+  readonly slots: Effect.Effect<ReadonlyArray<GeneratedSlot>>
 }
 
 export interface Interface {
-  readonly get: Effect.Effect<StatusSchema.Info>
+  readonly get: Effect.Effect<Info>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SelfImprovementStatus") {}
 
-const emptyReason = (enabled: boolean): StatusSchema.EmptyReason =>
+const emptyReason = (enabled: boolean): EmptyReason =>
   enabled
     ? {
         code: "no-terminal-evidence",
@@ -69,7 +70,7 @@ export function make(dependencies: Dependencies): Interface {
           const order = { active: 0, shadow: 1, canary: 2 } as const
           return order[left.slot] - order[right.slot] || String(left.name).localeCompare(String(right.name))
         }),
-      } satisfies StatusSchema.Info)),
+      } satisfies Info)),
     ),
   }
 }
@@ -80,7 +81,7 @@ const layer = Layer.effect(
     const db = (yield* Database.Service).db
     const location = yield* Location.Service
     const automation = yield* SelfImprovementAutomation.Service
-    const locationID = makeLocationID(
+    const locationID = SelfImprovementContracts.locationID(
       Location.Ref.make({ directory: location.directory, workspaceID: location.workspaceID }),
     )
 
@@ -147,7 +148,7 @@ const layer = Layer.effect(
                         versionID: row.versionID,
                         name: row.name,
                         desiredRevision: row.desiredRevision,
-                      } satisfies StatusSchema.GeneratedSlot,
+                      } satisfies GeneratedSlot,
                     ],
               ),
             ),

@@ -1,7 +1,16 @@
 export * as SessionOrchestration from "./orchestration"
 
 import type { Model } from "@opencode-ai/schema/model"
-import { SessionOrchestration as SessionOrchestrationSchema } from "@opencode-ai/schema/session-orchestration"
+import {
+  Question,
+  QuestionID,
+  Task,
+  TeamView,
+  truncateUtf8,
+  type Change,
+  type NotificationType,
+  type State,
+} from "@opencode-ai/schema/session-orchestration"
 import { AgentV2 } from "../agent"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
@@ -21,7 +30,7 @@ import { SessionSchema } from "./schema"
 import { SessionPendingTable, SessionTable, SessionTaskTable } from "./sql"
 
 const TeamViewBytes = 32 * 1024
-export const truncateUtf8 = SessionOrchestrationSchema.truncateUtf8
+export { truncateUtf8 }
 export const failureText = (input: string) => truncateUtf8(input, 16 * 1024)
 
 export const selectModel = (
@@ -36,18 +45,18 @@ export const identities = (parentID: SessionSchema.ID, messageID: SessionMessage
     childID: SessionSchema.ID.make(`ses_task_${digest.slice(0, 24)}`),
     inputID: SessionMessage.ID.make(`msg_task_${digest.slice(0, 24)}`),
     launchEventID: `evt_task_${digest.slice(0, 24)}`,
-    answer: (questionID: SessionOrchestrationSchema.QuestionID) =>
+    answer: (questionID: QuestionID) =>
       SessionMessage.ID.make(`msg_task_answer_${Hash.sha256(`${digest}\0${questionID}`).slice(0, 24)}`),
-    notification: (revision: number, type: SessionOrchestrationSchema.NotificationType) =>
+    notification: (revision: number, type: NotificationType) =>
       SessionMessage.ID.make(`msg_task_notice_${Hash.sha256(`${digest}\0${revision}\0${type}`).slice(0, 24)}`),
   }
 }
 
-export const renderTeamView = (tasks: ReadonlyArray<SessionOrchestrationSchema.Task>, maxBytes = TeamViewBytes) => {
-  const terminal = new Set<SessionOrchestrationSchema.State>(["cancelled", "completed", "failed", "lost"])
+export const renderTeamView = (tasks: ReadonlyArray<Task>, maxBytes = TeamViewBytes) => {
+  const terminal = new Set<State>(["cancelled", "completed", "failed", "lost"])
   const sorted = tasks
     .map(
-      (task): SessionOrchestrationSchema.Task => ({
+      (task): Task => ({
         ...task,
         description: truncateUtf8(task.description, 4 * 1024),
         progress: task.progress ? { ...task.progress, text: truncateUtf8(task.progress.text, 4 * 1024) } : undefined,
@@ -61,16 +70,16 @@ export const renderTeamView = (tasks: ReadonlyArray<SessionOrchestrationSchema.T
       return String(a.sessionID).localeCompare(String(b.sessionID))
     })
   const prefix = "Current direct subagent TeamView (JSON data):\n"
-  const children = new Array<SessionOrchestrationSchema.Task>()
+  const children = new Array<Task>()
   for (const task of sorted) {
-    const view = SessionOrchestrationSchema.TeamView.make({
+    const view = TeamView.make({
       children: [...children, task],
       omitted: sorted.length - children.length - 1,
     })
     if (Buffer.byteLength(prefix + JSON.stringify(view)) > maxBytes) break
     children.push(task)
   }
-  const view = SessionOrchestrationSchema.TeamView.make({ children, omitted: sorted.length - children.length })
+  const view = TeamView.make({ children, omitted: sorted.length - children.length })
   return { view, text: prefix + JSON.stringify(view) }
 }
 
@@ -105,7 +114,7 @@ export class ServiceUnavailableError extends Schema.TaggedErrorClass<ServiceUnav
 
 export class QuestionNotFoundError extends Schema.TaggedErrorClass<QuestionNotFoundError>()(
   "SessionOrchestration.QuestionNotFoundError",
-  { childID: SessionSchema.ID, questionID: SessionOrchestrationSchema.QuestionID },
+  { childID: SessionSchema.ID, questionID: QuestionID },
 ) {}
 
 export interface ModelSource {
@@ -171,52 +180,52 @@ export interface Interface {
   readonly get: (
     parentID: SessionSchema.ID,
     childID: SessionSchema.ID,
-  ) => Effect.Effect<SessionOrchestrationSchema.Task, SessionV2.NotFoundError | NotFoundError | ForbiddenError>
-  readonly launch: (input: LaunchInput) => Effect.Effect<SessionOrchestrationSchema.Task, LaunchError>
+  ) => Effect.Effect<Task, SessionV2.NotFoundError | NotFoundError | ForbiddenError>
+  readonly launch: (input: LaunchInput) => Effect.Effect<Task, LaunchError>
   readonly list: (
     parentID: SessionSchema.ID,
-  ) => Effect.Effect<ReadonlyArray<SessionOrchestrationSchema.Task>, SessionV2.NotFoundError>
+  ) => Effect.Effect<ReadonlyArray<Task>, SessionV2.NotFoundError>
   readonly send: (input: {
     readonly parentID: SessionSchema.ID
     readonly childID: SessionSchema.ID
     readonly messageID: SessionMessage.ID
     readonly text: string
     readonly delivery: "steer" | "queue"
-  }) => Effect.Effect<SessionOrchestrationSchema.Task, ControlError>
+  }) => Effect.Effect<Task, ControlError>
   readonly answer: (input: {
     readonly parentID: SessionSchema.ID
     readonly childID: SessionSchema.ID
-    readonly questionID: SessionOrchestrationSchema.QuestionID
+    readonly questionID: QuestionID
     readonly text?: string
     readonly data?: Schema.Json
-  }) => Effect.Effect<SessionOrchestrationSchema.Task, AnswerError>
+  }) => Effect.Effect<Task, AnswerError>
   readonly cancel: (input: {
     readonly parentID: SessionSchema.ID
     readonly childID: SessionSchema.ID
-  }) => Effect.Effect<SessionOrchestrationSchema.Task, ControlError>
+  }) => Effect.Effect<Task, ControlError>
   readonly resume: (input: {
     readonly parentID: SessionSchema.ID
     readonly childID: SessionSchema.ID
-  }) => Effect.Effect<SessionOrchestrationSchema.Task, ControlError>
+  }) => Effect.Effect<Task, ControlError>
   readonly progress: (
     childID: SessionSchema.ID,
     text: string,
-  ) => Effect.Effect<SessionOrchestrationSchema.Task, TaskNotFoundError | ConflictError>
+  ) => Effect.Effect<Task, TaskNotFoundError | ConflictError>
   readonly question: (
     childID: SessionSchema.ID,
     text: string,
     data?: Schema.Json,
-  ) => Effect.Effect<SessionOrchestrationSchema.Question, TaskNotFoundError | ConflictError>
+  ) => Effect.Effect<Question, TaskNotFoundError | ConflictError>
   readonly settle: (
     childID: SessionSchema.ID,
     result:
       | { readonly type: "completed"; readonly excerpt?: string }
       | { readonly type: "failed"; readonly error: string; readonly excerpt?: string }
       | { readonly type: "lost"; readonly excerpt?: string },
-  ) => Effect.Effect<SessionOrchestrationSchema.Task, TaskNotFoundError | ConflictError>
+  ) => Effect.Effect<Task, TaskNotFoundError | ConflictError>
   readonly background: (
     childID: SessionSchema.ID,
-  ) => Effect.Effect<SessionOrchestrationSchema.Task, TaskNotFoundError | ConflictError>
+  ) => Effect.Effect<Task, TaskNotFoundError | ConflictError>
   readonly teamView: (
     parentID: SessionSchema.ID,
   ) => Effect.Effect<ReturnType<typeof renderTeamView>, SessionV2.NotFoundError>
@@ -241,8 +250,8 @@ export type AnswerError = ControlError | InvalidRequestError | QuestionNotFoundE
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SessionOrchestration") {}
 
-const taskFromRow = (row: typeof SessionTaskTable.$inferSelect): SessionOrchestrationSchema.Task =>
-  SessionOrchestrationSchema.Task.make({
+const taskFromRow = (row: typeof SessionTaskTable.$inferSelect): Task =>
+  Task.make({
     sessionID: row.session_id,
     parentID: row.parent_id,
     description: row.description,
@@ -295,7 +304,7 @@ const layer = Layer.effect(
       return yield* new NotFoundError({ parentID, childID })
     })
 
-    const publish = (childID: SessionSchema.ID, change: SessionOrchestrationSchema.Change, id?: string) =>
+    const publish = (childID: SessionSchema.ID, change: Change, id?: string) =>
       events.publish(
         SessionEvent.Task.Updated,
         { sessionID: childID, change },
@@ -531,8 +540,8 @@ const layer = Layer.effect(
             if (!row) return yield* new TaskNotFoundError({ childID })
             if (row.state !== "running" || row.question_id !== null)
               return yield* new ConflictError({ message: `Cannot ask a question in ${row.state}` })
-            const question = SessionOrchestrationSchema.Question.make({
-              id: SessionOrchestrationSchema.QuestionID.make(
+            const question = Question.make({
+              id: QuestionID.make(
                 `qst_${Hash.sha256(`${childID}\0${row.revision}\0${text}`).slice(0, 24)}`,
               ),
               text: truncateUtf8(text, 8 * 1024),

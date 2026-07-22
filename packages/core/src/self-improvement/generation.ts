@@ -247,7 +247,7 @@ export const layer = Layer.effect(
               leaseTokenDigest: lease.leaseTokenDigest,
               now: SelfImprovementLifecycle.TimestampMillis.make(yield* Clock.currentTimeMillis),
             })
-            if (!renewed) return yield* Effect.die("Generation lease ownership lost")
+            if (!renewed) return yield* Effect.die(new Error("Generation lease ownership lost"))
           }
         }),
       )

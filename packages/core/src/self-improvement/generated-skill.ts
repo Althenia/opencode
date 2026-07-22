@@ -1,7 +1,7 @@
 export * as SelfImprovementGeneratedSkill from "./generated-skill"
 
 import path from "path"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { SelfImprovementLearning, SelfImprovementLifecycle } from "@opencode-ai/schema"
 import { FSUtil } from "../fs-util"
 import { Global } from "../global"
@@ -43,6 +43,14 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 
 const markerName = ".opencode-generated.json"
 const skillName = "SKILL.md"
+const Marker = Schema.Struct({
+  generated: Schema.Literal(true),
+  locationID: Schema.String,
+  artifactID: Schema.String,
+  versionID: Schema.String,
+  versionDigest: Schema.String.pipe(Schema.optional),
+})
+const decodeMarker = Schema.decodeUnknownOption(Schema.fromJsonString(Marker))
 
 const safeName = (value: string) => {
   const normalized = value
@@ -52,28 +60,8 @@ const safeName = (value: string) => {
   return normalized || "generated-skill"
 }
 
-const parseMarker = (value: string | undefined) => {
-  if (!value) return undefined
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>
-    if (
-      parsed.generated !== true ||
-      typeof parsed.locationID !== "string" ||
-      typeof parsed.artifactID !== "string" ||
-      typeof parsed.versionID !== "string"
-    )
-      return undefined
-    return parsed as {
-      generated: true
-      locationID: string
-      artifactID: string
-      versionID: string
-      versionDigest?: string
-    }
-  } catch {
-    return undefined
-  }
-}
+const parseMarker = (value: string | undefined) =>
+  value === undefined ? undefined : Option.getOrUndefined(decodeMarker(value))
 
 const quote = (value: string) => JSON.stringify(value)
 

@@ -700,6 +700,15 @@ function providerMetadata(value: unknown) {
   return Schema.is(ProviderMetadata)(value) ? value : undefined
 }
 
+const decodeJsonValue = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+function mutableJson(value: Schema.Json): JSONValue {
+  if (Array.isArray(value)) return value.map(mutableJson)
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mutableJson(item)]))
+  return value
+}
+
 function jsonObject(input: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, jsonValue(value)]))
 }
@@ -707,7 +716,7 @@ function jsonObject(input: Record<string, unknown>) {
 function jsonValue(input: unknown): JSONValue {
   try {
     const encoded = JSON.stringify(input)
-    return encoded === undefined ? null : (JSON.parse(encoded) as JSONValue)
+    return encoded === undefined ? null : mutableJson(decodeJsonValue(encoded))
   } catch {
     return messageValue(input)
   }

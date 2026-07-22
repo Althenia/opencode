@@ -17,7 +17,7 @@ import { SessionHistory } from "../session/history"
 import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { Hash } from "../util/hash"
-import { locationID as makeLocationID } from "./contracts"
+import { SelfImprovementContracts } from "./contracts"
 import { SelfImprovementEvaluationStore } from "./evaluation-store"
 import { SelfImprovementMetrics } from "./metrics"
 import { SelfImprovementPrivateEvidenceCommand } from "./private-evidence-command"
@@ -151,7 +151,7 @@ export const layer = Layer.effect(
     const command = yield* SelfImprovementPrivateEvidenceCommand.Service
     const query = yield* SelfImprovementPrivateQuery.Service
     const configured = Config.latest(yield* config.entries(), "experimental")?.self_improvement
-    const locationID = makeLocationID(
+    const locationID = SelfImprovementContracts.locationID(
       Location.Ref.make({
         directory: location.directory,
         ...(location.workspaceID === undefined ? {} : { workspaceID: location.workspaceID }),

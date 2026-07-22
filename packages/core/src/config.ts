@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util"
 import { type ParseError, parse } from "jsonc-parser"
 import { Context, Effect, Fiber, Layer, Option, PubSub, Schema, Semaphore, Stream } from "effect"
 import { Permission } from "@opencode-ai/schema/permission"
-import { Config as ConfigSchema } from "@opencode-ai/schema/config"
+import { Event } from "@opencode-ai/schema/config"
 import { Integration } from "@opencode-ai/schema/integration"
 import { Credential } from "./credential"
 import { EventV2 } from "./event"
@@ -389,7 +389,7 @@ export const layer = (options?: Options) => Layer.effect(
           configs = next
           yield* loadPolicies(next)
           yield* reconcile(next)
-          yield* events.publish(ConfigSchema.Event.Updated, {})
+          yield* events.publish(Event.Updated, {})
         }),
       ),
     )

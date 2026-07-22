@@ -455,7 +455,7 @@ function replayBody<A>(
       new Conflict({ code: "duplicate-different", message: "Idempotency key was reused with a different request" }),
     )
   const body = decode(record.storedResponse.body)
-  return body === undefined ? Effect.die("Stored idempotency response has an unexpected body") : Effect.succeed(body)
+  return body === undefined ? Effect.die(new Error("Stored idempotency response has an unexpected body")) : Effect.succeed(body)
 }
 const isObservationResponse = (body: SelfImprovementApi.StoredResponse["body"]) =>
   body instanceof SelfImprovementApi.CreateObservationResponse ? body : undefined

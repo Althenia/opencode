@@ -47,7 +47,7 @@ const layer = Layer.effect(
             return [true, { ...current, entries: [...current.entries, entry] }]
           }).pipe(
             Effect.flatMap((added) =>
-              added ? Effect.void : Effect.die(`Duplicate system context entry key: ${entry.key}`),
+              added ? Effect.void : Effect.die(new Error(`Duplicate system context entry key: ${entry.key}`)),
             ),
             Effect.as(entry),
           ),

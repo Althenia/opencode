@@ -1,22 +1,23 @@
 export * as Policy from "./policy"
 
-import { Context, Effect as EffectRuntime, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "./effect/app-node"
 import { Location } from "./location"
 import { Wildcard } from "./util/wildcard"
 
-export const Effect = Schema.Literals(["allow", "deny"]).annotate({ identifier: "Policy.Effect" })
-export type Effect = typeof Effect.Type
+const Decision = Schema.Literals(["allow", "deny"]).annotate({ identifier: "Policy.Effect" })
+export { Decision as Effect }
+export type Effect = typeof Decision.Type
 
 export class Info extends Schema.Class<Info>("Policy.Info")({
   action: Schema.String,
-  effect: Effect,
+  effect: Decision,
   resource: Schema.String,
 }) {}
 
 export interface Interface {
-  readonly load: (statements: readonly Info[]) => EffectRuntime.Effect<void>
-  readonly evaluate: (action: string, resource: string, fallback: Effect) => EffectRuntime.Effect<Effect>
+  readonly load: (statements: readonly Info[]) => Effect.Effect<void>
+  readonly evaluate: (action: string, resource: string, fallback: Effect) => Effect.Effect<Effect>
   readonly hasStatements: () => boolean
 }
 
@@ -25,11 +26,11 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 export const make = (): Interface => {
   let statements: readonly Info[] = []
   return Service.of({
-    load: EffectRuntime.fn("Policy.load")(function* (input) {
+    load: Effect.fn("Policy.load")(function* (input) {
       statements = input
     }),
     hasStatements: () => statements.length > 0,
-    evaluate: EffectRuntime.fn("Policy.evaluate")(function* (action, resource, fallback) {
+    evaluate: Effect.fn("Policy.evaluate")(function* (action, resource, fallback) {
       return (
         statements.findLast(
           (statement) => Wildcard.match(action, statement.action) && Wildcard.match(resource, statement.resource),
@@ -41,7 +42,7 @@ export const make = (): Interface => {
 
 const layer = Layer.effect(
   Service,
-  EffectRuntime.gen(function* () {
+  Effect.gen(function* () {
     yield* Location.Service
     return make()
   }),

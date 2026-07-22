@@ -17,7 +17,7 @@ import { Hash } from "../util/hash"
 import { SelfImprovementApprovalRequestTable, SelfImprovementApprovalTable } from "./approval-rollback.sql"
 import { SelfImprovementArtifactTable, SelfImprovementArtifactVersionTable } from "./artifact.sql"
 import { SelfImprovementContextReconciler } from "./context-reconciler"
-import { locationID as makeLocationID } from "./contracts"
+import { SelfImprovementContracts } from "./contracts"
 import { SelfImprovementGeneration } from "./generation"
 import { SelfImprovementGenerationStore } from "./generation-store"
 import { SelfImprovementObservationTable } from "./ingress.sql"
@@ -334,7 +334,7 @@ export const layer = Layer.effect(
       directory: location.directory,
       ...(location.workspaceID === undefined ? {} : { workspaceID: location.workspaceID }),
     })
-    const locationID = makeLocationID(locationRef)
+    const locationID = SelfImprovementContracts.locationID(locationRef)
     const coordinator = principal(locationID, "coordinator", "self-improvement-automation-coordinator")
     const evaluator = principal(locationID, "evaluator", "self-improvement-automation-evaluator")
     const approver = principal(locationID, "location-approver", "self-improvement-automatic-approver")

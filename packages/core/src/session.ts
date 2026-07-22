@@ -50,7 +50,7 @@ import { CommandV2 } from "./command"
 import { Shell } from "./shell"
 import { ShellSandbox } from "./shell-sandbox"
 import { Global } from "./global"
-import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
+import type { Info as ShellInfo } from "@opencode-ai/schema/shell"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { fileURLToPath } from "url"
 
@@ -925,7 +925,7 @@ function missingShellOutput() {
   }
 }
 
-function synthesizeTerminalShellInfo(started: ShellSchema.Info): ShellSchema.Info {
+function synthesizeTerminalShellInfo(started: ShellInfo): ShellInfo {
   return {
     ...started,
     // The Shell record was removed before waiters could observe it; publish a terminal

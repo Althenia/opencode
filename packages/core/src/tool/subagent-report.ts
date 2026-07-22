@@ -2,16 +2,16 @@ export * as SubagentReportTool from "./subagent-report"
 
 import { ToolFailure } from "@opencode-ai/ai"
 import type { Context as PluginContext } from "@opencode-ai/plugin/v2/effect/plugin"
-import { SessionOrchestration as SessionOrchestrationSchema } from "@opencode-ai/schema/session-orchestration"
+import { Question, Report, Task } from "@opencode-ai/schema/session-orchestration"
 import { Effect, Schema } from "effect"
 import { PluginRuntime } from "../plugin/runtime"
 import { Tool } from "./tool"
 
 export const name = "subagent_report"
-export const Input = SessionOrchestrationSchema.Report
+export const Input = Report
 export const Output = Schema.Union([
-  Schema.Struct({ action: Schema.Literal("progress"), task: SessionOrchestrationSchema.Task }),
-  Schema.Struct({ action: Schema.Literal("question"), question: SessionOrchestrationSchema.Question }),
+  Schema.Struct({ action: Schema.Literal("progress"), task: Task }),
+  Schema.Struct({ action: Schema.Literal("question"), question: Question }),
 ]).pipe(Schema.toTaggedUnion("action"))
 export type Output = typeof Output.Type
 

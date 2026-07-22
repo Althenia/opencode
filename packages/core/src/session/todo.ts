@@ -1,6 +1,6 @@
 export * as SessionTodo from "./todo"
 
-import { SessionTodo as Contract } from "@opencode-ai/schema/session-todo"
+import { Event, Info } from "@opencode-ai/schema/session-todo"
 import { asc, eq } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
 import { Database } from "../database/database"
@@ -9,9 +9,7 @@ import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
 import { SessionTodoTable } from "./sql"
 
-export const Info = Contract.Info
-export type Info = Contract.Info
-export const Event = Contract.Event
+export { Event, Info }
 
 export interface Interface {
   readonly update: (input: {

@@ -2,7 +2,7 @@ export * as SubagentControlTool from "./subagent-control"
 
 import { ToolFailure } from "@opencode-ai/ai"
 import type { Context as PluginContext } from "@opencode-ai/plugin/v2/effect/plugin"
-import { SessionOrchestration as SessionOrchestrationSchema } from "@opencode-ai/schema/session-orchestration"
+import { Control, Task } from "@opencode-ai/schema/session-orchestration"
 import { Effect, Schema } from "effect"
 import { PluginRuntime } from "../plugin/runtime"
 import { PermissionV2 } from "../permission"
@@ -12,13 +12,13 @@ import { Hash } from "../util/hash"
 import { SessionMessage } from "../session/message"
 
 export const name = "subagent_control"
-export const Input = SessionOrchestrationSchema.Control
+export const Input = Control
 export const Output = Schema.Union([
-  Schema.Struct({ action: Schema.Literal("list"), tasks: Schema.Array(SessionOrchestrationSchema.Task) }),
-  Schema.Struct({ action: Schema.Literal("send"), task: SessionOrchestrationSchema.Task }),
-  Schema.Struct({ action: Schema.Literal("answer"), task: SessionOrchestrationSchema.Task }),
-  Schema.Struct({ action: Schema.Literal("cancel"), task: SessionOrchestrationSchema.Task }),
-  Schema.Struct({ action: Schema.Literal("resume"), task: SessionOrchestrationSchema.Task }),
+  Schema.Struct({ action: Schema.Literal("list"), tasks: Schema.Array(Task) }),
+  Schema.Struct({ action: Schema.Literal("send"), task: Task }),
+  Schema.Struct({ action: Schema.Literal("answer"), task: Task }),
+  Schema.Struct({ action: Schema.Literal("cancel"), task: Task }),
+  Schema.Struct({ action: Schema.Literal("resume"), task: Task }),
 ]).pipe(Schema.toTaggedUnion("action"))
 export type Output = typeof Output.Type
 

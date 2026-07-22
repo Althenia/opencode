@@ -17,62 +17,110 @@ import { ProviderV2 } from "./provider"
 export const CatalogModelStatus = Schema.Literals(["alpha", "beta", "deprecated"])
 export type CatalogModelStatus = typeof CatalogModelStatus.Type
 
-type Cost = {
-  readonly input: Money.USDPerMillionTokens
-  readonly output: Money.USDPerMillionTokens
-  readonly cache_read?: Money.USDPerMillionTokens
-  readonly cache_write?: Money.USDPerMillionTokens
-  readonly tiers?: readonly (Cost & { readonly tier: { readonly type: "context"; readonly size: number } })[]
-  readonly context_over_200k?: Omit<Cost, "tiers" | "context_over_200k">
+const SourceCostFields = {
+  input: Money.USDPerMillionTokens,
+  output: Money.USDPerMillionTokens,
+  cache_read: Schema.optional(Money.USDPerMillionTokens),
+  cache_write: Schema.optional(Money.USDPerMillionTokens),
 }
 
-type ReasoningOption =
-  | { readonly type: "effort"; readonly values: readonly (string | null)[] }
-  | { readonly type: "toggle" }
-  | { readonly type: "budget_tokens"; readonly min?: number; readonly max?: number }
+const SourceCost = Schema.Struct({
+  ...SourceCostFields,
+  tiers: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        ...SourceCostFields,
+        tier: Schema.Struct({ type: Schema.Literal("context"), size: Schema.Number }),
+      }),
+    ),
+  ),
+  context_over_200k: Schema.optional(Schema.Struct(SourceCostFields)),
+})
+type Cost = typeof SourceCost.Type
 
-type Modality = "text" | "audio" | "image" | "video" | "pdf"
+const ReasoningOption = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("effort"), values: Schema.Array(Schema.NullOr(Schema.String)) }),
+  Schema.Struct({ type: Schema.Literal("toggle") }),
+  Schema.Struct({
+    type: Schema.Literal("budget_tokens"),
+    min: Schema.optional(Schema.Number),
+    max: Schema.optional(Schema.Number),
+  }),
+])
+type ReasoningOption = typeof ReasoningOption.Type
 
-type SourceModel = {
-  readonly id: string
-  readonly name: string
-  readonly family?: string
-  readonly release_date: string
-  readonly attachment: boolean
-  readonly reasoning: boolean
-  readonly reasoning_options?: readonly ReasoningOption[]
-  readonly temperature?: boolean
-  readonly tool_call: boolean
-  readonly interleaved?: true | { readonly field: "reasoning" | "reasoning_content" | "reasoning_details" }
-  readonly cost?: Cost
-  readonly limit: { readonly context: number; readonly input?: number; readonly output: number }
-  readonly modalities?: { readonly input: readonly Modality[]; readonly output: readonly Modality[] }
-  readonly experimental?: {
-    readonly modes?: Readonly<
-      Record<
-        string,
-        {
-          readonly cost?: Cost
-          readonly provider?: {
-            readonly body?: ProviderV2.Settings
-            readonly headers?: Readonly<Record<string, string>>
-          }
-        }
-      >
-    >
-  }
-  readonly status?: CatalogModelStatus
-  readonly provider?: { readonly npm?: string; readonly api?: string }
-}
+const Modality = Schema.Literals(["text", "audio", "image", "video", "pdf"])
+type Modality = typeof Modality.Type
 
-type SourceProvider = {
-  readonly api?: string
-  readonly name: string
-  readonly env: readonly string[]
-  readonly id: string
-  readonly npm: string
-  readonly models: Readonly<Record<string, SourceModel>>
-}
+const SourceRequest = Schema.Struct({
+  body: Schema.optional(ProviderV2.Settings),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+
+const SourceModel = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  family: Schema.optional(Schema.String),
+  release_date: Schema.String,
+  attachment: Schema.Boolean,
+  reasoning: Schema.Boolean,
+  reasoning_options: Schema.optional(Schema.Array(ReasoningOption)),
+  temperature: Schema.optional(Schema.Boolean),
+  tool_call: Schema.Boolean,
+  interleaved: Schema.optional(
+    Schema.Union([
+      Schema.Literal(true),
+      Schema.Struct({ field: Schema.Literals(["reasoning", "reasoning_content", "reasoning_details"]) }),
+    ]),
+  ),
+  cost: Schema.optional(SourceCost),
+  limit: Schema.Struct({
+    context: Schema.Number,
+    input: Schema.optional(Schema.Number),
+    output: Schema.Number,
+  }),
+  modalities: Schema.optional(
+    Schema.Struct({
+      input: Schema.Array(Modality),
+      output: Schema.Array(Modality),
+    }),
+  ),
+  experimental: Schema.optional(
+    Schema.Struct({
+      modes: Schema.optional(
+        Schema.Record(
+          Schema.String,
+          Schema.Struct({
+            cost: Schema.optional(SourceCost),
+            provider: Schema.optional(SourceRequest),
+          }),
+        ),
+      ),
+    }),
+  ),
+  status: Schema.optional(CatalogModelStatus),
+  provider: Schema.optional(
+    Schema.Struct({
+      npm: Schema.optional(Schema.String),
+      api: Schema.optional(Schema.String),
+    }),
+  ),
+})
+type SourceModel = typeof SourceModel.Type
+
+const SourceProvider = Schema.Struct({
+  api: Schema.optional(Schema.String),
+  name: Schema.String,
+  env: Schema.Array(Schema.String),
+  id: Schema.String,
+  npm: Schema.optional(Schema.String),
+  models: Schema.Record(Schema.String, SourceModel),
+})
+type SourceProvider = typeof SourceProvider.Type
+
+const SourceProviders = Schema.Record(Schema.String, SourceProvider)
+const decodeSourceProviders = Schema.decodeUnknownEffect(SourceProviders)
+const decodeSourceProvidersJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SourceProviders))
 
 export type Snapshot = {
   readonly info: ProviderV2.Info
@@ -87,7 +135,7 @@ function normalize(input: Record<string, SourceProvider>): readonly Snapshot[] {
     const info = {
       id: providerID,
       name: item.name,
-      package: ProviderV2.aisdk(item.npm),
+      package: item.npm ? ProviderV2.aisdk(item.npm) : "",
       ...(item.api ? { settings: { baseURL: item.api } } : {}),
     } satisfies ProviderV2.Info
     const models: ModelV2.Info[] = []
@@ -190,7 +238,7 @@ const OUTPUT_TOKEN_MAX = 32_000
 function reasoningVariants(provider: SourceProvider, model: SourceModel): NonNullable<ModelV2.Info["variants"]> {
   const npm = model.provider?.npm ?? provider.npm
   const options = model.reasoning_options
-  if (!options?.length) return []
+  if (!options?.length || npm === undefined) return []
   const toggle = options.some((option) => option.type === "toggle")
   const effort = options.find((option) => option.type === "effort")
   if (effort?.type === "effort") {
@@ -579,17 +627,12 @@ export const layer = (options?: Options) => Layer.effect(
     })
 
     const loadFromDisk = fs.readJson(options?.file ?? filepath).pipe(
-      Effect.map((input) => input as Record<string, SourceProvider>),
-      Effect.catch((error) => {
-        if (
-          options?.file === undefined &&
-          error._tag === "FileSystemError" &&
-          error.method === "readJson"
-        ) {
-          return fs.remove(filepath, { force: true }).pipe(Effect.ignore, Effect.as(undefined))
-        }
-        return Effect.succeed(undefined)
-      }),
+      Effect.flatMap(decodeSourceProviders),
+      Effect.catch(() =>
+        options?.file === undefined
+          ? fs.remove(filepath, { force: true }).pipe(Effect.ignore, Effect.as(undefined))
+          : Effect.succeed(undefined),
+      ),
     )
 
     const loadSnapshot = Effect.sync(() =>
@@ -598,6 +641,7 @@ export const layer = (options?: Options) => Layer.effect(
 
     const fetchAndWrite = Effect.fn("ModelsDev.fetchAndWrite")(function* () {
       const text = yield* fetchApi()
+      const providers = yield* decodeSourceProvidersJson(text)
       const tempfile = `${filepath}.${process.pid}.${Date.now()}.tmp`
       yield* fs.writeWithDirs(tempfile, text).pipe(
         Effect.andThen(fs.rename(tempfile, filepath)),
@@ -608,7 +652,7 @@ export const layer = (options?: Options) => Layer.effect(
           }),
         ),
       )
-      return text
+      return providers
     })
 
     const populate = Effect.gen(function* () {
@@ -618,13 +662,13 @@ export const layer = (options?: Options) => Layer.effect(
       if (bundled) return normalize(bundled)
       if (!fetch) return []
       // Flock is cross-process: concurrent opencode CLIs can race on this cache file.
-      const text = yield* Effect.scoped(
+      const providers = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Flock.effect(lockKey)
           return yield* fetchAndWrite()
         }),
       )
-      return normalize(JSON.parse(text) as Record<string, SourceProvider>)
+      return normalize(providers)
     }).pipe(Effect.withSpan("ModelsDev.populate"), Effect.orDie)
 
     const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(populate, Duration.infinity)

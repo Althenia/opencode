@@ -404,7 +404,7 @@ export const make = (dependencies: Dependencies): Interface => {
                   tx,
                 ))
               )
-                return yield* Effect.die("Tombstoned context projection conflict")
+                return yield* Effect.die(new Error("Tombstoned context projection conflict"))
             }
           } else {
             yield* transitions
@@ -438,7 +438,7 @@ export const make = (dependencies: Dependencies): Interface => {
                 { locationID: outbox.locationID, versionID: outbox.intent.supersededVersionID },
                 tx,
               )
-              if (supersededStage !== "active") return yield* Effect.die("Superseded version is not active")
+              if (supersededStage !== "active") return yield* Effect.die(new Error("Superseded version is not active"))
               yield* transitions
                 .append(
                   {
@@ -485,7 +485,7 @@ export const make = (dependencies: Dependencies): Interface => {
                       tx,
                     )
                     .pipe(Effect.map((removed) => removed || outbox.intent.event === "canary-regressed"))
-            if (!projected) return yield* Effect.die("Context projection conflict")
+            if (!projected) return yield* Effect.die(new Error("Context projection conflict"))
           }
           yield* audit
             .append(

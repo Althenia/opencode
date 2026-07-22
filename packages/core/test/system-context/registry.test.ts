@@ -96,7 +96,10 @@ describe("SystemContextRegistry", () => {
       const exit = yield* registry.register(entry("test/duplicate", "second", "test/other")).pipe(Effect.exit)
 
       expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("Duplicate system context entry key")
+      if (Exit.isFailure(exit)) {
+        expect(Cause.pretty(exit.cause)).toContain("Duplicate system context entry key")
+        expect(Cause.pretty(exit.cause)).toContain("test/duplicate")
+      }
     }),
   )
 
