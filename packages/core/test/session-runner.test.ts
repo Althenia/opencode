@@ -1417,6 +1417,43 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("replaces the agent system prompt after switching agents", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((editor) => {
+        editor.update(AgentV2.ID.make("brainstorm"), (agent) => {
+          agent.system = "Brainstorm agent instructions"
+          agent.mode = "primary"
+        })
+        editor.update(AgentV2.ID.make("build"), (agent) => {
+          agent.system = "Build agent instructions"
+          agent.mode = "primary"
+        })
+      })
+      yield* session.switchAgent({ sessionID, agent: AgentV2.ID.make("brainstorm") })
+      yield* admit(session, "Design")
+      response = reply.text("Designed", "text-brainstorm")
+      yield* session.resume(sessionID)
+
+      yield* session.switchAgent({ sessionID, agent: AgentV2.ID.make("build") })
+      yield* admit(session, "Implement")
+      response = reply.text("Built", "text-build-after-switch")
+      yield* session.resume(sessionID)
+
+      expect(requests.at(-2)?.system.map((part) => part.text)).toEqual([
+        "Brainstorm agent instructions",
+        "Initial context",
+      ])
+      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Build agent instructions", "Initial context"])
+      expect(
+        (yield* session.messages({ sessionID })).some(
+          (message) => message.type === "assistant" && message.agent === "build",
+        ),
+      ).toBe(true)
+    }),
+  )
+
   it.effect("uses an explicitly selected non-build agent system", () =>
     Effect.gen(function* () {
       const session = yield* setup

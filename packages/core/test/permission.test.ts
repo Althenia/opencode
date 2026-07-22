@@ -15,6 +15,7 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionPermissionCeiling } from "@opencode-ai/core/session/permission-ceiling"
+import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { eq } from "drizzle-orm"
@@ -87,7 +88,7 @@ function assertion(input: Partial<PermissionV2.AssertInput> = {}) {
   } satisfies PermissionV2.AssertInput
 }
 
-function waitForRequest() {
+function waitForRequest(input: Partial<PermissionV2.AssertInput> = {}) {
   return Effect.gen(function* () {
     const service = yield* PermissionV2.Service
     const events = yield* EventV2.Service
@@ -98,7 +99,7 @@ function waitForRequest() {
         : Effect.void,
     )
     yield* Effect.addFinalizer(() => unsubscribe)
-    const fiber = yield* service.assert(assertion()).pipe(Effect.forkScoped)
+    const fiber = yield* service.assert(assertion(input)).pipe(Effect.forkScoped)
     const request = yield* Deferred.await(asked)
     return { service, fiber, request }
   })
@@ -305,6 +306,33 @@ describe("PermissionV2", () => {
           ),
         ).toBe(true)
       expect(yield* service.list()).toEqual([])
+    }),
+  )
+
+  it.effect("clears a pending permission when the Session switches agents", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const { service, fiber, request } = yield* waitForRequest({ agent: AgentV2.ID.make("test") })
+      const events = yield* EventV2.Service
+      const replied = yield* Deferred.make<PermissionV2.ReplyInput>()
+      const unsubscribe = yield* events.listen((event) =>
+        event.type === PermissionV2.Event.Replied.type
+          ? Deferred.succeed(replied, event.data as PermissionV2.ReplyInput).pipe(Effect.asVoid)
+          : Effect.void,
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
+      yield* events.publish(SessionEvent.AgentSelected, {
+        sessionID: SessionV2.ID.make("ses_test"),
+        agent: AgentV2.ID.make("build"),
+      })
+      yield* Effect.yieldNow
+
+      expect(yield* service.list()).toEqual([])
+      expect(yield* service.get(request.id)).toBeUndefined()
+      expect(yield* Deferred.await(replied)).toMatchObject({ requestID: request.id, reply: "reject" })
+      const exit = yield* Fiber.await(fiber)
+      expect(exit._tag).toBe("Failure")
     }),
   )
 
