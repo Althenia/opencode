@@ -189,6 +189,7 @@ export const fromCatalogModel = (
   })
   const packageName = ProviderV2.packageName(resolved.package)
   const key = apiKey(resolved, credential)
+  const usesOAuthAdapter = resolved.settings?.apiKey === "oauth"
 
   if (OpenAICodex.isChatGPT(credential) && !ProviderV2.isAISDK(resolved.package) && isNativeOpenAI(resolved.package)) {
     return Effect.succeed(codexModel(resolved, credential, key))
@@ -202,7 +203,7 @@ export const fromCatalogModel = (
         .model({ id: resolved.modelID ?? resolved.id }),
     )
   }
-  if (ProviderV2.isAISDK(resolved.package) && packageName === "@ai-sdk/anthropic") {
+  if (ProviderV2.isAISDK(resolved.package) && packageName === "@ai-sdk/anthropic" && !usesOAuthAdapter) {
     return Effect.succeed(
       withDefaults(resolved, AnthropicMessages.route)
         .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })

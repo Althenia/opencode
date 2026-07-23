@@ -290,6 +290,34 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("loads Anthropic through AISDK when the OAuth sentinel is configured", () =>
+    Effect.gen(function* () {
+      const fallback = yield* SessionRunnerModel.fromCatalogModel(
+        model(ProviderV2.aisdk("@ai-sdk/openai"), {
+          settings: { baseURL: "https://openai.example/v1" },
+        }),
+      )
+      let loaded = false
+
+      yield* SessionRunnerModel.fromCatalogModel(
+        model(ProviderV2.aisdk("@ai-sdk/anthropic"), {
+          settings: { apiKey: "oauth", baseURL: "https://api.anthropic.com/v1" },
+        }),
+        undefined,
+        {
+          loadAISDK: (runtime) =>
+            Effect.sync(() => {
+              loaded = true
+              expect(runtime.settings).toMatchObject({ apiKey: "oauth" })
+              return fallback
+            }),
+        },
+      )
+
+      expect(loaded).toBe(true)
+    }),
+  )
+
   it.effect("uses resolved credentials for bearer auth", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(
