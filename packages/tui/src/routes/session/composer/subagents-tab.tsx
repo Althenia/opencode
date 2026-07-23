@@ -8,6 +8,7 @@ import { useClient } from "../../../context/client"
 import { useTheme } from "../../../context/theme"
 import { Locale } from "../../../util/locale"
 import { Keymap } from "../../../context/keymap"
+import { formatDiagnosticsModel } from "../../../util/cache-diagnostics"
 import { useComposerTab } from "./index"
 
 interface SubagentEntry {
@@ -31,8 +32,11 @@ type CancelClient = {
 }
 
 export function formatSubagentModel(model: { providerID: string; id: string; variant?: string } | undefined) {
-  if (!model) return
-  return `${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}`
+  return formatDiagnosticsModel(model)
+}
+
+export function isActiveSubagent(state: SessionOrchestrationTask["state"]) {
+  return state === "starting" || state === "running" || state === "waiting" || state === "cancelling"
 }
 
 export function entriesFromTasks(
@@ -41,7 +45,7 @@ export function entriesFromTasks(
 ): SubagentEntry[] {
   return [...tasks]
     .sort((a, b) => {
-      const state = Number(b.state === "running") - Number(a.state === "running")
+      const state = Number(isActiveSubagent(b.state)) - Number(isActiveSubagent(a.state))
       if (state !== 0) return state
       const created = b.time.created - a.time.created
       if (created !== 0) return created
@@ -56,6 +60,20 @@ export function entriesFromTasks(
       model: formatSubagentModel(task.model),
       current: task.sessionID === currentSessionID,
     }))
+}
+
+export function subagentSections(entries: ReadonlyArray<SubagentEntry>) {
+  const active = entries.filter((entry) => isActiveSubagent(entry.status))
+  const inactive = entries.filter((entry) => !isActiveSubagent(entry.status))
+  return [
+    ...(active.length > 0 ? [{ label: "Active", entries: active }] : []),
+    ...(inactive.length > 0 ? [{ label: "Inactive", entries: inactive }] : []),
+  ]
+}
+
+export function subagentScrollIndex(entries: ReadonlyArray<SubagentEntry>, index: number) {
+  const active = entries.filter((entry) => isActiveSubagent(entry.status)).length
+  return index + Number(active > 0) + Number(index >= active && entries.length > active)
 }
 
 export function taskStatusLabel(state: SessionOrchestrationTask["state"]) {
@@ -118,6 +136,7 @@ export function SubagentsTab(props: { sessionID: string }) {
   const session = createMemo(() => data.session.get(props.sessionID))
   const parentID = createMemo(() => session()?.parentID ?? props.sessionID)
   const entries = createMemo(() => entriesFromTasks(data.session.subagent.list(parentID()), route.sessionID))
+  const sections = createMemo(() => subagentSections(entries()))
 
   createEffect(() => {
     if (!composer.active("subagents")) return
@@ -164,12 +183,13 @@ export function SubagentsTab(props: { sessionID: string }) {
 
   function scrollToIndex(index: number, center: boolean) {
     if (!scroll) return
+    const rowIndex = subagentScrollIndex(entries(), index)
     if (center) {
-      scroll.scrollTo(Math.max(0, index - Math.floor(scroll.viewport.height / 2)))
+      scroll.scrollTo(Math.max(0, rowIndex - Math.floor(scroll.viewport.height / 2)))
       return
     }
-    if (index >= scroll.scrollTop + scroll.viewport.height) scroll.scrollTo(index - scroll.viewport.height + 1)
-    if (index < scroll.scrollTop) scroll.scrollTo(index)
+    if (rowIndex >= scroll.scrollTop + scroll.viewport.height) scroll.scrollTo(rowIndex - scroll.viewport.height + 1)
+    if (rowIndex < scroll.scrollTop) scroll.scrollTo(rowIndex)
   }
 
   onMount(() => {
@@ -251,47 +271,57 @@ export function SubagentsTab(props: { sessionID: string }) {
     <Show when={composer.active("subagents")}>
       <scrollbox scrollbarOptions={{ visible: false }} maxHeight={5} ref={(value: ScrollBoxRenderable) => (scroll = value)}>
         <Show when={entries().length > 0} fallback={<text fg={themeV2.text.subdued}> No subagents</text>}>
-          <For each={entries()}>
-            {(entry, index) => {
-              const active = createMemo(() => index() === selected())
-              return (
-                <box
-                  flexDirection="row"
-                  paddingLeft={1}
-                  paddingRight={1}
-                  backgroundColor={
-                    active()
-                      ? themeV2.background.action.primary.focused
-                      : entry.current
-                        ? themeV2.background.action.primary.selected
-                        : themeV2.background.action.primary.default
-                  }
-                  onMouseOver={() => setStore("selected", index())}
-                  onMouseUp={() => {
-                    setStore("selected", index())
-                    navigate({ type: "session", sessionID: entry.sessionID })
+          <For each={sections()}>
+            {(section) => (
+              <>
+                <text fg={themeV2.text.subdued} attributes={TextAttributes.BOLD}>
+                  {section.label}
+                </text>
+                <For each={section.entries}>
+                  {(entry) => {
+                    const entryIndex = createMemo(() => entries().indexOf(entry))
+                    const active = createMemo(() => entryIndex() === selected())
+                    return (
+                      <box
+                        flexDirection="row"
+                        paddingLeft={1}
+                        paddingRight={1}
+                        backgroundColor={
+                          active()
+                            ? themeV2.background.action.primary.focused
+                            : entry.current
+                              ? themeV2.background.action.primary.selected
+                              : themeV2.background.action.primary.default
+                        }
+                        onMouseOver={() => setStore("selected", entryIndex())}
+                        onMouseUp={() => {
+                          setStore("selected", entryIndex())
+                          navigate({ type: "session", sessionID: entry.sessionID })
+                        }}
+                      >
+                        <box flexGrow={1} minWidth={0} flexDirection="row">
+                          <text
+                            fg={
+                              active()
+                                ? themeV2.text.action.primary.focused
+                                : entry.current
+                                  ? themeV2.text.action.primary.selected
+                                  : themeV2.text.action.primary.default
+                            }
+                            attributes={active() ? TextAttributes.BOLD : undefined}
+                            wrapMode="none"
+                          >
+                            {entry.agent}: {entry.title}
+                            <Show when={entry.detail}> — {entry.detail}</Show>
+                          </text>
+                        </box>
+                        <SubagentMetadata model={entry.model} status={taskStatusLabel(entry.status)} active={active()} />
+                      </box>
+                    )
                   }}
-                >
-                  <box flexGrow={1} minWidth={0} flexDirection="row">
-                    <text
-                      fg={
-                        active()
-                          ? themeV2.text.action.primary.focused
-                          : entry.current
-                            ? themeV2.text.action.primary.selected
-                            : themeV2.text.action.primary.default
-                      }
-                      attributes={active() ? TextAttributes.BOLD : undefined}
-                      wrapMode="none"
-                    >
-                      {entry.agent}: {entry.title}
-                      <Show when={entry.detail}> — {entry.detail}</Show>
-                    </text>
-                  </box>
-                  <SubagentMetadata model={entry.model} status={taskStatusLabel(entry.status)} active={active()} />
-                </box>
-              )
-            }}
+                </For>
+              </>
+            )}
           </For>
         </Show>
       </scrollbox>

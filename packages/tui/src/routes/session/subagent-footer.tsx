@@ -1,11 +1,12 @@
 import { createEffect, createMemo, createSignal, on, Show } from "solid-js"
+import type { SessionCacheDiagnostics, SessionInfo } from "@opencode-ai/client"
 import { useRouteData } from "../../context/route"
 import { useData } from "../../context/data"
 import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import { Locale } from "../../util/locale"
 import { useTerminalDimensions } from "@opentui/solid"
-import { formatCacheDiagnostics } from "../../util/cache-diagnostics"
+import { formatCacheDiagnostics, formatDiagnosticsModel } from "../../util/cache-diagnostics"
 import { Keymap } from "../../context/keymap"
 
 const money = new Intl.NumberFormat("en-US", {
@@ -13,43 +14,38 @@ const money = new Intl.NumberFormat("en-US", {
   currency: "USD",
 })
 
-export function SubagentFooter() {
-  const route = useRouteData("session")
-  const data = useData()
-  const session = createMemo(() => data.session.get(route.sessionID))
+type SubagentFooterUsage = {
+  model?: string
+  context?: string
+  cache?: string
+  cost?: string
+}
 
-  createEffect(
-    on(
-      () => route.sessionID,
-      (sessionID) => void data.session.diagnostics.sync(sessionID).catch(() => undefined),
-    ),
-  )
+export function subagentFooterData(
+  session: Pick<SessionInfo, "agent" | "model" | "cost"> | undefined,
+  diagnostics: SessionCacheDiagnostics | null | undefined,
+) {
+  const formatted = diagnostics ? formatCacheDiagnostics(diagnostics) : undefined
+  return {
+    title: session?.agent ? Locale.titlecase(session.agent) : "Subagent",
+    usage: session
+      ? {
+          model: formatted?.model ?? formatDiagnosticsModel(session.model),
+          context: formatted?.context,
+          cache: formatted?.cache,
+          cost: session.cost > 0 ? money.format(session.cost) : undefined,
+        }
+      : undefined,
+  }
+}
 
-  const subagentInfo = createMemo(() => {
-    const s = session()
-    if (!s) return "Subagent"
-    const agentMatch = s.title.match(/@(\w+) subagent/)
-    return agentMatch ? Locale.titlecase(agentMatch[1]) : "Subagent"
-  })
-
-  const usage = createMemo(() => {
-    const current = session()
-    if (!current) return
-    const cost = current.cost
-    const formattedCost = cost > 0 ? money.format(cost) : undefined
-    const diagnostics = data.session.diagnostics.get(route.sessionID)
-
-    return {
-      ...(diagnostics ? formatCacheDiagnostics(diagnostics) : { context: undefined, cache: undefined }),
-      cost: formattedCost,
-    }
-  })
-
+export function SubagentFooterContent(props: { title: string; usage: () => SubagentFooterUsage | undefined }) {
   const { themeV2 } = useTheme().contextual("elevated")
   const keymap = Keymap.use()
   const shortcuts = Keymap.useShortcuts()
   const [hover, setHover] = createSignal<"parent" | "prev" | "next" | null>(null)
-  useTerminalDimensions()
+  const dimensions = useTerminalDimensions()
+  const compact = createMemo(() => dimensions().width < 60)
 
   return (
     <box flexShrink={0}>
@@ -64,20 +60,20 @@ export function SubagentFooter() {
         flexShrink={0}
         backgroundColor={themeV2.background.default}
       >
-        <box flexDirection="row" justifyContent="space-between" gap={1}>
-          <box flexDirection="row" gap={1}>
+        <box flexDirection="row" flexWrap="wrap" justifyContent="space-between" gap={1}>
+          <box flexDirection="row" flexWrap="wrap" gap={1} flexGrow={1} minWidth={0}>
             <text fg={themeV2.text.default}>
-              <b>{subagentInfo()}</b>
+              <b>{props.title}</b>
             </text>
-            <Show when={usage()}>
+            <Show when={props.usage()}>
               {(item) => (
                 <text fg={themeV2.text.subdued} wrapMode="none">
-                  {[item().context, item().cache, item().cost].filter(Boolean).join(" · ")}
+                  {[item().model, item().context, item().cache, item().cost].filter(Boolean).join(" · ")}
                 </text>
               )}
             </Show>
           </box>
-          <box flexDirection="row" gap={2}>
+          <box flexDirection="row" flexWrap="wrap" justifyContent="flex-end" gap={1} flexShrink={0}>
             <box
               onMouseOver={() => setHover("parent")}
               onMouseOut={() => setHover(null)}
@@ -87,7 +83,7 @@ export function SubagentFooter() {
               }
             >
               <text fg={themeV2.text.default}>
-                Parent <span style={{ fg: themeV2.text.subdued }}>{shortcuts.get("session.parent")}</span>
+                {compact() ? "↖" : "Parent"} <span style={{ fg: themeV2.text.subdued }}>{shortcuts.get("session.parent")}</span>
               </text>
             </box>
             <box
@@ -99,7 +95,7 @@ export function SubagentFooter() {
               }
             >
               <text fg={themeV2.text.default}>
-                Prev <span style={{ fg: themeV2.text.subdued }}>{shortcuts.get("session.child.previous")}</span>
+                {compact() ? "←" : "Prev"} <span style={{ fg: themeV2.text.subdued }}>{shortcuts.get("session.child.previous")}</span>
               </text>
             </box>
             <box
@@ -111,7 +107,7 @@ export function SubagentFooter() {
               }
             >
               <text fg={themeV2.text.default}>
-                Next <span style={{ fg: themeV2.text.subdued }}>{shortcuts.get("session.child.next")}</span>
+                {compact() ? "→" : "Next"} <span style={{ fg: themeV2.text.subdued }}>{shortcuts.get("session.child.next")}</span>
               </text>
             </box>
           </box>
@@ -119,4 +115,21 @@ export function SubagentFooter() {
       </box>
     </box>
   )
+}
+
+export function SubagentFooter() {
+  const route = useRouteData("session")
+  const data = useData()
+  const session = createMemo(() => data.session.get(route.sessionID))
+
+  createEffect(
+    on(
+      () => route.sessionID,
+      (sessionID) => void data.session.diagnostics.sync(sessionID).catch(() => undefined),
+    ),
+  )
+
+  const footer = createMemo(() => subagentFooterData(session(), data.session.diagnostics.get(route.sessionID)))
+
+  return <SubagentFooterContent title={footer().title} usage={() => footer().usage} />
 }

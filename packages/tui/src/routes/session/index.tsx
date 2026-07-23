@@ -57,6 +57,7 @@ import { DialogFork } from "./dialog-fork"
 import { DialogTimeline } from "./dialog-timeline"
 import { Sidebar } from "./sidebar"
 import { Composer } from "./composer"
+import { SubagentFooter } from "./subagent-footer"
 import { filetype } from "../../util/filetype"
 import parsers from "../../parsers-config"
 import { errorMessage } from "../../util/error"
@@ -1059,6 +1060,9 @@ export function Session() {
                   </pluginRuntime.Slot>
                 </Match>
               </Switch>
+              <Show when={session()?.parentID}>
+                <SubagentFooter />
+              </Show>
             </box>
           </Show>
         </box>

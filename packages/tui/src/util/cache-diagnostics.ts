@@ -1,6 +1,11 @@
 import type { SessionCacheDiagnostics } from "@opencode-ai/client"
 import { Locale } from "./locale"
 
+export function formatDiagnosticsModel(model: SessionCacheDiagnostics["model"] | undefined) {
+  if (!model) return
+  return `${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}`
+}
+
 export function cacheHitPercent(value: SessionCacheDiagnostics["cache"]["hitRatio"]) {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value * 100) : undefined
 }
@@ -8,6 +13,7 @@ export function cacheHitPercent(value: SessionCacheDiagnostics["cache"]["hitRati
 export function formatCacheDiagnostics(diagnostics: SessionCacheDiagnostics) {
   const hitPercent = cacheHitPercent(diagnostics.cache.hitRatio)
   return {
+    model: formatDiagnosticsModel(diagnostics.model),
     context:
       diagnostics.context.limit === undefined
         ? `Context ${Locale.number(diagnostics.context.total)} (includes cached)`

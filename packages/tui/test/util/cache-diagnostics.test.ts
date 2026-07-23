@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { SessionCacheDiagnostics } from "@opencode-ai/client"
-import { formatCacheDiagnostics } from "../../src/util/cache-diagnostics"
+import { formatCacheDiagnostics, formatDiagnosticsModel } from "../../src/util/cache-diagnostics"
 
 const diagnostics: SessionCacheDiagnostics = {
   model: { id: "model", providerID: "openai" },
@@ -12,6 +12,7 @@ const diagnostics: SessionCacheDiagnostics = {
 
 test("formats context and cache as separate labeled values", () => {
   expect(formatCacheDiagnostics(diagnostics)).toEqual({
+    model: "openai/model",
     context: "Context 1.0K/2.0K (52%; includes cached)",
     cache: "Cache hit 90% · 900 read · 0 write · 100 uncached",
   })
@@ -25,7 +26,12 @@ test("handles missing limits and ratios safely", () => {
       cache: { eligible: 0, mechanism: "none" },
     }),
   ).toEqual({
+    model: "openai/model",
     context: "Context 5 (includes cached)",
     cache: "Cache hit n/a · 900 read · 0 write · 100 uncached",
   })
+})
+
+test("omits an unavailable diagnostics model without inventing a variant", () => {
+  expect(formatDiagnosticsModel(undefined)).toBeUndefined()
 })
