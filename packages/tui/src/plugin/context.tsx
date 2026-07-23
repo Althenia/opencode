@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin/v2/tui"
+import { useRenderer } from "@opentui/solid"
 import {
   batch,
   createContext,
@@ -22,6 +23,7 @@ import { Keymap } from "../context/keymap"
 import { useRoute } from "../context/route"
 import { useTuiLifecycle } from "../context/runtime"
 import { useLocation } from "../context/location"
+import { createTuiAttention } from "../attention"
 import { builtins } from "./builtins"
 
 export interface PackageResolver {
@@ -57,6 +59,7 @@ type Registration = {
 const PluginContext = createContext<Value>()
 
 export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>) {
+  const renderer = useRenderer()
   const client = useClient()
   const data = useData()
   const route = useRoute()
@@ -71,6 +74,7 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>
     states: [] as ReadonlyArray<State>,
     registrations: {} as Record<string, Registration>,
   })
+  const attention = createTuiAttention({ renderer, config: config.data, update: config.update })
 
   const activate = async (id: string) => {
     const item = store.registrations[id]
@@ -87,6 +91,7 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>
       get location() {
         return location.current
       },
+      attention,
       client: client.api,
       data,
       keymap: {
@@ -270,29 +275,40 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>
       ])
     }
   }
-  onMount(() => {
-    const loading = reconcile()
-    let disposing: Promise<void> | undefined
-    const dispose = () => {
-      if (disposing) return disposing
-      disposing = loading
-        .catch(() => undefined)
-        .then(() =>
-          Promise.all(
-            Object.entries(store.registrations)
-              .filter(([, registration]) => registration.active)
-              .map(([id]) => deactivate(id)),
-          ),
+  let loading = Promise.resolve()
+  let disposing: Promise<void> | undefined
+  const dispose = () => {
+    if (disposing) return disposing
+    disposing = loading
+      .then(
+        () => undefined,
+        (error) => error,
+      )
+      .then(async (loadingError) => {
+        const results = await Promise.allSettled(
+          Object.entries(store.registrations)
+            .filter(([, registration]) => registration.active)
+            .map(([id]) => deactivate(id)),
         )
-        .then(() => setStore("registrations", reconcileStore({})))
-      return disposing
-    }
-    const unregister = lifecycle.add(dispose)
-    onCleanup(() => {
-      unregister()
-      void dispose()
-    })
-    void loading.finally(() => setStore("ready", true))
+        attention.dispose()
+        setStore("registrations", reconcileStore({}))
+        const failed = results.find((result) => result.status === "rejected")
+        if (failed?.status === "rejected") throw failed.reason
+        if (loadingError) throw loadingError
+      })
+    return disposing
+  }
+  const unregister = lifecycle.add(dispose)
+  onCleanup(() => {
+    unregister()
+    void dispose().catch(() => undefined)
+  })
+  onMount(() => {
+    loading = reconcile()
+    void loading.then(
+      () => setStore("ready", true),
+      () => setStore("ready", true),
+    )
   })
 
   return (
