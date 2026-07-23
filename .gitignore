@@ -35,3 +35,9 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+.bun/
+Library/
+.local/
+.cargo
+.rustup
+
