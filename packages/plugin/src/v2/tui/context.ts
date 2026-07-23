@@ -24,6 +24,7 @@ import type {
 } from "@opencode-ai/client"
 import type { KeyEvent, Renderable } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
+import type { TuiAttention } from "../../tui.js"
 
 interface LocationCollection<Value> {
   list(location?: LocationRef): Value[] | undefined
@@ -204,6 +205,7 @@ export interface UI {
 export interface Context {
   readonly options: Readonly<Record<string, any>>
   readonly location: LocationRef | undefined
+  readonly attention: TuiAttention
   readonly client: OpenCodeClient
   readonly data: Data
   readonly keymap: Keymap

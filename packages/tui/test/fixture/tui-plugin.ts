@@ -1,26 +1,41 @@
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
-import { RGBA } from "@opentui/core"
-import { createTuiResolvedConfig } from "./tui-runtime"
+import type { Context } from "@opencode-ai/plugin/v2/tui/context"
 
-type Opts = {
-  client?: TuiPluginApi["client"]
-  keymap?: TuiPluginApi["keymap"]
-  attention?: Partial<TuiPluginApi["attention"]>
-  event?: TuiPluginApi["event"]
-  state?: { session?: Partial<TuiPluginApi["state"]["session"]> }
+type Options = {
+  readonly attention?: Partial<Context["attention"]>
+  readonly client?: Partial<Context["client"]>
+  readonly data?: {
+    readonly on?: Context["data"]["on"]
+    readonly session?: Partial<Context["data"]["session"]>
+  }
 }
 
-export function createTuiPluginApi(opts: Opts = {}) {
-  const color = RGBA.fromInts(200, 200, 200)
-  const dialog = { clear() {}, replace() {}, setSize() {}, size: "medium" as const, depth: 0, open: false }
+const on = (() => () => {}) as Context["data"]["on"]
+
+export function createTuiPluginContext(options: Options = {}) {
+  // The fixture intentionally implements only Context surfaces used by notification tests.
+  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return {
-    attention: { notify: async () => ({ ok: false, notification: false, sound: false }), ...opts.attention },
-    client: opts.client,
-    event: opts.event,
-    keymap: opts.keymap,
-    state: { session: { get: () => undefined, ...opts.state?.session } },
-    theme: { current: new Proxy({}, { get: () => color }) },
-    tuiConfig: createTuiResolvedConfig(),
-    ui: { dialog },
-  } as unknown as TuiPluginApi
+    options: {},
+    location: undefined,
+    attention: {
+      notify: async () => ({ ok: false, notification: false, sound: false }),
+      soundboard: {
+        registerPack: () => () => {},
+        activate: () => false,
+        current: () => "",
+        list: () => [],
+      },
+      ...options.attention,
+    },
+    client: options.client ?? {},
+    data: {
+      on: options.data?.on ?? on,
+      session: {
+        get: () => undefined,
+        ...options.data?.session,
+      },
+    },
+    keymap: {},
+    ui: {},
+  } as unknown as Context
 }
