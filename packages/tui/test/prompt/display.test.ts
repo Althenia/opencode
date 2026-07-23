@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { displayCharAt, displaySlice, mentionTriggerIndex } from "../../src/prompt/display"
+import {
+  autocompleteTriggerIndex,
+  displayCharAt,
+  displaySlice,
+  mentionTriggerIndex,
+  promptCommandPalette,
+  skillTriggerIndex,
+} from "../../src/prompt/display"
 
 describe("prompt display", () => {
   test("uses display-width offsets for mentions", () => {
@@ -29,5 +36,28 @@ describe("prompt display", () => {
     expect(mentionTriggerIndex("hello@")).toBeUndefined()
     expect(mentionTriggerIndex("foo@bar.com")).toBeUndefined()
     expect(mentionTriggerIndex("中文 @src file")).toBeUndefined()
+  })
+
+  test("recognizes skill triggers only at token boundaries", () => {
+    expect(skillTriggerIndex("$review")).toBe(0)
+    expect(skillTriggerIndex("use $review")).toBe(4)
+    expect(skillTriggerIndex("use $review now")).toBeUndefined()
+    expect(skillTriggerIndex("email$review")).toBeUndefined()
+    expect(skillTriggerIndex("$review\n$plan", 12)).toBe(8)
+  })
+
+  test("revalidates mention and skill menus from the cursor", () => {
+    expect(autocompleteTriggerIndex("$skill", 6, "$")).toBe(0)
+    expect(autocompleteTriggerIndex("$skill", 0, "$")).toBeUndefined()
+    expect(autocompleteTriggerIndex("$skill later", 12, "$")).toBeUndefined()
+    expect(autocompleteTriggerIndex("use @file", 9, "@")).toBe(4)
+    expect(autocompleteTriggerIndex("use @file", 4, "@")).toBeUndefined()
+  })
+
+  test("defaults omitted palette visibility while preserving explicit hidden values", () => {
+    expect(promptCommandPalette({})).toBe(true)
+    expect(promptCommandPalette({ palette: true })).toBe(true)
+    expect(promptCommandPalette({ palette: false })).toBeUndefined()
+    expect(promptCommandPalette({ palette: undefined })).toBeUndefined()
   })
 })

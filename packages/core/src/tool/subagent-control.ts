@@ -33,7 +33,7 @@ export const Plugin = {
           name,
           Tool.make({
             description:
-              "List direct child tasks, send steer or queue input, answer an open child question, cancel a child, or resume durable pending child work.",
+              "List direct child tasks, send steer or queue input (which can reactivate a terminal child while retaining its Session context), answer an open child question, cancel a child, or resume already-pending durable work.",
             input: Input,
             output: Output,
             toModelOutput: ({ output }) => [{ type: "text", text: JSON.stringify(output) }],

@@ -39,15 +39,23 @@ export function entriesFromTasks(
   tasks: ReadonlyArray<SessionOrchestrationTask>,
   currentSessionID: string,
 ): SubagentEntry[] {
-  return tasks.map((task) => ({
-    sessionID: task.sessionID,
-    agent: Locale.titlecase(task.agent),
-    title: task.description,
-    detail: task.question?.text ?? task.progress?.text,
-    status: task.state,
-    model: formatSubagentModel(task.model),
-    current: task.sessionID === currentSessionID,
-  }))
+  return [...tasks]
+    .sort((a, b) => {
+      const state = Number(b.state === "running") - Number(a.state === "running")
+      if (state !== 0) return state
+      const created = b.time.created - a.time.created
+      if (created !== 0) return created
+      return a.sessionID.localeCompare(b.sessionID)
+    })
+    .map((task) => ({
+      sessionID: task.sessionID,
+      agent: Locale.titlecase(task.agent),
+      title: task.description,
+      detail: task.question?.text ?? task.progress?.text,
+      status: task.state,
+      model: formatSubagentModel(task.model),
+      current: task.sessionID === currentSessionID,
+    }))
 }
 
 export function taskStatusLabel(state: SessionOrchestrationTask["state"]) {

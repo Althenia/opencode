@@ -8,7 +8,6 @@ export interface PromptCacheNamespaceInput {
   readonly projectID: string
   readonly directory: string
   readonly workspaceID?: string
-  readonly agentID: string
   readonly providerID: string
   readonly modelID: string
   readonly variant: string
@@ -25,7 +24,6 @@ export const promptCacheNamespace = (input: PromptCacheNamespaceInput): string =
       projectID: input.projectID,
       directory: input.directory,
       workspaceID: input.workspaceID,
-      agentID: input.agentID,
       providerID: input.providerID,
       modelID: input.modelID,
       variant: input.variant,

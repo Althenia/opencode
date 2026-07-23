@@ -92,7 +92,6 @@ export const layer = (options?: SessionModelHeaders.Options) =>
           projectID: session.projectID,
           directory: session.location.directory,
           workspaceID: session.location.workspaceID,
-          agentID: agent.id,
           providerID: resolved.ref.providerID,
           modelID: resolved.ref.id,
           variant: resolved.ref.variant ?? "default",

@@ -12,3 +12,23 @@ test("every configurable keybind has a runtime consumer", async () => {
 
   expect(missing).toEqual([])
 })
+
+test("session goal keeps palette and autonomy state wiring", async () => {
+  const prompt = await Bun.file("src/component/prompt/index.tsx").text()
+  const session = await Bun.file("src/routes/session/index.tsx").text()
+
+  expect(prompt).toContain("currentGoal={props.autonomy?.goal?.text}")
+  expect(prompt).toContain("onUpdated={(state) => props.onAutonomyUpdated?.(sessionID, state)}")
+  expect(session).toContain("autonomy={autonomy()}")
+  expect(session).toContain("onAutonomyUpdated={acceptAutonomy}")
+})
+
+test("retained submission retry is an explicit conditional Prompt command", async () => {
+  const prompt = await Bun.file("src/component/prompt/index.tsx").text()
+
+  expect(prompt).toContain('title: "Retry previous submission"')
+  expect(prompt).toContain('name: "prompt.retry"')
+  expect(prompt).toMatch(/\.\.\.\(retry\(\)\s*\?/)
+  expect(prompt).toContain("enabled: true")
+  expect(prompt).toContain("Run Retry previous submission; current draft will be preserved in stash")
+})

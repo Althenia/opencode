@@ -52,6 +52,17 @@ const layer = Layer.effect(
                 changed: (_previous, date) => `Today's date is now: ${date}`,
               },
             }),
+            Instructions.make({
+              key: Instructions.Key.make("core/subagent-reuse"),
+              codec: Schema.toCodecJson(Schema.String),
+              read: Effect.succeed(
+                "Before launching a subagent, inspect the current direct child TeamView. Reuse a relevant direct terminal child with subagent_control send when its agent, domain, model, and retained context fit; send only incremental context. Launch a new child when role, model, location, permission, or task context does not fit. Use resume only for durable pending work.",
+              ),
+              render: {
+                initial: (instruction) => instruction,
+                changed: (_previous, instruction) => instruction,
+              },
+            }),
           ]),
         ),
     })

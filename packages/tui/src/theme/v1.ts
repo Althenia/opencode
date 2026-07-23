@@ -190,6 +190,13 @@ function getSyntaxRules(theme: Theme) {
       },
     },
     {
+      scope: ["extmark.skill"],
+      style: {
+        foreground: theme.accent,
+        bold: true,
+      },
+    },
+    {
       scope: ["extmark.paste"],
       style: {
         foreground: selectedForeground(theme, theme.warning),

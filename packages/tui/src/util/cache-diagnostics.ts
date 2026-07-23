@@ -12,6 +12,6 @@ export function formatCacheDiagnostics(diagnostics: SessionCacheDiagnostics) {
       diagnostics.context.limit === undefined
         ? `Context ${Locale.number(diagnostics.context.total)} (includes cached)`
         : `Context ${Locale.number(diagnostics.context.total)}/${Locale.number(diagnostics.context.limit)} (${diagnostics.context.percent}%; includes cached)`,
-    cache: `Cache ${hitPercent === undefined ? "n/a" : `${hitPercent}%`} · ${Locale.number(diagnostics.tokens.cacheRead)} read · ${Locale.number(diagnostics.tokens.cacheWrite)} write · ${Locale.number(diagnostics.tokens.uncachedInput)} uncached`,
+    cache: `Cache hit ${hitPercent === undefined ? "n/a" : `${hitPercent}%`} · ${Locale.number(diagnostics.tokens.cacheRead)} read · ${Locale.number(diagnostics.tokens.cacheWrite)} write · ${Locale.number(diagnostics.tokens.uncachedInput)} uncached`,
   }
 }

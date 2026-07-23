@@ -52,7 +52,6 @@ import { useEditorContext } from "../../context/editor"
 import { openEditor } from "../../editor"
 import { useDialog } from "../../ui/dialog"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
-import { DialogSessionGoal } from "../../component/dialog-session-goal"
 import { DialogMessage } from "./dialog-message"
 import { DialogFork } from "./dialog-fork"
 import { DialogTimeline } from "./dialog-timeline"
@@ -86,7 +85,12 @@ import { createSessionRows, messageBoundaryIDs, resolvePart, type PartRef, type 
 import { switchLabel } from "../../util/model"
 import { findMessageBoundary, messageNavigationSlack } from "./message-navigation"
 import { stringWidth } from "../../util/string-width"
-import { autonomyModeLabel } from "../../util/session-autonomy"
+import {
+  autonomyModeLabel,
+  currentSessionAutonomy,
+  type SessionAutonomyResponse,
+} from "../../util/session-autonomy"
+import { promptSkillsFromMetadata, segmentPromptSkills } from "../../prompt/skill"
 
 addDefaultParsers(parsers.parsers)
 
@@ -196,12 +200,21 @@ export function Session() {
   const scrollAcceleration = createMemo(() => getScrollAcceleration(config))
   const toast = useToast()
   const client = useClient()
-  const [autonomy, setAutonomy] = createSignal<SessionAutonomyState>({ mode: "normal" })
+  const [autonomyResponse, setAutonomyResponse] = createSignal<SessionAutonomyResponse>()
+  const autonomy = createMemo(() =>
+    currentSessionAutonomy(route.sessionID, client.connection.status() === "connected", autonomyResponse()),
+  )
+  const acceptAutonomy = (sessionID: string, state: SessionAutonomyState) => {
+    if (route.sessionID !== sessionID || client.connection.status() !== "connected") return false
+    setAutonomyResponse({ sessionID, state })
+    return true
+  }
   const updateAutonomy = (input: { mode: "normal" | "yolo" } | { mode: "goal"; goal: string }) => {
+    const sessionID = route.sessionID
     void client.api.session.autonomy
-      .set({ sessionID: route.sessionID, payload: input })
+      .set({ sessionID, payload: input })
       .then((state) => {
-        setAutonomy(state)
+        if (!acceptAutonomy(sessionID, state)) return
         toast.show({ message: `${autonomyModeLabel(state)} mode activated`, variant: "success", duration: 3000 })
         dialog.clear()
       })
@@ -211,11 +224,12 @@ export function Session() {
   }
   createEffect(
     on([() => route.sessionID, () => client.connection.status()], ([sessionID, status]) => {
+      setAutonomyResponse(undefined)
       if (status !== "connected") return
       void client.api.session.autonomy
         .get({ sessionID })
         .then((state) => {
-          if (route.sessionID === sessionID) setAutonomy(state)
+          acceptAutonomy(sessionID, state)
         })
         .catch(() => undefined)
     }),
@@ -526,13 +540,6 @@ export function Session() {
       group: "Session",
       slash: { name: "yolo" },
       run: () => updateAutonomy({ mode: "yolo" }),
-    },
-    {
-      title: `Set autonomous goal${autonomy().mode === "goal" ? " (active)" : ""}`,
-      id: "session.autonomy.goal",
-      group: "Session",
-      slash: { name: "goal" },
-      run: () => DialogSessionGoal.show(dialog, route.sessionID, autonomy().goal?.text, setAutonomy),
     },
     {
       title: "Compact session",
@@ -1045,6 +1052,8 @@ export function Session() {
                         toBottom()
                       }}
                       sessionID={route.sessionID}
+                      autonomy={autonomy()}
+                      onAutonomyUpdated={acceptAutonomy}
                       right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
                     />
                   </pluginRuntime.Slot>
@@ -1507,10 +1516,10 @@ function SessionNoticeMessageV2(props: { message: SessionMessageInfo }) {
 }
 
 function SessionSkillMessage(props: { message: Extract<SessionMessageInfo, { type: "skill" }> }) {
-  const { themeV2 } = useTheme()
+  const { themeV2, mode } = useTheme()
   return (
-    <InlineToolRow icon="→" color={themeV2.text.subdued} pending="Skill" complete={true}>
-      Skill {props.message.name}
+    <InlineToolRow icon="✦" color={themeV2.hue.accent[mode() === "light" ? 700 : 200]} pending="Skill" complete={true}>
+      <span style={{ fg: themeV2.hue.accent[mode() === "light" ? 700 : 200], bold: true }}>{props.message.name}</span>
     </InlineToolRow>
   )
 }
@@ -1711,6 +1720,8 @@ function UserMessage(props: { message: SessionMessageUser }) {
   const dialog = useDialog()
   const renderer = useRenderer()
   const promptRef = usePromptRef()
+  const skills = createMemo(() => promptSkillsFromMetadata(props.message.metadata))
+  const content = createMemo(() => segmentPromptSkills(props.message.text, skills()))
 
   return (
     <Show when={props.message.text.trim() || files().length}>
@@ -1742,7 +1753,18 @@ function UserMessage(props: { message: SessionMessageUser }) {
           backgroundColor={hover() ? themeV2.raise(themeV2.background.default) : themeV2.background.default}
           flexShrink={0}
         >
-          <text fg={themeV2.text.default}>{props.message.text}</text>
+          <text fg={themeV2.text.default}>
+            <For each={content()}>
+              {(part) => (
+                <Show
+                  when={part.type === "skill"}
+                  fallback={part.value}
+                >
+                  <span style={{ fg: themeV2.hue.accent[mode() === "light" ? 700 : 200], bold: true }}>{part.value}</span>
+                </Show>
+              )}
+            </For>
+          </text>
           <Show when={files().length}>
             <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
               <For each={files()}>
@@ -2081,7 +2103,6 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
           tableOptions={{ style: "grid" }}
           conceal={ctx.markdownMode() === "rendered"}
           fg={themeV2.markdown.text}
-          bg={themeV2.background.default}
         />
       </box>
     </Show>

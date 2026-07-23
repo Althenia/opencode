@@ -8,7 +8,6 @@ const base = {
   projectID: "project",
   directory: "/repo",
   workspaceID: "workspace",
-  agentID: "build",
   providerID: "openai",
   modelID: "gpt-5.6",
   variant: "default",
@@ -42,7 +41,7 @@ const namespaceWithSchema = (inputSchema: Readonly<Record<string, unknown>>) =>
 
 test("pins the canonical prompt-cache namespace digest", () => {
   expect(SessionRunnerCache.promptCacheNamespace(base)).toBe(
-    "a7b8e1c2ae9e5f1771db591cf4866c4c263bf0c5c69665d3df911e2202aa75de",
+    "34ac9a1023f1f79201ff542b687b8ba3fe9265b38b6597799be4681bc1bb44b4",
   )
 })
 
@@ -68,7 +67,7 @@ test("canonicalizes object order and preserves JSON array positions", () => {
 
 test("uses deterministic code-point ordering for integer-like and non-BMP keys", () => {
   expect(namespaceWithSchema({ "10": "ten", "2": "two", "\u{10000}": "astral", "\u{e000}": "bmp" })).toBe(
-    "1eb891bbfc2208cc8ebced61ab2b09c2108bb47615ec44e830c28ca07edb875f",
+    "7d7eedb54e8320998075e21f6eeef18825979882955c774593df2b87ba329c13",
   )
 })
 
@@ -87,7 +86,6 @@ test("isolates every cache sharing dimension", () => {
     projectID: "other-project",
     directory: "/other",
     workspaceID: "other-workspace",
-    agentID: "reviewer",
     providerID: "anthropic",
     modelID: "claude",
     variant: "reasoning",
@@ -99,4 +97,10 @@ test("isolates every cache sharing dimension", () => {
     expect(SessionRunnerCache.promptCacheNamespace({ ...base, [key]: value })).not.toBe(baseline)
   }
   expect(SessionRunnerCache.promptCacheNamespace({ ...base, workspaceID: undefined })).not.toBe(baseline)
+})
+
+test("shares equivalent parent and routed-subagent request prefixes", () => {
+  const parent = { ...base, agentID: "build" }
+  const routedSubagent = { ...base, agentID: "reviewer" }
+  expect(SessionRunnerCache.promptCacheNamespace(routedSubagent)).toBe(SessionRunnerCache.promptCacheNamespace(parent))
 })

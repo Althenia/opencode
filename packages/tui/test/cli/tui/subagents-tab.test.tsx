@@ -45,7 +45,7 @@ test("formats provider, model, and optional variant", () => {
   expect(module.formatSubagentModel(undefined)).toBeUndefined()
 })
 
-test("derives rows only from durable managed tasks", () => {
+test("derives rows with running newest first before other newest tasks", () => {
   const tasks: SessionOrchestrationTask[] = [
     {
       sessionID: "ses_waiting",
@@ -70,11 +70,35 @@ test("derives rows only from durable managed tasks", () => {
       revision: 3,
       time: { created: 2, updated: 3 },
     },
+    {
+      sessionID: "ses_running_old",
+      parentID: "ses_parent",
+      description: "Investigate regression",
+      agent: "explore",
+      model: { providerID: "openai", id: "gpt-5.6-luna" },
+      background: true,
+      state: "running",
+      revision: 4,
+      time: { created: 3, updated: 4 },
+    },
+    {
+      sessionID: "ses_running_new",
+      parentID: "ses_parent",
+      description: "Run validation",
+      agent: "general",
+      model: { providerID: "openai", id: "gpt-5.6-sol" },
+      background: true,
+      state: "running",
+      revision: 5,
+      time: { created: 4, updated: 5 },
+    },
   ]
 
   expect(module.entriesFromTasks(tasks, "ses_waiting")).toEqual([
-    expect.objectContaining({ sessionID: "ses_waiting", title: "Review implementation", status: "waiting", current: true }),
+    expect.objectContaining({ sessionID: "ses_running_new", title: "Run validation", status: "running", current: false }),
+    expect.objectContaining({ sessionID: "ses_running_old", title: "Investigate regression", status: "running", current: false }),
     expect.objectContaining({ sessionID: "ses_lost", title: "Inspect runtime", status: "lost", current: false }),
+    expect.objectContaining({ sessionID: "ses_waiting", title: "Review implementation", status: "waiting", current: true }),
   ])
   expect(module.taskStatusLabel("waiting")).toBe("Waiting")
   expect(module.taskStatusLabel("failed")).toBe("Failed")

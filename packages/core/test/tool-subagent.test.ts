@@ -669,22 +669,61 @@ describe("SubagentTool", () => {
 
           const cancelled = yield* orchestration.cancel({ parentID: parent.id, childID: child.sessionID })
           expect(cancelled.state).toBe("cancelled")
+          const messageID = SessionMessage.ID.make("msg_late_queue")
+          const reactivated = yield* orchestration.send({
+            parentID: parent.id,
+            childID: child.sessionID,
+            messageID,
+            text: "late",
+            delivery: "queue",
+          })
+          expect(reactivated.state).toBe("running")
+          const pending = yield* sessions.pending(child.sessionID)
+          yield* orchestration.send({
+            parentID: parent.id,
+            childID: child.sessionID,
+            messageID,
+            text: "late",
+            delivery: "queue",
+          })
+          expect(yield* sessions.pending(child.sessionID)).toHaveLength(pending.length)
+          expect((yield* orchestration.resume({ parentID: parent.id, childID: child.sessionID })).state).toBe("running")
+          yield* orchestration.settle(child.sessionID, { type: "completed", excerpt: "done" })
           expect(
-            yield* Effect.exit(
-              orchestration.send({
+            (
+              yield* orchestration.send({
                 parentID: parent.id,
                 childID: child.sessionID,
-                messageID: SessionMessage.ID.make("msg_late_queue"),
-                text: "late",
-                delivery: "queue",
-              }),
-            ),
-          ).toMatchObject({ _tag: "Failure" })
+                messageID: SessionMessage.ID.make("msg_completed_reuse"),
+                text: "completed",
+                delivery: "steer",
+              })
+            ).state,
+          ).toBe("running")
+          yield* orchestration.settle(child.sessionID, { type: "failed", error: "failed" })
           expect(
-            yield* Effect.exit(orchestration.resume({ parentID: parent.id, childID: child.sessionID })),
-          ).toMatchObject({
-            _tag: "Failure",
-          })
+            (
+              yield* orchestration.send({
+                parentID: parent.id,
+                childID: child.sessionID,
+                messageID: SessionMessage.ID.make("msg_failed_reuse"),
+                text: "failed",
+                delivery: "steer",
+              })
+            ).state,
+          ).toBe("running")
+          yield* orchestration.settle(child.sessionID, { type: "lost" })
+          expect(
+            (
+              yield* orchestration.send({
+                parentID: parent.id,
+                childID: child.sessionID,
+                messageID: SessionMessage.ID.make("msg_lost_reuse"),
+                text: "lost",
+                delivery: "steer",
+              })
+            ).state,
+          ).toBe("running")
         }),
       ),
     ),
@@ -750,6 +789,64 @@ describe("SubagentTool", () => {
     ),
   )
 
+  it.live("does not reactivate a terminal child when a promoted parent message is retried", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          const sessions = yield* SessionV2.Service
+          const parent = yield* sessions.create({ location, model: parentModel })
+          yield* withSubagent(parent.location)
+          const locations = yield* LocationServiceMap.Service
+          const orchestration = (yield* PluginRuntime.Service).orchestration
+          const prepared = yield* SessionOrchestration.preflight(parent, {
+            agent: AgentV2.ID.make("reviewer"),
+            caller: toolIdentity.agent,
+          }).pipe(Effect.provide(locations.get(parent.location)))
+          const child = yield* orchestration.launch({
+            parentID: parent.id,
+            parentAssistantMessageID: SessionMessage.ID.make("msg_retry_parent"),
+            toolCallID: "call_retry",
+            agent: AgentV2.ID.make("reviewer"),
+            description: "retry",
+            prompt: "initial",
+            background: true,
+            prepared,
+          })
+          const db = (yield* Database.Service).db
+          const events = yield* EventV2.Service
+          yield* db.delete(SessionPendingTable).where(eq(SessionPendingTable.session_id, child.sessionID)).run()
+          yield* orchestration.settle(child.sessionID, { type: "completed", excerpt: "done" })
+
+          const messageID = SessionMessage.ID.make("msg_completed_retry")
+          yield* orchestration.send({
+            parentID: parent.id,
+            childID: child.sessionID,
+            messageID,
+            text: "retry",
+            delivery: "steer",
+          })
+          yield* SessionPending.promoteSteers(db, events, child.sessionID)
+          yield* orchestration.settle(child.sessionID, { type: "completed", excerpt: "done" })
+
+          const wakes = executionWakes.filter((id) => id === child.sessionID).length
+          const task = yield* orchestration.send({
+            parentID: parent.id,
+            childID: child.sessionID,
+            messageID,
+            text: "retry",
+            delivery: "steer",
+          })
+          expect(task.state).toBe("completed")
+          expect(executionWakes.filter((id) => id === child.sessionID)).toHaveLength(wakes)
+        }),
+      ),
+    ),
+  )
+
   it.live("recovers only unstarted admitted work and marks an in-flight attempt lost", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
@@ -783,10 +880,37 @@ describe("SubagentTool", () => {
 
           const unstarted = yield* launch("recover_unstarted")
           expect(executionWakes.filter((id) => id === unstarted.sessionID)).toHaveLength(1)
-          yield* orchestration.recover
-          expect(executionWakes.filter((id) => id === unstarted.sessionID)).toHaveLength(2)
+           yield* orchestration.recover
+           expect(executionWakes.filter((id) => id === unstarted.sessionID)).toHaveLength(2)
 
-          const inFlight = yield* launch("recover_inflight")
+          const terminalPending = yield* launch("recover_terminal_pending")
+          const db = (yield* Database.Service).db
+          yield* db.delete(SessionPendingTable).where(eq(SessionPendingTable.session_id, terminalPending.sessionID)).run()
+          yield* orchestration.settle(terminalPending.sessionID, { type: "completed", excerpt: "done" })
+          yield* sessions.synthetic({
+            id: SessionMessage.ID.make("msg_recover_terminal_1"),
+            sessionID: terminalPending.sessionID,
+            text: "admitted before task reactivation",
+            description: "Parent subagent message",
+            metadata: { source: "subagent_parent", parentID: parent.id, childID: terminalPending.sessionID, kind: "message" },
+            delivery: "steer",
+            resume: false,
+          })
+          yield* sessions.synthetic({
+            id: SessionMessage.ID.make("msg_recover_terminal_2"),
+            sessionID: terminalPending.sessionID,
+            text: "second admitted input",
+            description: "Parent subagent message",
+            metadata: { source: "subagent_parent", parentID: parent.id, childID: terminalPending.sessionID, kind: "message" },
+            delivery: "queue",
+            resume: false,
+          })
+          expect(executionWakes.filter((id) => id === terminalPending.sessionID)).toHaveLength(1)
+          yield* orchestration.recover
+          expect(executionWakes.filter((id) => id === terminalPending.sessionID)).toHaveLength(2)
+          expect((yield* orchestration.get(parent.id, terminalPending.sessionID)).state).toBe("running")
+
+           const inFlight = yield* launch("recover_inflight")
           const assistantMessageID = SessionMessage.ID.make("msg_inflight_assistant")
           yield* EventV2.Service.use((events) =>
             events.publish(SessionEvent.Step.Started, {

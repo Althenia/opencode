@@ -560,8 +560,21 @@ const projectTask = Effect.fn("SessionProjector.projectTask")(function* (
   const conflict = () => Effect.die(new TaskProjectionConflict(`Invalid ${change.type} transition from ${task.state}`))
 
   if (change.type === "started") {
-    if (task.state !== "starting") return yield* conflict()
-    yield* update({ state: "running" })
+    if (task.state === "starting") {
+      yield* update({ state: "running" })
+      return
+    }
+    if (!["cancelled", "completed", "failed", "lost"].includes(task.state)) return yield* conflict()
+    yield* update({
+      state: "running",
+      progress: null,
+      progress_time: null,
+      question_id: null,
+      question: null,
+      question_data: null,
+      question_time: null,
+      attempt_started: false,
+    })
     return
   }
   if (change.type === "backgrounded") {

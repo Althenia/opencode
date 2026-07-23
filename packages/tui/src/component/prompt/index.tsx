@@ -24,7 +24,7 @@ import { useEvent } from "../../context/event"
 import { editorSelectionKey, useEditorContext, type EditorSelection } from "../../context/editor"
 import { normalizePromptContent, openEditor } from "../../editor"
 import { useExit } from "../../context/exit"
-import { promptOffsetWidth } from "../../prompt/display"
+import { promptCommandPalette, promptOffsetWidth } from "../../prompt/display"
 import { expandPromptInputPastedText, realignPromptInputMentions } from "../../prompt/mention"
 import { parseSlashHead } from "../../prompt/parse"
 import { stringWidth } from "../../util/string-width"
@@ -32,6 +32,7 @@ import { createStore, produce, unwrap } from "solid-js/store"
 import { emptyPrompt, usePromptHistory, type PromptInfo, type PromptPartRef } from "../../prompt/history"
 import { computePromptTraits } from "../../prompt/traits"
 import { expandPastedTextPlaceholders, expandTrackedPastedText } from "../../prompt/part"
+import { promptSkillMetadata } from "../../prompt/skill"
 import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
@@ -54,11 +55,24 @@ import { useLocation } from "../../context/location"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { abbreviateHome } from "../../runtime"
 import { formatCacheDiagnostics } from "../../util/cache-diagnostics"
+import {
+  activateGoal,
+  confirmSessionCreation,
+  parseGoalCommand,
+  restoreSessionSubmission,
+  retainSessionSubmission,
+  submitSessionPrompt,
+  type SessionSubmissionRetry,
+} from "../../util/session-autonomy"
+import { DialogSessionGoal } from "../dialog-session-goal"
+import type { SessionAutonomyState } from "@opencode-ai/client"
 
 registerOpencodeSpinner()
 
 export type PromptProps = {
   sessionID?: string
+  autonomy?: SessionAutonomyState
+  onAutonomyUpdated?: (sessionID: string, state: SessionAutonomyState) => void
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
@@ -70,6 +84,27 @@ export type PromptProps = {
     normal?: string[]
     shell?: string[]
   }
+}
+
+type PromptSubmissionPayload = {
+  inputText: string
+  goal: ReturnType<typeof parseGoalCommand>
+  files: PromptInfo["files"]
+  agents: PromptInfo["agents"]
+  metadata: ReturnType<typeof promptSkillMetadata>
+  mode: NonNullable<PromptInfo["mode"]>
+  agentID: string
+  model: {
+    providerID: string
+    id: string
+    variant?: string
+  }
+  editor?: {
+    key: string
+    text: string
+  }
+  history: PromptInfo
+  cursor: number
 }
 
 function pastedFilepath(value: string, platform: string) {
@@ -226,6 +261,8 @@ export function Prompt(props: PromptProps) {
   })
   const editorContextLabelState = createMemo(() => editor.labelState())
   const [auto, setAuto] = createSignal<AutocompleteRef>()
+  const [retry, setRetry] = createSignal<SessionSubmissionRetry<PromptSubmissionPayload>>()
+  const [retryRestored, setRetryRestored] = createSignal(false)
   const move = usePromptMove({
     projectID: () =>
       (props.sessionID ? data.session.get(props.sessionID)?.projectID : undefined) ?? data.location.info()?.project.id,
@@ -277,6 +314,7 @@ export function Prompt(props: PromptProps) {
   }
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
+  const skillStyleId = syntax().getStyleId("extmark.skill")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
   const event = useEvent()
@@ -531,6 +569,24 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Set autonomous goal",
+        name: "session.autonomy.goal",
+        category: "Session",
+        palette: props.sessionID !== undefined,
+        slash: { name: "goal", arguments: true as const },
+        run: () => {
+          const sessionID = props.sessionID
+          if (!sessionID) return
+          dialog.replace(() => (
+            <DialogSessionGoal
+              sessionID={sessionID}
+              currentGoal={props.autonomy?.goal?.text}
+              onUpdated={(state) => props.onAutonomyUpdated?.(sessionID, state)}
+            />
+          ))
+        },
+      },
+      {
         title: "Move session",
         desc: "Move to another project dir",
         name: "session.move",
@@ -540,16 +596,16 @@ export function Prompt(props: PromptProps) {
           move.open()
         },
       },
-    ].map(
-      ({ name, category, ...command }) =>
-        ({
-          id: name,
-          group: category,
-          bind: false,
-          palette: true as const,
-          ...command,
-        }) satisfies KeymapCommand,
-    ),
+    ].map((item) => {
+      const { name, category, ...command } = item
+      return {
+        id: name,
+        group: category,
+        bind: false,
+        ...command,
+        palette: promptCommandPalette(item),
+      } satisfies KeymapCommand
+    }),
   )
 
   Keymap.createLayer(() => ({
@@ -660,6 +716,11 @@ export function Prompt(props: PromptProps) {
         ref: { type: "agent" as const, index },
         styleId: agentStyleId,
       })),
+      ...(prompt.skills ?? []).map((part, index) => ({
+        mention: part.mention,
+        ref: { type: "skill" as const, index },
+        styleId: skillStyleId,
+      })),
       ...prompt.pasted.map((part, index) => ({
         mention: part.source,
         ref: { type: "pasted" as const, index },
@@ -686,12 +747,13 @@ export function Prompt(props: PromptProps) {
   }
 
   function syncExtmarksWithPromptParts() {
-    const allExtmarks = input.extmarks.getAllForTypeId(promptPartTypeId)
+    const allExtmarks = input.extmarks.getAllForTypeId(promptPartTypeId).slice().sort((left, right) => left.start - right.start)
     setStore(
       produce((draft) => {
         const newMap = new Map<number, PromptPartRef>()
         const files: NonNullable<PromptInfo["files"]> = []
         const agents: NonNullable<PromptInfo["agents"]> = []
+        const skills: NonNullable<PromptInfo["skills"]> = []
         const pasted: PromptInfo["pasted"] = []
 
         for (const extmark of allExtmarks) {
@@ -717,6 +779,16 @@ export function Prompt(props: PromptProps) {
             newMap.set(extmark.id, { type: "agent", index })
             continue
           }
+          if (ref.type === "skill") {
+            const part = draft.prompt.skills?.[ref.index]
+            if (!part?.mention) continue
+            part.mention.start = extmark.start
+            part.mention.end = extmark.end
+            const index = skills.length
+            skills.push(part)
+            newMap.set(extmark.id, { type: "skill", index })
+            continue
+          }
           const part = draft.prompt.pasted[ref.index]
           if (!part) continue
           part.source.start = extmark.start
@@ -729,6 +801,7 @@ export function Prompt(props: PromptProps) {
         draft.extmarkToPart = newMap
         draft.prompt.files = files
         draft.prompt.agents = agents
+        draft.prompt.skills = skills
         draft.prompt.pasted = pasted
       }),
     )
@@ -736,6 +809,38 @@ export function Prompt(props: PromptProps) {
 
   const stashCommands = createMemo(() =>
     [
+      ...(retry()
+        ? [
+            {
+              title: "Retry previous submission",
+              name: "prompt.retry",
+              category: "Prompt",
+              enabled: true,
+              run: () => {
+                const submission = retry()
+                if (!submission) return
+                const restored = restoreSessionSubmission(
+                  submission,
+                  { ...structuredClone(unwrap(store.prompt)), mode: store.mode },
+                  (prompt) => stash.push({ prompt }),
+                  (prompt) =>
+                    !prompt.text.trim() &&
+                    prompt.pasted.length === 0 &&
+                    (prompt.files?.length ?? 0) === 0 &&
+                    (prompt.agents?.length ?? 0) === 0 &&
+                    (prompt.skills?.length ?? 0) === 0,
+                )
+                input.setText(restored.prompt.text)
+                setStore("prompt", restored.prompt)
+                setStore("mode", submission.payload.mode)
+                restoreExtmarksFromPrompt(restored.prompt)
+                input.cursorOffset = restored.cursor
+                setRetryRestored(true)
+                dialog.clear()
+              },
+            },
+          ]
+        : []),
       {
         title: "Stash prompt",
         name: "prompt.stash",
@@ -975,8 +1080,33 @@ export function Prompt(props: PromptProps) {
       void exit()
       return true
     }
-    const slash = argumentSlash(store.prompt.text, keymapCommands())
-    if (slash) {
+    const inputText = expandTrackedPastedText(
+      store.prompt.text,
+      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+        const ref = store.extmarkToPart.get(extmark.id)
+        if (ref?.type !== "pasted") return []
+        const part = store.prompt.pasted[ref.index]
+        if (!part) return []
+        return [{ start: extmark.start, end: extmark.end, text: part.text }]
+      }),
+    )
+    const currentHistory = { ...structuredClone(unwrap(store.prompt)), mode: store.mode }
+    const retained = retry()
+    if (retained && JSON.stringify(currentHistory) !== JSON.stringify(retained.payload.history)) {
+      toast.show({
+        message: "Run Retry previous submission; current draft will be preserved in stash",
+        variant: "error",
+        duration: 5000,
+      })
+      return false
+    }
+    const goal = parseGoalCommand(inputText)
+    if (goal && !goal.goal) {
+      toast.show({ message: "A goal is required", variant: "error" })
+      return false
+    }
+    const slash = argumentSlash(inputText, keymapCommands())
+    if (slash && !goal) {
       clearPrompt()
       await slash.command.run(slash.input)
       return true
@@ -990,25 +1120,80 @@ export function Prompt(props: PromptProps) {
     }
 
     const variant = local.model.variant.current()
-    let sessionID = props.sessionID
-    let session = sessionID ? data.session.get(sessionID) : undefined
+    const promptFiles = store.prompt.files?.map((file) => ({
+      ...file,
+      mention: file.mention ? { ...file.mention } : undefined,
+    }))
+    const promptAgents = store.prompt.agents?.map((agent) => ({
+      ...agent,
+      mention: agent.mention ? { ...agent.mention } : undefined,
+    }))
+    const metadata = promptSkillMetadata(store.prompt.skills ?? [])
+    const editorSelection = editorContext()
+    const candidateEditorSelection = editorSelection && editor.labelState() === "pending" ? editorSelection : undefined
+    const payload: PromptSubmissionPayload = {
+      inputText,
+      goal,
+      files: promptFiles,
+      agents: promptAgents,
+      metadata,
+      mode: store.mode,
+      agentID: agent.id,
+      model: {
+        providerID: selectedModel.providerID,
+        id: selectedModel.modelID,
+        variant,
+      },
+      editor: candidateEditorSelection
+        ? {
+            key: editorSelectionKey(candidateEditorSelection),
+            text: formatEditorContext(candidateEditorSelection),
+          }
+        : undefined,
+      history: currentHistory,
+      cursor: input.cursorOffset,
+    }
+    const key = JSON.stringify({
+      sessionID: props.sessionID,
+      text: payload.inputText,
+      files: payload.files ?? [],
+      agents: payload.agents ?? [],
+      skills: payload.metadata?.skills ?? [],
+      mode: payload.mode,
+      agent: payload.agentID,
+      model: payload.model,
+      editor: payload.editor?.key,
+    })
+    const restoredRetry = retryRestored() && retained && JSON.stringify(payload.history) === JSON.stringify(retained.payload.history)
+    const submission = restoredRetry
+      ? retained
+      : retainSessionSubmission(retained, key, metadata?.skills.length ?? 0, payload, props.sessionID)
+    if (!restoredRetry && submission.key !== key) {
+      toast.show({
+        message: "Run Retry previous submission; current draft will be preserved in stash",
+        variant: "error",
+        duration: 5000,
+      })
+      return false
+    }
+    setRetry(submission)
+    const sessionID = submission.sessionID
+    let session = data.session.get(sessionID)
     let finishMoveProgress = false
-    if (sessionID == null) {
+    if (!submission.creationConfirmed) {
       const directory = await move.getDirectory()
       if (move.pending() && !directory) return false
       finishMoveProgress = Boolean(move.progress())
       const location = data.location.default()
 
-      const created = await client.api.session
-        .create({
+      const created = await confirmSessionCreation(submission, (id) =>
+        client.api.session.create({
+          id,
           location: directory ? { directory } : location,
-          agent: agent.id,
-          model: {
-            providerID: selectedModel.providerID,
-            id: selectedModel.modelID,
-            variant,
-          },
-        })
+          agent: submission.payload.agentID,
+          model: submission.payload.model,
+        }),
+      )
         .catch(() => undefined)
 
       if (!created) {
@@ -1021,45 +1206,51 @@ export function Prompt(props: PromptProps) {
         return true
       }
 
-      sessionID = created.id
       session = created
     }
 
-    const inputText = expandTrackedPastedText(
-      store.prompt.text,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const ref = store.extmarkToPart.get(extmark.id)
-        if (ref?.type !== "pasted") return []
-        const part = store.prompt.pasted[ref.index]
-        if (!part) return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
+    const currentMode = submission.payload.mode
+    const pendingEditorSelection = submission.payload.editor
 
-    // Capture mode before it gets reset
-    const currentMode = store.mode
-    const editorSelection = editorContext()
-    const pendingEditorSelection = editorSelection && editor.labelState() === "pending" ? editorSelection : undefined
-
-    if (store.mode === "shell") {
+    if (submission.payload.goal) {
+      move.startSubmit()
+      const result = await activateGoal({
+        sessionID,
+        id: submission.promptID,
+        goal: submission.payload.goal.goal,
+        get: () => client.api.session.autonomy.get({ sessionID }),
+        set: (payload) => client.api.session.autonomy.set({ sessionID, payload }),
+        prompt: (input) => client.api.session.prompt(input),
+      }).then(
+        (state) => ({ state }),
+        (error) => ({ error }),
+      )
+      if ("error" in result) {
+        toast.show({ title: "Failed to set goal", message: errorMessage(result.error), variant: "error" })
+        return false
+      }
+      props.onAutonomyUpdated?.(sessionID, result.state)
+      toast.show({ message: "Goal mode activated", variant: "success", duration: 3000 })
+    } else if (submission.payload.mode === "shell") {
       move.startSubmit()
       void client.api.session.shell({
         sessionID,
-        command: inputText,
+        command: submission.payload.inputText,
       })
       setStore("mode", "normal")
     } else if (
-      inputText.startsWith("/") &&
+      submission.payload.inputText.startsWith("/") &&
       (data.location.command.list(currentLocation.current) ?? []).some(
-        (command) => command.name === inputText.split("\n")[0].split(" ")[0].slice(1),
+        (command) => command.name === submission.payload.inputText.split("\n")[0].split(" ")[0].slice(1),
       )
     ) {
       move.startSubmit()
       // Parse command from first line, preserve multi-line content in arguments
-      const firstLineEnd = inputText.indexOf("\n")
-      const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
+      const firstLineEnd = submission.payload.inputText.indexOf("\n")
+      const firstLine =
+        firstLineEnd === -1 ? submission.payload.inputText : submission.payload.inputText.slice(0, firstLineEnd)
       const [command, ...firstLineArgs] = firstLine.split(" ")
-      const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
+      const restOfInput = firstLineEnd === -1 ? "" : submission.payload.inputText.slice(firstLineEnd + 1)
       const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
 
       void client.api.session
@@ -1067,24 +1258,25 @@ export function Prompt(props: PromptProps) {
           sessionID,
           command: command.slice(1),
           arguments: args,
-          agent: agent.id,
-          model: { providerID: selectedModel.providerID, id: selectedModel.modelID, variant },
-          files: store.prompt.files,
-          agents: store.prompt.agents,
+          agent: submission.payload.agentID,
+          model: submission.payload.model,
+          files: submission.payload.files,
+          agents: submission.payload.agents,
         })
         .catch((error) => {
           toast.show({ title: "Failed to run command", message: errorMessage(error), variant: "error" })
         })
     } else if (
-      inputText.startsWith("/") &&
+      submission.payload.inputText.startsWith("/") &&
       (data.location.skill.list(currentLocation.current) ?? []).some(
-        (skill) => skill.slash === true && skill.id === inputText.split("\n")[0].split(" ")[0].slice(1),
+        (skill) =>
+          skill.slash === true && skill.id === submission.payload.inputText.split("\n")[0].split(" ")[0].slice(1),
       )
     ) {
       move.startSubmit()
       void client.api.session.skill({
         sessionID,
-        skill: inputText.split("\n")[0].split(" ")[0].slice(1),
+        skill: submission.payload.inputText.split("\n")[0].split(" ")[0].slice(1),
       })
     } else {
       move.startSubmit()
@@ -1092,17 +1284,17 @@ export function Prompt(props: PromptProps) {
         await data.session.sync(sessionID)
         session = data.session.get(sessionID)
       }
-      if (session?.agent !== agent.id) {
-        await client.api.session.switchAgent({ sessionID, agent: agent.id })
+      if (session?.agent !== submission.payload.agentID) {
+        await client.api.session.switchAgent({ sessionID, agent: submission.payload.agentID })
       }
       if (
-        session?.model?.providerID !== selectedModel.providerID ||
-        session.model.id !== selectedModel.modelID ||
-        (session.model.variant ?? "default") !== (variant ?? "default")
+        session?.model?.providerID !== submission.payload.model.providerID ||
+        session.model.id !== submission.payload.model.id ||
+        (session.model.variant ?? "default") !== (submission.payload.model.variant ?? "default")
       ) {
         await client.api.session.switchModel({
           sessionID,
-          model: { providerID: selectedModel.providerID, id: selectedModel.modelID, variant },
+          model: submission.payload.model,
         })
       }
       if (session?.revert) {
@@ -1119,8 +1311,9 @@ export function Prompt(props: PromptProps) {
         // Keep editor context hidden while admitting it before the corresponding user prompt.
         const error = await client.api.session
           .synthetic({
+            id: submission.syntheticID,
             sessionID,
-            text: formatEditorContext(pendingEditorSelection),
+            text: pendingEditorSelection.text,
             resume: false,
           })
           .then(
@@ -1132,27 +1325,37 @@ export function Prompt(props: PromptProps) {
           return false
         }
       }
-      const error = await client.api.session
-        .prompt({
+      const prompt = (resume: boolean) =>
+        client.api.session.prompt({
+          id: submission.promptID,
           sessionID,
-          text: inputText,
-          files: store.prompt.files,
-          agents: store.prompt.agents,
+          text: submission.payload.inputText,
+          files: submission.payload.files,
+          agents: submission.payload.agents,
+          metadata: submission.payload.metadata,
+          resume,
         })
-        .then(
+      const error = await submitSessionPrompt({
+        prompt,
+        skills: (submission.payload.metadata?.skills ?? []).map((skill, index) => () =>
+          client.api.session.skill({ id: submission.skillIDs[index], sessionID, skill: skill.id, resume: false }),
+        ),
+      }).then(
           () => undefined,
           (error) => error,
         )
       if (error) {
-        toast.show({ title: "Failed to send prompt", message: errorMessage(error), variant: "error" })
+        toast.show({ title: "Failed to send prompt or activate skill", message: errorMessage(error), variant: "error" })
         return false
       }
       if (pendingEditorSelection) editor.markSelectionSent()
     }
     history.append({
-      ...store.prompt,
+      ...submission.payload.history,
       mode: currentMode,
     })
+    setRetry(undefined)
+    setRetryRestored(false)
     input.extmarks.clear()
     setStore("prompt", emptyPrompt())
     setStore("extmarkToPart", new Map())
@@ -1393,7 +1596,10 @@ export function Prompt(props: PromptProps) {
                 syncExtmarksWithPromptParts()
                 setCursorVersion((value) => value + 1)
               }}
-              onCursorChange={() => setCursorVersion((value) => value + 1)}
+              onCursorChange={() => {
+                setCursorVersion((value) => value + 1)
+                auto()?.onInput(input.plainText)
+              }}
               onKeyDown={(e: { preventDefault(): void }) => {
                 if (props.disabled) {
                   e.preventDefault()
@@ -1658,6 +1864,7 @@ export function Prompt(props: PromptProps) {
         value={store.prompt.text}
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
+        skillStyleId={skillStyleId}
         promptPartTypeId={() => promptPartTypeId}
       />
     </>

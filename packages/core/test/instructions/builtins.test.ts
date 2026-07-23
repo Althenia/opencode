@@ -52,6 +52,8 @@ describe("InstructionBuiltIns", () => {
           "</env>",
           "",
           `Today's date: ${localDate(timestamp)}`,
+          "",
+          "Before launching a subagent, inspect the current direct child TeamView. Reuse a relevant direct terminal child with subagent_control send when its agent, domain, model, and retained context fit; send only incremental context. Launch a new child when role, model, location, permission, or task context does not fit. Use resume only for durable pending work.",
         ].join("\n"),
       )
     }),

@@ -4,6 +4,7 @@ import { type DialogContext, useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { useToast } from "../ui/toast"
 import { errorMessage } from "../util/error"
+import { activateGoal, retainSessionSubmission, type SessionSubmissionRetry } from "../util/session-autonomy"
 
 export function DialogSessionGoal(props: {
   sessionID: string
@@ -13,6 +14,7 @@ export function DialogSessionGoal(props: {
   const dialog = useDialog()
   const client = useClient()
   const toast = useToast()
+  let retry: SessionSubmissionRetry<{ sessionID: string; goal: string }> | undefined
 
   return (
     <DialogPrompt
@@ -22,9 +24,30 @@ export function DialogSessionGoal(props: {
       onConfirm={(value) => {
         const goal = value.trim()
         if (!goal) return
-        void client.api.session.autonomy
-          .set({ sessionID: props.sessionID, payload: { mode: "goal", goal } })
+        const key = JSON.stringify({ sessionID: props.sessionID, goal })
+        const submission = retainSessionSubmission(retry, key, 0, {
+          sessionID: props.sessionID,
+          goal,
+        })
+        if (submission.key !== key) {
+          toast.show({
+            message: "Retry the previous goal before submitting changed content",
+            variant: "error",
+            duration: 5000,
+          })
+          return
+        }
+        retry = submission
+        void activateGoal({
+          sessionID: submission.payload.sessionID,
+          id: retry.promptID,
+          goal: submission.payload.goal,
+          get: () => client.api.session.autonomy.get({ sessionID: submission.payload.sessionID }),
+          set: (payload) => client.api.session.autonomy.set({ sessionID: submission.payload.sessionID, payload }),
+          prompt: (input) => client.api.session.prompt(input),
+        })
           .then((state) => {
+            retry = undefined
             props.onUpdated?.(state)
             toast.show({ message: "Goal mode activated", variant: "success", duration: 3000 })
             dialog.clear()

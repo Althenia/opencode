@@ -149,6 +149,56 @@ describe("Session orchestration projection", () => {
     }),
   )
 
+  it.effect("reactivates every terminal task and clears stale execution state", () =>
+    Effect.gen(function* () {
+      yield* seed
+      yield* launch()
+      yield* update({ type: "started" })
+      yield* update({ type: "progressed", progress: { text: "stale", time: 3 } })
+      const events = yield* EventV2.Service
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID: childID,
+        assistantMessageID: SessionMessage.ID.make("msg_reused_assistant"),
+        agent: AgentV2.ID.make("build"),
+        model,
+      })
+      yield* update({ type: "completed", excerpt: "done" })
+      yield* update({ type: "started" })
+
+      const db = (yield* Database.Service).db
+      expect(
+        yield* db.select().from(SessionTaskTable).where(eq(SessionTaskTable.session_id, childID)).get(),
+      ).toMatchObject({
+        state: "running",
+        progress: null,
+        progress_time: null,
+        question_id: null,
+        question: null,
+        question_data: null,
+        question_time: null,
+        attempt_started: false,
+      })
+      yield* update({ type: "completed", excerpt: "done again" })
+      yield* update({ type: "started" })
+      yield* update({ type: "failed", error: "failed" })
+      yield* update({ type: "started" })
+      yield* update({ type: "lost" })
+      yield* update({ type: "started" })
+      const question = {
+        id: SessionOrchestrationSchema.QuestionID.make("qst_reuse"),
+        text: "Proceed?",
+        time: 4,
+      }
+      yield* update({ type: "question_asked", question })
+      yield* update({ type: "cancel_requested" })
+      yield* update({ type: "cancelled" })
+      yield* update({ type: "started" })
+      expect(
+        yield* db.select().from(SessionTaskTable).where(eq(SessionTaskTable.session_id, childID)).get(),
+      ).toMatchObject({ state: "running", question_id: null, revision: 14 })
+    }),
+  )
+
   it.effect("durably detaches a foreground task before terminal notification", () =>
     Effect.gen(function* () {
       yield* seed
@@ -276,6 +326,18 @@ describe("Session orchestration helpers", () => {
         }),
       )
       const rendered = SessionOrchestration.renderTeamView(tasks)
+      const ordered = SessionOrchestration.renderTeamView([
+        { ...tasks[1]!, state: "completed", time: { ...tasks[1]!.time, updated: 1 } },
+        { ...tasks[3]!, state: "running", time: { ...tasks[3]!.time, updated: 3 } },
+        { ...tasks[0]!, state: "running", time: { ...tasks[0]!.time, updated: 3 } },
+        { ...tasks[2]!, state: "completed", time: { ...tasks[2]!.time, updated: 9 } },
+      ])
+      expect(ordered.view.children.map((task) => task.sessionID)).toEqual([
+        SessionSchema.ID.make("ses_00"),
+        SessionSchema.ID.make("ses_03"),
+        SessionSchema.ID.make("ses_02"),
+        SessionSchema.ID.make("ses_01"),
+      ])
       expect(Buffer.byteLength(rendered.text)).toBeLessThanOrEqual(32 * 1024)
       expect(
         rendered.view.children.every(

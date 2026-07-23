@@ -1,4 +1,4 @@
-import { createMemo, createSignal, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, on, Show } from "solid-js"
 import { useRouteData } from "../../context/route"
 import { useData } from "../../context/data"
 import { useTheme } from "../../context/theme"
@@ -17,6 +17,13 @@ export function SubagentFooter() {
   const route = useRouteData("session")
   const data = useData()
   const session = createMemo(() => data.session.get(route.sessionID))
+
+  createEffect(
+    on(
+      () => route.sessionID,
+      (sessionID) => void data.session.diagnostics.sync(sessionID).catch(() => undefined),
+    ),
+  )
 
   const subagentInfo = createMemo(() => {
     const s = session()

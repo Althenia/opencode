@@ -6,6 +6,7 @@ import type { Types } from "effect"
 import { createSimpleContext } from "../context/helper"
 import { useTuiPaths } from "../context/runtime"
 import { appendText, readText, writeText } from "../util/persistence"
+import type { PromptSkill } from "./skill"
 
 export type PastedText = {
   text: string
@@ -18,15 +19,16 @@ export type PastedText = {
 
 export type PromptInfo = Types.DeepMutable<Pick<SessionPromptInput, "text" | "files" | "agents">> & {
   pasted: PastedText[]
+  skills?: PromptSkill[]
   mode?: "normal" | "shell"
 }
 
 export type PromptPartRef = {
-  type: "file" | "agent" | "pasted"
+  type: "file" | "agent" | "pasted" | "skill"
   index: number
 }
 
-export const emptyPrompt = (): PromptInfo => ({ text: "", files: [], agents: [], pasted: [] })
+export const emptyPrompt = (): PromptInfo => ({ text: "", files: [], agents: [], pasted: [], skills: [] })
 
 export const MAX_HISTORY_ENTRIES = 50
 

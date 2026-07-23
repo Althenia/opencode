@@ -19,7 +19,7 @@ import { KeyedMutex } from "../effect/keyed-mutex"
 import { PermissionV2 } from "../permission"
 import { Hash } from "../util/hash"
 import { Context, Effect, Layer, Schema } from "effect"
-import { asc, eq, inArray } from "drizzle-orm"
+import { and, asc, eq, inArray } from "drizzle-orm"
 import { SessionV2 } from "../session"
 import { SessionExecution } from "./execution"
 import { SessionEvent } from "./event"
@@ -30,6 +30,7 @@ import { SessionSchema } from "./schema"
 import { SessionPendingTable, SessionTable, SessionTaskTable } from "./sql"
 
 const TeamViewBytes = 32 * 1024
+const terminalStates = new Set<State>(["cancelled", "completed", "failed", "lost"])
 export { truncateUtf8 }
 export const failureText = (input: string) => truncateUtf8(input, 16 * 1024)
 
@@ -53,7 +54,6 @@ export const identities = (parentID: SessionSchema.ID, messageID: SessionMessage
 }
 
 export const renderTeamView = (tasks: ReadonlyArray<Task>, maxBytes = TeamViewBytes) => {
-  const terminal = new Set<State>(["cancelled", "completed", "failed", "lost"])
   const sorted = tasks
     .map(
       (task): Task => ({
@@ -64,9 +64,9 @@ export const renderTeamView = (tasks: ReadonlyArray<Task>, maxBytes = TeamViewBy
       }),
     )
     .toSorted((a, b) => {
-      const state = Number(terminal.has(a.state)) - Number(terminal.has(b.state))
+      const state = Number(terminalStates.has(a.state)) - Number(terminalStates.has(b.state))
       if (state !== 0) return state
-      if (a.time.created !== b.time.created) return a.time.created - b.time.created
+      if (a.time.updated !== b.time.updated) return b.time.updated - a.time.updated
       return String(a.sessionID).localeCompare(String(b.sessionID))
     })
   const prefix = "Current direct subagent TeamView (JSON data):\n"
@@ -411,7 +411,7 @@ const layer = Layer.effect(
         locks.withLock(input.childID)(
           Effect.gen(function* () {
             const row = yield* owned(input.parentID, input.childID)
-            if (row.state !== "running")
+            if (row.state !== "running" && !terminalStates.has(row.state))
               return yield* new ConflictError({ message: `Cannot send to task in ${row.state}` })
             yield* sessions
               .synthetic({
@@ -432,9 +432,19 @@ const layer = Layer.effect(
                 Effect.mapError((error) =>
                   error._tag === "Session.NotFoundError"
                     ? error
-                    : new ConflictError({ message: `Conflicting parent message for ${input.childID}` }),
+                  : new ConflictError({ message: `Conflicting parent message for ${input.childID}` }),
                 ),
               )
+            const pending = yield* db
+              .select({ id: SessionPendingTable.id })
+              .from(SessionPendingTable)
+              .where(and(eq(SessionPendingTable.id, input.messageID), eq(SessionPendingTable.session_id, input.childID)))
+              .get()
+              .pipe(Effect.orDie)
+            if (terminalStates.has(row.state)) {
+              if (!pending) return taskFromRow(row)
+              yield* publish(input.childID, { type: "started" })
+            }
             yield* execution.wake(input.childID)
             return yield* current(input.childID)
           }),
@@ -595,13 +605,23 @@ const layer = Layer.effect(
         return renderTeamView(yield* result.list(parentID))
       }),
       recover: Effect.gen(function* () {
-        const rows = yield* db
+        const active = yield* db
           .select()
           .from(SessionTaskTable)
           .where(inArray(SessionTaskTable.state, ["starting", "running", "cancelling"]))
           .orderBy(asc(SessionTaskTable.time_created), asc(SessionTaskTable.session_id))
           .all()
           .pipe(Effect.orDie)
+        const terminal = yield* db
+          .select({ session_id: SessionTaskTable.session_id })
+          .from(SessionPendingTable)
+          .innerJoin(SessionTaskTable, eq(SessionTaskTable.session_id, SessionPendingTable.session_id))
+          .where(inArray(SessionTaskTable.state, ["cancelled", "completed", "failed", "lost"]))
+          .groupBy(SessionTaskTable.session_id)
+          .orderBy(asc(SessionTaskTable.time_created), asc(SessionTaskTable.session_id))
+          .all()
+          .pipe(Effect.orDie)
+        const rows = [...active, ...terminal]
         yield* Effect.forEach(
           rows,
           (row) =>
@@ -610,7 +630,10 @@ const layer = Layer.effect(
                 const latest = yield* task(row.session_id)
                 if (
                   !latest ||
-                  (latest.state !== "starting" && latest.state !== "running" && latest.state !== "cancelling")
+                  (latest.state !== "starting" &&
+                    latest.state !== "running" &&
+                    latest.state !== "cancelling" &&
+                    !terminalStates.has(latest.state))
                 )
                   return
                 if (latest.state === "cancelling") {
@@ -631,6 +654,12 @@ const layer = Layer.effect(
                   .limit(1)
                   .get()
                   .pipe(Effect.orDie)
+                if (terminalStates.has(latest.state)) {
+                  if (!pending) return
+                  yield* publish(latest.session_id, { type: "started" })
+                  yield* execution.wake(latest.session_id)
+                  return
+                }
                 if (!pending) {
                   if (latest.state === "starting") yield* publish(latest.session_id, { type: "started" })
                   yield* publish(latest.session_id, {

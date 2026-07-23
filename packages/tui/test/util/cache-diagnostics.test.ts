@@ -13,7 +13,7 @@ const diagnostics: SessionCacheDiagnostics = {
 test("formats context and cache as separate labeled values", () => {
   expect(formatCacheDiagnostics(diagnostics)).toEqual({
     context: "Context 1.0K/2.0K (52%; includes cached)",
-    cache: "Cache 90% · 900 read · 0 write · 100 uncached",
+    cache: "Cache hit 90% · 900 read · 0 write · 100 uncached",
   })
 })
 
@@ -26,6 +26,6 @@ test("handles missing limits and ratios safely", () => {
     }),
   ).toEqual({
     context: "Context 5 (includes cached)",
-    cache: "Cache n/a · 900 read · 0 write · 100 uncached",
+    cache: "Cache hit n/a · 900 read · 0 write · 100 uncached",
   })
 })

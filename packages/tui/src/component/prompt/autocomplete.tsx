@@ -17,16 +17,17 @@ import { SplitBorder } from "../../ui/border"
 import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "../../util/locale"
 import type { PromptInfo, PromptPartRef } from "../../prompt/history"
+import type { PromptSkill } from "../../prompt/skill"
 import { useFrecency } from "../../prompt/frecency"
 import { Keymap } from "../../context/keymap"
-import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
+import { autocompleteTriggerIndex, displayCharAt, mentionTriggerIndex, skillTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/client"
 import { stringWidth } from "../../util/string-width"
 import { parseFileLineRange, stripFileLineRange } from "../../prompt/parse"
 
 export type AutocompleteRef = {
   onInput: (value: string) => void
-  visible: false | "@" | "/"
+  visible: false | "@" | "/" | "$"
 }
 
 export type AutocompleteOption = {
@@ -50,6 +51,7 @@ export function Autocomplete(props: {
   ref: (ref: AutocompleteRef) => void
   fileStyleId: number
   agentStyleId: number
+  skillStyleId: number
   promptPartTypeId: () => number
 }) {
   const editor = useEditorContext()
@@ -139,14 +141,16 @@ export function Autocomplete(props: {
     text: string,
     part:
       | { type: "file"; value: NonNullable<PromptInfo["files"]>[number]; path?: string }
-      | { type: "agent"; value: NonNullable<PromptInfo["agents"]>[number] },
+      | { type: "agent"; value: NonNullable<PromptInfo["agents"]>[number] }
+      | { type: "skill"; value: PromptSkill },
   ) {
     const input = props.input()
     const currentCursorOffset = input.cursorOffset
 
     const charAfterCursor = displayCharAt(props.value, currentCursorOffset)
     const needsSpace = charAfterCursor !== " "
-    const append = "@" + text + (needsSpace ? " " : "")
+    const prefix = part.type === "skill" ? "$" : "@"
+    const append = prefix + text + (needsSpace ? " " : "")
 
     input.cursorOffset = store.index
     const startCursor = input.logicalCursor
@@ -156,11 +160,11 @@ export function Autocomplete(props: {
     input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
     input.insertText(append)
 
-    const virtualText = "@" + text
+    const virtualText = prefix + text
     const extmarkStart = store.index
     const extmarkEnd = extmarkStart + stringWidth(virtualText)
 
-    const styleId = part.type === "file" ? props.fileStyleId : props.agentStyleId
+    const styleId = part.type === "file" ? props.fileStyleId : part.type === "agent" ? props.agentStyleId : props.skillStyleId
 
     const extmarkId = input.extmarks.create({
       start: extmarkStart,
@@ -191,6 +195,19 @@ export function Autocomplete(props: {
         const index = files.length
         files.push(part.value)
         props.setExtmark({ type: "file", index }, extmarkId)
+        return
+      }
+
+      if (part.type === "skill") {
+        const skills = (draft.skills ??= [])
+        if (part.value.mention) {
+          part.value.mention.start = extmarkStart
+          part.value.mention.end = extmarkEnd
+          part.value.mention.text = virtualText
+        }
+        const index = skills.length
+        skills.push(part.value)
+        props.setExtmark({ type: "skill", index }, extmarkId)
         return
       }
 
@@ -279,7 +296,7 @@ export function Autocomplete(props: {
   const [files] = createResource(
     () => ({ query: search(), location: location.current, visible: store.visible }),
     async (input) => {
-      if (!input.visible || input.visible === "/") return { options: [], failed: false }
+      if (input.visible !== "@") return { options: [], failed: false }
       if (referenceMatch()) return { options: [], failed: false }
       const { lineRange, base } = parseFileLineRange(input.query ?? "")
 
@@ -327,7 +344,7 @@ export function Autocomplete(props: {
   )
 
   const mcpResources = createMemo(() => {
-    if (!store.visible || store.visible === "/") return []
+    if (store.visible !== "@") return []
 
     const options: AutocompleteOption[] = []
     const width = props.anchor().width - 4
@@ -373,6 +390,26 @@ export function Autocomplete(props: {
         }),
       )
   })
+
+  const skills = createMemo(() =>
+    (data.location.skill.list(location.current) ?? []).map(
+      (skill): AutocompleteOption => ({
+        display: "$" + skill.id,
+        value: `${skill.id} ${skill.name} ${skill.description ?? ""}`,
+        description: skill.description ?? skill.name,
+        onSelect: () => {
+          insertPart(skill.id, {
+            type: "skill",
+            value: {
+              id: skill.id,
+              name: skill.name,
+              mention: { start: 0, end: 0, text: "" },
+            },
+          })
+        },
+      }),
+    ),
+  )
 
   const referenceAliases = createMemo(() =>
     references()
@@ -452,6 +489,7 @@ export function Autocomplete(props: {
     const agentsValue = agents()
     const referenceAliasesValue = referenceAliases()
     const commandsValue = commands()
+    const skillsValue = skills()
     const searchValue = search()
 
     if (store.visible === "@" && referenceMatchValue) {
@@ -462,7 +500,11 @@ export function Autocomplete(props: {
     // it shouldn't be additionally sorted by fuzzysort as it will loose the results
     const fileOptions: AutocompleteOption[] = store.visible === "@" && !files.loading ? fileSearch.options : []
     const nonFileOptions: AutocompleteOption[] =
-      store.visible === "@" ? [...referenceAliasesValue, ...agentsValue, ...mcpResources()] : [...commandsValue]
+      store.visible === "@"
+        ? [...referenceAliasesValue, ...agentsValue, ...mcpResources()]
+        : store.visible === "$"
+          ? skillsValue
+          : [...commandsValue]
 
     if (!searchValue) {
       return [...nonFileOptions, ...fileOptions]
@@ -472,8 +514,8 @@ export function Autocomplete(props: {
       .go(stripFileLineRange(searchValue), nonFileOptions, {
         keys: [
           (obj) => stripFileLineRange((obj.value ?? obj.display).trimEnd()),
-          // Match description for slash commands only; for "@" it surfaced unrelated items.
-          ...(store.visible === "/" ? ["description" as const] : []),
+          // Matching descriptions for references surfaced unrelated items.
+          ...(store.visible !== "@" ? ["description" as const] : []),
           (obj) => obj.aliases?.join(" ") ?? "",
         ],
         threshold: store.visible === "@" ? 0.5 : 0,
@@ -603,7 +645,7 @@ export function Autocomplete(props: {
     ],
   }))
 
-  function show(mode: "@" | "/") {
+  function show(mode: "@" | "/" | "$") {
     setStore({
       visible: mode,
       index: props.input().cursorOffset,
@@ -638,13 +680,17 @@ export function Autocomplete(props: {
       },
       onInput(value) {
         if (store.visible) {
+          const outsideToken =
+            store.visible !== "/" &&
+            autocompleteTriggerIndex(value, props.input().cursorOffset, store.visible) !== store.index
           if (
             // Typed text before the trigger
             props.input().cursorOffset <= store.index ||
             // There is a space between the trigger and the cursor
             props.input().getTextRange(store.index, props.input().cursorOffset).match(/\s/) ||
             // "/<command>" is not the sole content
-            (store.visible === "/" && value.match(/^\S+\s+\S+\s*$/))
+            (store.visible === "/" && value.match(/^\S+\s+\S+\s*$/)) ||
+            outsideToken
           ) {
             hide()
           }
@@ -667,6 +713,13 @@ export function Autocomplete(props: {
         if (idx !== undefined) {
           show("@")
           setStore("index", idx)
+          return
+        }
+
+        const skill = skillTriggerIndex(value, offset)
+        if (skill !== undefined) {
+          show("$")
+          setStore("index", skill)
         }
       },
     })
@@ -683,6 +736,7 @@ export function Autocomplete(props: {
   const scrollAcceleration = createMemo(() => getScrollAcceleration(config))
   const emptyMessage = createMemo(() => {
     if (store.visible === "/") return "No matching commands"
+    if (store.visible === "$") return "No matching skills"
     if (files.loading) return "Searching…"
     if (files().failed) return "Could not search files. Keep typing to try again."
     return "No matching files, agents, or references"
