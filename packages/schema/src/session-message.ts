@@ -16,7 +16,6 @@ import { Skill as SkillSchema } from "./skill.js"
 import { Money } from "./money.js"
 import { Snapshot } from "./snapshot.js"
 import { TokenUsage } from "./token-usage.js"
-import { SessionCacheDiagnostics } from "./session-cache-diagnostics.js"
 
 export const ID = Schema.String.check(Schema.isStartsWith("msg_")).pipe(
   Schema.brand("Session.Message.ID"),
@@ -201,7 +200,6 @@ export const Assistant = Schema.Struct({
   tokens: TokenUsage.Info.pipe(optional),
   diagnostics: Schema.Struct({
     contextLimit: NonNegativeInt.pipe(optional),
-    cacheMechanism: SessionCacheDiagnostics.Mechanism,
   }).pipe(optional),
   error: SessionError.Error.pipe(optional),
   retry: AssistantRetry.pipe(optional),

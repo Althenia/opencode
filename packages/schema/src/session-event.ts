@@ -22,7 +22,6 @@ import { Snapshot } from "./snapshot.js"
 import { TokenUsage } from "./token-usage.js"
 import { SessionPending } from "./session-pending.js"
 import { Project } from "./project.js"
-import { SessionCacheDiagnostics } from "./session-cache-diagnostics.js"
 import { SessionOrchestration } from "./session-orchestration.js"
 
 export { FileAttachment }
@@ -273,7 +272,6 @@ export namespace Step {
       cost: Money.USD,
       tokens: TokenUsage.Info,
       contextLimit: NonNegativeInt.pipe(optional),
-      cacheMechanism: SessionCacheDiagnostics.Mechanism.pipe(optional),
       snapshot: Snapshot.ID.pipe(optional),
       files: Schema.Array(RelativePath).pipe(optional),
     },
@@ -290,7 +288,6 @@ export namespace Step {
       cost: Money.USD.pipe(optional),
       tokens: TokenUsage.Info.pipe(optional),
       contextLimit: NonNegativeInt.pipe(optional),
-      cacheMechanism: SessionCacheDiagnostics.Mechanism.pipe(optional),
       snapshot: Snapshot.ID.pipe(optional),
       files: Schema.Array(RelativePath).pipe(optional),
     },

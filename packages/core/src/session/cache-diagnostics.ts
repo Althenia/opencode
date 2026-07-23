@@ -11,7 +11,6 @@ export interface CalculateInput {
   readonly tokens: TokenUsage.Info
   readonly estimatedCost: Money.USD
   readonly contextLimit?: number
-  readonly cacheMechanism?: Session.CacheMechanism
 }
 
 const safe = (value: number) => Math.max(0, Number.isFinite(value) ? value : 0)
@@ -63,7 +62,7 @@ export function calculate(input: CalculateInput): Session.CacheDiagnostics {
     cache: {
       eligible,
       ...(eligible > 0 ? { hitRatio: cacheRead / eligible } : {}),
-      mechanism: input.cacheMechanism ?? mechanism(input.model, input.tokens),
+      mechanism: mechanism(input.model, input.tokens),
     },
     estimatedCost: input.estimatedCost,
   }
@@ -96,6 +95,5 @@ export function fromMessages(
     tokens: last.tokens,
     estimatedCost: last.cost ?? Money.USD.zero,
     contextLimit: last.diagnostics?.contextLimit,
-    cacheMechanism: last.diagnostics?.cacheMechanism,
   })
 }

@@ -744,6 +744,25 @@ export type SessionStepStarted = {
   data: { sessionID: string; assistantMessageID: string; agent: string; model: ModelRef; snapshot?: string }
 }
 
+export type SessionStepEnded = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.step.ended"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    assistantMessageID: string
+    finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
+    cost: MoneyUSD
+    tokens: TokenUsageInfo
+    contextLimit?: number
+    snapshot?: string
+    files?: Array<string>
+  }
+}
+
 export type SessionTextStarted = {
   id: string
   created: number
@@ -1248,26 +1267,6 @@ export type SessionCacheDiagnostics = {
   estimatedCost: MoneyUSD
 }
 
-export type SessionStepEnded = {
-  id: string
-  created: number
-  metadata?: { [x: string]: any }
-  type: "session.step.ended"
-  durable: { aggregateID: string; seq: number; version: 1 }
-  location?: LocationRef
-  data: {
-    sessionID: string
-    assistantMessageID: string
-    finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
-    cost: MoneyUSD
-    tokens: TokenUsageInfo
-    contextLimit?: number
-    cacheMechanism?: SessionCacheMechanism
-    snapshot?: string
-    files?: Array<string>
-  }
-}
-
 export type SessionAutonomyGoal = {
   text: string
   status: SessionAutonomyGoalStatus
@@ -1367,7 +1366,6 @@ export type SessionStepFailed = {
     cost?: MoneyUSD
     tokens?: TokenUsageInfo
     contextLimit?: number
-    cacheMechanism?: SessionCacheMechanism
     snapshot?: string
     files?: Array<string>
   }
@@ -2242,7 +2240,7 @@ export type SessionMessageAssistant = {
   finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
   cost?: MoneyUSD
   tokens?: TokenUsageInfo
-  diagnostics?: { contextLimit?: number; cacheMechanism: SessionCacheMechanism }
+  diagnostics?: { contextLimit?: number }
   error?: SessionStructuredError
   retry?: SessionMessageAssistantRetry
 }

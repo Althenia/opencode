@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { CacheHint, LLM, Message } from "../src"
 import { Auth, LLMClient } from "../src/route"
-import { AmazonBedrock } from "../src/providers"
+import { AmazonBedrock, GoogleVertexMessages } from "../src/providers"
 import * as AnthropicMessages from "../src/protocols/anthropic-messages"
 import * as Gemini from "../src/protocols/gemini"
 import * as OpenAIChat from "../src/protocols/openai-chat"
@@ -16,6 +16,11 @@ const anthropicModel = AnthropicMessages.route
 const bedrockModel = AmazonBedrock.configure({
   credentials: { region: "us-east-1", accessKeyId: "fixture", secretAccessKey: "fixture" },
 }).model("anthropic.claude-3-5-sonnet-20241022-v2:0")
+
+const vertexAnthropicModel = GoogleVertexMessages.configure({
+  accessToken: "test",
+  baseURL: "https://vertex.test/v1/projects/test/locations/global/publishers/anthropic/models",
+}).model("claude-sonnet-4-5")
 
 const openaiModel = OpenAIChat.route
   .with({ endpoint: { baseURL: "https://api.openai.test/v1/" }, auth: Auth.bearer("test") })
@@ -79,6 +84,24 @@ describe("applyCachePolicy", () => {
             content: [{ type: "text", text: "latest user message", cache_control: { type: "ephemeral" } }],
           },
         ],
+      })
+    }),
+  )
+
+  it.effect("'auto' follows the Anthropic Messages protocol on Vertex", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: vertexAnthropicModel,
+          system: "Sys",
+          prompt: "hi",
+          cache: "auto",
+        }),
+      )
+
+      expect(prepared.body).toMatchObject({
+        system: [{ type: "text", text: "Sys", cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }] }],
       })
     }),
   )
@@ -200,6 +223,77 @@ describe("applyCachePolicy", () => {
       const body = prepared.body as { system: Array<{ text: string; cache_control?: unknown }> }
       expect(body.system[0]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
       expect(body.system[1]?.cache_control).toEqual({ type: "ephemeral" })
+    }),
+  )
+
+  it.effect("four manual hints consume the automatic breakpoint budget", () =>
+    Effect.gen(function* () {
+      const manual = new CacheHint({ type: "ephemeral" })
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: anthropicModel,
+          tools: [{ name: "t1", description: "t1", inputSchema: { type: "object", properties: {} } }],
+          system: [
+            { type: "text", text: "system one", cache: manual },
+            { type: "text", text: "system two", cache: manual },
+          ],
+          messages: [
+            new Message({ role: "user", content: [{ type: "text", text: "u1", cache: manual }] }),
+            new Message({ role: "assistant", content: [{ type: "text", text: "a1", cache: manual }] }),
+            Message.user("u2"),
+          ],
+          cache: "auto",
+        }),
+      )
+
+      const body = prepared.body as {
+        tools: Array<{ cache_control?: unknown }>
+        system: Array<{ cache_control?: unknown }>
+        messages: Array<{ content: Array<{ cache_control?: unknown }> }>
+      }
+      expect(body.tools[0]?.cache_control).toBeUndefined()
+      expect(body.system.map((part) => part.cache_control)).toEqual([
+        { type: "ephemeral" },
+        { type: "ephemeral" },
+      ])
+      expect(body.messages.map((message) => message.content[0]?.cache_control)).toEqual([
+        { type: "ephemeral" },
+        { type: "ephemeral" },
+        undefined,
+      ])
+    }),
+  )
+
+  it.effect("default auto hints do not precede a manual one-hour hint", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: anthropicModel,
+          tools: [{ name: "t1", description: "t1", inputSchema: { type: "object", properties: {} } }],
+          system: [
+            {
+              type: "text",
+              text: "one-hour prefix",
+              cache: new CacheHint({ type: "ephemeral", ttlSeconds: 3600 }),
+            },
+            { type: "text", text: "default prefix" },
+          ],
+          prompt: "hi",
+          cache: "auto",
+        }),
+      )
+
+      const body = prepared.body as {
+        tools: Array<{ cache_control?: unknown }>
+        system: Array<{ cache_control?: unknown }>
+        messages: Array<{ content: Array<{ cache_control?: unknown }> }>
+      }
+      expect(body.tools[0]?.cache_control).toBeUndefined()
+      expect(body.system.map((part) => part.cache_control)).toEqual([
+        { type: "ephemeral", ttl: "1h" },
+        { type: "ephemeral" },
+      ])
+      expect(body.messages[0]?.content[0]?.cache_control).toEqual({ type: "ephemeral" })
     }),
   )
 

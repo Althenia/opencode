@@ -2748,12 +2748,24 @@ test("loads and refreshes normalized session diagnostics", async () => {
     await data.session.diagnostics.sync("ses_test")
     expect(data.session.diagnostics.get("ses_test")?.cache.hitRatio).toBe(0.5)
 
+    emitEvent(events, {
+      id: "evt_diagnostics_started",
+      created: 1,
+      type: "session.step.started",
+      durable: durable("ses_test", 1),
+      data: {
+        sessionID: "ses_test",
+        assistantMessageID: "msg_assistant",
+        agent: "build",
+        model: { providerID: "openai", id: "model" },
+      },
+    })
     hitRatio = 0.9
     emitEvent(events, {
       id: "evt_diagnostics",
-      created: 1,
+      created: 2,
       type: "session.step.ended",
-      durable: durable("ses_test", 1),
+      durable: durable("ses_test", 2),
       data: {
         sessionID: "ses_test",
         assistantMessageID: "msg_assistant",
@@ -2761,10 +2773,13 @@ test("loads and refreshes normalized session diagnostics", async () => {
         cost: 0,
         tokens: { input: 100, output: 20, reasoning: 10, cache: { read: 900, write: 0 } },
         contextLimit: 2_000,
-        cacheMechanism: "openai-prompt-cache",
       },
     })
 
+    await wait(() => data.session.message.get("ses_test", "msg_assistant")?.type === "assistant")
+    expect(data.session.message.get("ses_test", "msg_assistant")).toMatchObject({
+      diagnostics: { contextLimit: 2_000 },
+    })
     await wait(() => data.session.diagnostics.get("ses_test")?.cache.hitRatio === 0.9)
     expect(diagnosticRequests).toBe(2)
   } finally {

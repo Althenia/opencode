@@ -98,11 +98,12 @@ describe("OpenAI Chat route", () => {
         LLM.request({
           model: OpenAI.configure({ baseURL: "https://api.openai.test/v1/", apiKey: "test" }).chat("gpt-4o-mini"),
           prompt: "think",
-          providerOptions: { openai: { reasoningEffort: "max" } },
+          providerOptions: { openai: { promptCacheKey: "session_123", reasoningEffort: "max" } },
         }),
       )
 
       expect(prepared.body.store).toBe(false)
+      expect(prepared.body.prompt_cache_key).toBe("session_123")
       expect(prepared.body.reasoning_effort).toBe("max")
     }),
   )
@@ -500,7 +501,7 @@ describe("OpenAI Chat route", () => {
           prompt_tokens: 5,
           completion_tokens: 2,
           total_tokens: 7,
-          prompt_tokens_details: { cached_tokens: 1 },
+          prompt_tokens_details: { cached_tokens: 1, cache_write_tokens: 2 },
           completion_tokens_details: { reasoning_tokens: 0 },
         }),
       )
@@ -508,8 +509,9 @@ describe("OpenAI Chat route", () => {
       const usage = new Usage({
         inputTokens: 5,
         outputTokens: 2,
-        nonCachedInputTokens: 4,
+        nonCachedInputTokens: 2,
         cacheReadInputTokens: 1,
+        cacheWriteInputTokens: 2,
         reasoningTokens: 0,
         totalTokens: 7,
         providerMetadata: {
@@ -517,7 +519,7 @@ describe("OpenAI Chat route", () => {
             prompt_tokens: 5,
             completion_tokens: 2,
             total_tokens: 7,
-            prompt_tokens_details: { cached_tokens: 1 },
+            prompt_tokens_details: { cached_tokens: 1, cache_write_tokens: 2 },
             completion_tokens_details: { reasoning_tokens: 0 },
           },
         },
