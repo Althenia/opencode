@@ -248,6 +248,9 @@ it.effect("generates from fresh settled Session context without durable mutation
     })
     instruction = "Changed context"
     const before = yield* durableState(db, sessionID)
+    const generate = yield* SessionGenerate.Service
+    yield* generate.generate({ sessionID, prompt: "Summarize privately" })
+    const unhookedPromptCacheKey = requests[0]?.providerOptions?.openai?.promptCacheKey
     const hooks = yield* PluginHooks.Service
     yield* hooks.register("session", "context", (event) =>
       Effect.sync(() => {
@@ -255,39 +258,41 @@ it.effect("generates from fresh settled Session context without durable mutation
       }),
     )
 
-    const generate = yield* SessionGenerate.Service
     const result = yield* generate.generate({ sessionID, prompt: "Summarize privately" })
+    const request = requests.at(-1)
+    if (!request) throw new Error("Missing generated request")
 
     expect(result).toBe("Transient answer")
-    expect(requests).toHaveLength(1)
-    expect(requests[0]?.model).toBe(model)
-    expect(requests[0]?.system[0]?.text).toBe("Hooked system")
-    expect(requests[0]?.system.map((part) => part.text)).toContain("Initial context")
-    expect(requests[0]?.http?.headers).toMatchObject({ "X-Session-Id": sessionID })
-    const promptCacheKey = requests[0]?.providerOptions?.openai?.promptCacheKey
+    expect(requests).toHaveLength(2)
+    expect(request?.model).toBe(model)
+    expect(request?.system[0]?.text).toBe("Hooked system")
+    expect(request?.system.map((part) => part.text)).toContain("Initial context")
+    expect(request?.http?.headers).toMatchObject({ "X-Session-Id": sessionID })
+    const promptCacheKey = request?.providerOptions?.openai?.promptCacheKey
     expect(promptCacheKey).toMatch(/^[0-9a-f]{64}$/)
     expect(promptCacheKey).not.toBe(sessionID)
-    expect(requests[0]?.providerOptions?.openrouter).toMatchObject({
+    expect(promptCacheKey).not.toBe(unhookedPromptCacheKey)
+    expect(request?.providerOptions?.openrouter).toMatchObject({
       promptCacheKey,
       sessionID: promptCacheKey,
     })
     expect(
-      requests[0]?.messages.flatMap((message) =>
+      request?.messages.flatMap((message) =>
         message.role === "system"
           ? message.content.flatMap((content) => (content.type === "text" ? [content.text] : []))
           : [],
       ),
     ).toEqual(["Changed context"])
-    expect(userTexts(requests[0])).toEqual(["Existing durable context", "Summarize privately"])
+    expect(userTexts(request)).toEqual(["Existing durable context", "Summarize privately"])
     expect(
-      requests[0]?.messages.flatMap((message) =>
+      request?.messages.flatMap((message) =>
         message.role === "assistant"
           ? message.content.flatMap((content) => (content.type === "text" ? [content.text] : []))
           : [],
       ),
     ).toEqual(["Settled partial answer"])
-    expect(requests[0]?.tools).toEqual([])
-    expect(requests[0]?.toolChoice).toMatchObject({ type: "none" })
+    expect(request?.tools).toEqual([])
+    expect(request?.toolChoice).toMatchObject({ type: "none" })
     expect(yield* durableState(db, sessionID)).toEqual(before)
   }),
 )

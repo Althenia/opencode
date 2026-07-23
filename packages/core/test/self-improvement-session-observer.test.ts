@@ -75,6 +75,60 @@ const providerFailedAssistant = SessionMessage.Assistant.make({
   error: { type: "unknown", message: "secret provider response" },
 })
 
+const assistantWithTool = (id: string, name: string, created: number) =>
+  SessionMessage.Assistant.make({
+    ...assistant,
+    id: messageID(id),
+    content: [
+      SessionMessage.AssistantTool.make({
+        type: "tool",
+        id: `tool-${id}`,
+        name,
+        state: {
+          status: "completed",
+          input: {},
+          structured: {},
+          content: [],
+        },
+        time: { created: at(created), completed: at(created + 200) },
+      }),
+    ],
+    time: { created: at(created), completed: at(created + 500) },
+  })
+
+const assistantWithCorrection = SessionMessage.Assistant.make({
+  ...assistant,
+  id: messageID("same-cycle-correction"),
+  content: [
+    SessionMessage.AssistantTool.make({
+      type: "tool",
+      id: "tool-before-correction",
+      name: "edit",
+      state: {
+        status: "error",
+        input: {},
+        structured: {},
+        content: [],
+        error: { type: "unknown", message: "first attempt failed" },
+      },
+      time: { created: at(1_100), completed: at(1_200) },
+    }),
+    SessionMessage.AssistantTool.make({
+      type: "tool",
+      id: "tool-after-correction",
+      name: "edit",
+      state: {
+        status: "completed",
+        input: {},
+        structured: {},
+        content: [],
+      },
+      time: { created: at(1_300), completed: at(1_400) },
+    }),
+  ],
+  time: { created: at(1_100), completed: at(1_500) },
+})
+
 const evidence = (index: number): SelfImprovementSessionObserver.Evidence => {
   const successful = index % 5 === 0 ? 0 : 1
   const taskIDDigest = SelfImprovement.Digest.make(Hash.sha256(`task-${index}`))
@@ -170,6 +224,72 @@ test("records one privacy-safe observation for a successful prompt cycle", async
   expect(JSON.stringify(observations[0])).not.toContain("/secret")
 })
 
+test("learns a repeated action followed by a correction as a global failure pattern", async () => {
+  const observations: SelfImprovementSessionObserver.Evidence[] = []
+  const service = SelfImprovementSessionObserver.make({
+    locationID,
+    settings: { enabled: true },
+    dependencies: SelfImprovementSessionObserver.dependencies({
+      loadMessages: () =>
+        Effect.succeed([
+          user("initial-action", 1_000),
+          assistantWithTool("initial-action", "edit", 1_100),
+          user("intermediate", 2_000),
+          assistantWithTool("intermediate", "read", 2_100),
+          user("correction", 3_000),
+          assistantWithTool("correction", "edit", 3_100),
+        ]),
+      insertEvidence: () => Effect.succeed(true),
+      listControlEvidence: () => Effect.succeed([]),
+      listBaselines: () => Effect.succeed([]),
+      putSuiteRevision: () => Effect.void,
+      bootstrapBaseline: () => Effect.void,
+      listOpenRuns: () => Effect.succeed([]),
+      recordObservation: (value) => Effect.sync(() => observations.push(value)),
+      appendSample: () => Effect.void,
+    }),
+  })
+
+  await Effect.runPromise(service.record({ sessionID, exit: Exit.succeed(undefined) }))
+
+  expect(observations[0]).toMatchObject({
+    outcomeClass: "failure",
+    outcome: "success",
+    errorClass: "session.correction",
+    orderedToolSymbolIDs: ["edit"],
+  })
+  expect(observations[0]?.metrics.taskQuality).toEqual({ earnedAllowlistedPoints: 1, possibleAllowlistedPoints: 1 })
+  expect(observations[0]?.metrics.repeatFixRate).toEqual({ repeatedTasks: 1, completedTasks: 1 })
+})
+
+test("learns a failed action corrected later in the same prompt cycle", async () => {
+  const observations: SelfImprovementSessionObserver.Evidence[] = []
+  const service = SelfImprovementSessionObserver.make({
+    locationID,
+    settings: { enabled: true },
+    dependencies: SelfImprovementSessionObserver.dependencies({
+      loadMessages: () => Effect.succeed([user("same-cycle-correction", 1_000), assistantWithCorrection]),
+      insertEvidence: () => Effect.succeed(true),
+      listControlEvidence: () => Effect.succeed([]),
+      listBaselines: () => Effect.succeed([]),
+      putSuiteRevision: () => Effect.void,
+      bootstrapBaseline: () => Effect.void,
+      listOpenRuns: () => Effect.succeed([]),
+      recordObservation: (value) => Effect.sync(() => observations.push(value)),
+      appendSample: () => Effect.void,
+    }),
+  })
+
+  await Effect.runPromise(service.record({ sessionID, exit: Exit.succeed(undefined) }))
+
+  expect(observations[0]).toMatchObject({
+    outcomeClass: "failure",
+    outcome: "success",
+    errorClass: "session.correction",
+    orderedToolSymbolIDs: ["edit"],
+  })
+})
+
 test("classifies a tool failure without retaining its raw error", async () => {
   const observations: SelfImprovementSessionObserver.Evidence[] = []
   const service = SelfImprovementSessionObserver.make({
@@ -239,7 +359,11 @@ test("classifies a completed cycle without assistant output as a failure", async
 
   await Effect.runPromise(service.record({ sessionID, exit: Exit.succeed(undefined) }))
 
-  expect(observations[0]).toMatchObject({ outcomeClass: "failure", outcome: "failure", errorClass: "session.no-output" })
+  expect(observations[0]).toMatchObject({
+    outcomeClass: "failure",
+    outcome: "failure",
+    errorClass: "session.no-output",
+  })
 })
 
 test("records cancellation as observation only", async () => {
@@ -368,7 +492,10 @@ test("adds one sample to every matching open evaluation run", async () => {
     requestDigest: SelfImprovement.Digest.make(Hash.sha256("run")),
     createdAt: SelfImprovementLifecycle.TimestampMillis.make(1_000),
   })
-  const samples: Array<{ run: SelfImprovementEvaluation.EvaluationRun; evidence: SelfImprovementSessionObserver.Evidence }> = []
+  const samples: Array<{
+    run: SelfImprovementEvaluation.EvaluationRun
+    evidence: SelfImprovementSessionObserver.Evidence
+  }> = []
   const service = SelfImprovementSessionObserver.make({
     locationID,
     settings: { enabled: true },

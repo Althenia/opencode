@@ -76,12 +76,10 @@ export const SystemContextFunctions: {
   make: SystemContext.make,
   combine: SystemContext.combine,
 }
-export const locationID = (location: Location.Ref): SelfImprovementLifecycle.LocationID =>
-  SelfImprovementLifecycle.LocationID.make(
-    Hash.sha256(
-      `self-improvement/location/v1\0directory\0${location.directory}\0workspace\0${location.workspaceID ?? ""}`,
-    ),
-  )
+export const ScopeID = SelfImprovementLifecycle.LocationID.make(Hash.sha256("self-improvement/global/v1"))
+
+// Self-improvement evidence and policy intentionally span every project, workspace, and Session.
+export const locationID = (_location: Location.Ref): SelfImprovementLifecycle.LocationID => ScopeID
 
 export const S01Traceability = {
   "R-01": {

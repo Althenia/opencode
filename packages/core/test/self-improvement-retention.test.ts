@@ -7,6 +7,7 @@ import { SelfImprovementAuditStore } from "@opencode-ai/core/self-improvement/au
 import { SelfImprovementContracts } from "@opencode-ai/core/self-improvement/contracts"
 import { SelfImprovementRetention } from "@opencode-ai/core/self-improvement/retention"
 import { AbsolutePath, SelfImprovementLifecycle } from "@opencode-ai/schema"
+import { WorkspaceID } from "@opencode-ai/schema/workspace-id"
 import { Effect, Layer } from "effect"
 import { sql } from "drizzle-orm"
 import { location as makeLocation } from "./fixture/location"
@@ -18,6 +19,17 @@ const locationA = SelfImprovementContracts.locationID(locationRef)
 const locationB = "b".repeat(64)
 const makeDb = EffectDrizzleSqlite.makeWithDefaults()
 const locationLayer = Layer.succeed(Location.Service, Location.Service.of(makeLocation(locationRef)))
+
+test("uses one self-improvement scope across projects and workspaces", () => {
+  expect(
+    SelfImprovementContracts.locationID(
+      Location.Ref.make({
+        directory: AbsolutePath.make("/another-project"),
+        workspaceID: WorkspaceID.create(),
+      }),
+    ),
+  ).toBe(locationA)
+})
 
 const createTables = (db: Effect.Success<typeof makeDb>) =>
   Effect.gen(function* () {

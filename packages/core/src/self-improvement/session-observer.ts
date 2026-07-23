@@ -1,6 +1,6 @@
 export * as SelfImprovementSessionObserver from "./session-observer"
 
-import { and, asc, eq, gte, lte, ne } from "drizzle-orm"
+import { and, asc, eq, ne } from "drizzle-orm"
 import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import {
   SelfImprovement,
@@ -9,7 +9,6 @@ import {
   SelfImprovementLearning,
   SelfImprovementLifecycle,
 } from "@opencode-ai/schema"
-import { Config } from "../config"
 import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { Location } from "../location"
@@ -124,15 +123,13 @@ export function make(input: {
       input.dependencies.appendSample({ run, evidence }).pipe(Effect.catchCause(Effect.logWarning)),
     )
   })
-  const record = Effect.fn("SelfImprovementSessionObserver.record")((request: {
-    readonly sessionID: SessionSchema.ID
-    readonly exit: Exit.Exit<void, unknown>
-  }) =>
-    persist(request).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("self-improvement session observation failed", { cause: Cause.pretty(cause) }),
+  const record = Effect.fn("SelfImprovementSessionObserver.record")(
+    (request: { readonly sessionID: SessionSchema.ID; readonly exit: Exit.Exit<void, unknown> }) =>
+      persist(request).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("self-improvement session observation failed", { cause: Cause.pretty(cause) }),
+        ),
       ),
-    ),
   )
   return { record }
 }
@@ -145,19 +142,17 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const db = (yield* Database.Service).db
-    const config = yield* Config.Service
     const location = yield* Location.Service
     const evaluation = yield* SelfImprovementEvaluationStore.Service
     const command = yield* SelfImprovementPrivateEvidenceCommand.Service
     const query = yield* SelfImprovementPrivateQuery.Service
-    const configured = Config.latest(yield* config.entries(), "experimental")?.self_improvement
     const locationID = SelfImprovementContracts.locationID(
       Location.Ref.make({
         directory: location.directory,
         ...(location.workspaceID === undefined ? {} : { workspaceID: location.workspaceID }),
       }),
     )
-    const producerID = configured?.evidence_principal_id ?? "self-improvement-runtime-evidence"
+    const producerID = "self-improvement-runtime-evidence"
     const principal = new SelfImprovementLifecycle.Principal({
       id: SelfImprovementLifecycle.PrincipalID.make(producerID),
       kind: "runtime-evidence-service",
@@ -167,7 +162,8 @@ export const layer = Layer.effect(
     const service = make({
       locationID,
       settings: {
-        enabled: configured?.automatic === true,
+        // Capture privacy-safe learning evidence for every Session; `automatic` gates mutation, not observation.
+        enabled: true,
         producerID: principal.id,
       },
       dependencies: dependencies({
@@ -194,7 +190,10 @@ export const layer = Layer.effect(
             .onConflictDoNothing()
             .returning({ id: SelfImprovementSessionEvidenceTable.id })
             .get()
-            .pipe(Effect.orDie, Effect.map((row) => row !== undefined)),
+            .pipe(
+              Effect.orDie,
+              Effect.map((row) => row !== undefined),
+            ),
         listControlEvidence: (input) =>
           db
             .select()
@@ -239,17 +238,21 @@ export const layer = Layer.effect(
               ),
             ),
         putSuiteRevision: (suite) =>
-          evaluation.putSuiteRevision(suite).pipe(
-            Effect.catchTag("SelfImprovementEvaluationStore.Conflict", (error) =>
-              error.message === "Suite revision already exists" ? Effect.void : Effect.fail(error),
+          evaluation
+            .putSuiteRevision(suite)
+            .pipe(
+              Effect.catchTag("SelfImprovementEvaluationStore.Conflict", (error) =>
+                error.message === "Suite revision already exists" ? Effect.void : Effect.fail(error),
+              ),
             ),
-          ),
         bootstrapBaseline: (baseline) =>
-          evaluation.bootstrapBaseline(baseline).pipe(
-            Effect.catchTag("SelfImprovementEvaluationStore.Conflict", (error) =>
-              error.message === "Baseline already exists" ? Effect.void : Effect.fail(error),
+          evaluation
+            .bootstrapBaseline(baseline)
+            .pipe(
+              Effect.catchTag("SelfImprovementEvaluationStore.Conflict", (error) =>
+                error.message === "Baseline already exists" ? Effect.void : Effect.fail(error),
+              ),
             ),
-          ),
         listOpenRuns: (input) =>
           query
             .listMetricRuns({ locationID, state: "open", includeSamples: false, limit: 100 })
@@ -323,7 +326,6 @@ export const node = makeLocationNode({
   service: Service,
   layer,
   deps: [
-    Config.node,
     Database.node,
     Location.node,
     SelfImprovementEvaluationStore.node,
@@ -424,22 +426,44 @@ function summarize(
   const assistants = messages
     .slice(userIndex + 1)
     .filter((message): message is SessionMessage.Assistant => message.type === "assistant")
+  const previousAssistants = messages
+    .slice(0, userIndex)
+    .filter((message): message is SessionMessage.Assistant => message.type === "assistant")
   const tools = assistants.flatMap((message) =>
     message.content.filter((part): part is SessionMessage.AssistantTool => part.type === "tool"),
   )
+  const previousToolNames = new Set(
+    previousAssistants.flatMap((message) =>
+      message.content.flatMap((part) => (part.type === "tool" ? [part.name] : [])),
+    ),
+  )
   const orderedToolSymbolIDs = Array.from(new Set(tools.map((tool) => tool.name)))
-  const failedTool = tools.find((tool) => tool.state.status === "error")
+  const finalTools = tools.filter(
+    (tool, index) => tools.findLastIndex((candidate) => candidate.name === tool.name) === index,
+  )
+  const failedTool = finalTools.find((tool) => tool.state.status === "error")
   const failedAssistant = assistants.find((message) => message.error !== undefined)
   const interrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
   const failedSession = Exit.isFailure(exit)
   const noOutput = assistants.length === 0
   const failure = failedTool !== undefined || failedAssistant !== undefined || failedSession || noOutput
-  const outcomeClass: SelfImprovementLearning.ObservationOutcomeClass = interrupted
+  const taskOutcomeClass: SelfImprovementLearning.ObservationOutcomeClass = interrupted
     ? "cancelled"
     : failure
       ? "failure"
       : "success"
-  const outcome: SelfImprovementEvaluation.TaskOutcome = outcomeClass === "success" ? "success" : "failure"
+  const correction =
+    taskOutcomeClass === "success" &&
+    (tools.some((tool) => previousToolNames.has(tool.name)) ||
+      tools.some(
+        (tool, index) =>
+          tool.state.status === "error" &&
+          tools
+            .slice(index + 1)
+            .some((candidate) => candidate.name === tool.name && candidate.state.status === "completed"),
+      ))
+  const outcomeClass: SelfImprovementLearning.ObservationOutcomeClass = correction ? "failure" : taskOutcomeClass
+  const outcome: SelfImprovementEvaluation.TaskOutcome = taskOutcomeClass === "success" ? "success" : "failure"
   const startedAt = SelfImprovementLifecycle.TimestampMillis.make(DateTime.toEpochMillis(user.time.created))
   const terminalAt = SelfImprovementLifecycle.TimestampMillis.make(
     assistants.reduce(
@@ -456,11 +480,11 @@ function summarize(
     { input: 0, output: 0, cacheRead: 0 },
   )
   const completedTools = tools.filter((tool) => tool.state.status === "completed").length
-  const successful = outcomeClass === "success" ? 1 : 0
+  const successful = outcome === "success" ? 1 : 0
   const metrics = new SelfImprovementEvaluation.MetricComponents({
     taskQuality: { earnedAllowlistedPoints: successful, possibleAllowlistedPoints: 1 },
     correctness: { passedRequiredChecks: successful, requiredChecks: 1 },
-    repeatFixRate: { repeatedTasks: 0, completedTasks: 1 },
+    repeatFixRate: { repeatedTasks: correction ? 1 : 0, completedTasks: 1 },
     precision: { acceptedRelevantItems: completedTools, assessedItems: tools.length },
     latencyMs: Math.max(0, terminalAt - startedAt),
     tokensPerSuccess: new SelfImprovementEvaluation.TokensPerSuccessMetric({
@@ -479,13 +503,15 @@ function summarize(
   const taskIDDigest = SelfImprovement.Digest.make(Hash.sha256(`${locationID}\0${user.id}`))
   const errorClass = interrupted
     ? "session.interrupted"
-    : failedTool
-      ? `tool.${failedTool.name}.failed`
-      : failedAssistant || failedSession
-        ? "session.failed"
-        : noOutput
-          ? "session.no-output"
-          : "none"
+    : correction
+      ? "session.correction"
+      : failedTool
+        ? `tool.${failedTool.name}.failed`
+        : failedAssistant || failedSession
+          ? "session.failed"
+          : noOutput
+            ? "session.no-output"
+            : "none"
   const sampleIDDigest = SelfImprovement.Digest.make(
     Hash.sha256(`${taskIDDigest}\0${JSON.stringify(metrics)}\0${outcome}`),
   )

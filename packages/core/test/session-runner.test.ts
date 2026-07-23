@@ -3381,6 +3381,36 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("derives cache namespaces from final hooked system and tools", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* insertSession(otherSessionID)
+      const hooks = yield* PluginHooks.Service
+      yield* hooks.register("session", "context", (event) =>
+        Effect.sync(() => {
+          if (event.sessionID !== otherSessionID) return
+          event.system = [SystemPart.make("Session-specific hook output")]
+          delete event.tools.echo
+        }),
+      )
+      yield* admit(session, "Run unmodified request")
+      yield* session.prompt({
+        sessionID: otherSessionID,
+        text: "Run hooked request",
+        resume: false,
+      })
+
+      yield* session.resume(sessionID)
+      yield* session.resume(otherSessionID)
+
+      const namespaces = requests.map((request) => request.providerOptions?.openai?.promptCacheKey)
+      expect(namespaces).toHaveLength(2)
+      expect(namespaces[0]).not.toBe(namespaces[1])
+      expect(requests[1]?.system.map((part) => part.text)).toEqual(["Session-specific hook output"])
+      expect(requests[1]?.tools.map((tool) => tool.name)).not.toContain("echo")
+    }),
+  )
+
   it.effect("shares a stable cache namespace across long session IDs", () =>
     Effect.gen(function* () {
       const session = yield* setup

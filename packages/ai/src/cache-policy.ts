@@ -15,6 +15,8 @@
 import { CacheHint, type CachePolicy, type CachePolicyObject } from "./schema/options"
 import { LLMRequest, Message, ToolDefinition, type ContentPart } from "./schema/messages"
 
+export const CACHE_POLICY_REVISION = "provider-native/v1"
+
 const AUTO: CachePolicyObject = {
   tools: true,
   system: true,

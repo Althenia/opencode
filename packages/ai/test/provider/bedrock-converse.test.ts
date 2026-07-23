@@ -250,7 +250,18 @@ describe("Bedrock Converse route", () => {
         ["contentBlockDelta", { contentBlockIndex: 0, delta: { text: "!" } }],
         ["contentBlockStop", { contentBlockIndex: 0 }],
         ["messageStop", { stopReason: "end_turn" }],
-        ["metadata", { usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } }],
+        [
+          "metadata",
+          {
+            usage: {
+              inputTokens: 5,
+              outputTokens: 2,
+              totalTokens: 7,
+              cacheReadInputTokens: 2,
+              cacheWriteInputTokens: 1,
+            },
+          },
+        ],
       )
       const response = yield* LLMClient.generate(baseRequest).pipe(Effect.provide(fixedBytes(body)))
 
@@ -265,6 +276,9 @@ describe("Bedrock Converse route", () => {
         inputTokens: 5,
         outputTokens: 2,
         totalTokens: 7,
+        nonCachedInputTokens: 2,
+        cacheReadInputTokens: 2,
+        cacheWriteInputTokens: 1,
       })
     }),
   )

@@ -6,7 +6,7 @@ import { AmazonBedrock } from "../src/providers"
 import * as AnthropicMessages from "../src/protocols/anthropic-messages"
 import * as Gemini from "../src/protocols/gemini"
 import * as OpenAIChat from "../src/protocols/openai-chat"
-import { applyCachePolicy } from "../src/cache-policy"
+import { CACHE_POLICY_REVISION, applyCachePolicy } from "../src/cache-policy"
 import { it } from "./lib/effect"
 
 const anthropicModel = AnthropicMessages.route
@@ -27,6 +27,10 @@ const geminiModel = Gemini.route
     auth: Auth.header("x-goog-api-key", "test"),
   })
   .model({ id: "gemini-2.5-flash" })
+
+test("pins the provider-native cache policy revision", () => {
+  expect(CACHE_POLICY_REVISION).toBe("provider-native/v1")
+})
 
 describe("applyCachePolicy", () => {
   it.effect("undefined cache resolves to 'auto' (the recommended default)", () =>
