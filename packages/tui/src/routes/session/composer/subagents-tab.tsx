@@ -273,7 +273,7 @@ export function SubagentsTab(props: { sessionID: string }) {
         <Show when={entries().length > 0} fallback={<text fg={themeV2.text.subdued}> No subagents</text>}>
           <For each={sections()}>
             {(section) => (
-              <>
+              <box flexDirection="column">
                 <text fg={themeV2.text.subdued} attributes={TextAttributes.BOLD}>
                   {section.label}
                 </text>
@@ -320,7 +320,7 @@ export function SubagentsTab(props: { sessionID: string }) {
                     )
                   }}
                 </For>
-              </>
+              </box>
             )}
           </For>
         </Show>

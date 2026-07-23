@@ -54,7 +54,6 @@ import { useData } from "../../context/data"
 import { useLocation } from "../../context/location"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { abbreviateHome } from "../../runtime"
-import { formatCacheDiagnostics } from "../../util/cache-diagnostics"
 import {
   activateGoal,
   confirmSessionCreation,
@@ -127,11 +126,6 @@ export type PromptRef = {
   focus(): void
   submit(): void
 }
-
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
 
 const DRAFT_RETENTION_MIN_CHARS = 20
 
@@ -338,19 +332,6 @@ export function Prompt(props: PromptProps) {
     if (!props.disabled) input.cursorColor = themeV2.text.default
   })
 
-  const usage = createMemo(() => {
-    if (!props.sessionID) return
-    const session = data.session.get(props.sessionID)
-    if (!session) return
-    const cost = data.session.cost(props.sessionID)
-    const formattedCost = cost > 0 ? money.format(cost) : undefined
-    const diagnostics = data.session.diagnostics.get(props.sessionID)
-    return {
-      ...(diagnostics ? formatCacheDiagnostics(diagnostics) : { context: undefined, cache: undefined }),
-      cost: formattedCost,
-    }
-  })
-
   const subagentStatusLabel = createMemo(() => {
     const agents = activeSubagents()
     if (!agents) return undefined
@@ -362,13 +343,6 @@ export function Prompt(props: PromptProps) {
     return `${shells} shell${shells === 1 ? "" : "s"}`
   })
   const liveWorkStatusVisible = createMemo(() => Boolean(subagentStatusLabel() || shellStatusLabel()))
-
-  // Far-right footer cluster: live work counts lead, then context/cost usage.
-  // When empty, the cluster falls back to the hotkey hints.
-  const statusItems = createMemo(() => {
-    const stats = usage()
-    return [stats?.context, stats?.cache, stats?.cost].filter(Boolean)
-  })
 
   const [store, setStore] = createStore<{
     prompt: PromptInfo
@@ -1804,7 +1778,7 @@ export function Prompt(props: PromptProps) {
           <Switch>
             <Match when={store.mode === "normal"}>
               <Switch>
-                <Match when={liveWorkStatusVisible() || statusItems().length > 0}>
+                <Match when={liveWorkStatusVisible()}>
                   <text fg={themeV2.text.subdued} wrapMode="none" truncate flexShrink={1}>
                     <Show when={liveWorkStatusVisible() && liveWorkShortcut()}>
                       {(shortcut) => <span style={{ fg: themeV2.text.default }}>{shortcut()} </span>}
@@ -1817,12 +1791,6 @@ export function Prompt(props: PromptProps) {
                     </Show>
                     <Show when={shellStatusLabel()}>
                       {(label) => <span style={{ fg: themeV2.text.subdued }}>{label()}</span>}
-                    </Show>
-                    <Show when={liveWorkStatusVisible() && statusItems().length > 0}>
-                      <span style={{ fg: themeV2.text.subdued }}> · </span>
-                    </Show>
-                    <Show when={statusItems().length > 0}>
-                      <span style={{ fg: themeV2.text.subdued }}>{statusItems().join(" · ")}</span>
                     </Show>
                   </text>
                 </Match>

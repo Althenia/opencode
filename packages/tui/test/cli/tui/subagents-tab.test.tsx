@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
+import { BoxRenderable, type Renderable, ScrollBoxRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import type { SessionOrchestrationTask } from "@opencode-ai/client"
 import { ClientProvider } from "../../../src/context/client"
@@ -13,6 +14,11 @@ import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 
 const module = await import("../../../src/routes/session/composer/subagents-tab")
+
+function findScrollBox(root: Renderable): ScrollBoxRenderable | undefined {
+  if (root instanceof ScrollBoxRenderable) return root
+  return root.getChildren().map(findScrollBox).find(Boolean)
+}
 
 async function renderMetadata(input: { model?: string; status?: string; width?: number }) {
   const [{ ConfigProvider }, { ThemeProvider }] = await Promise.all([
@@ -320,6 +326,9 @@ test("renders section headings while keyboard navigation selects only task rows 
     expect(initial).toContain("Inactive")
     expect(initial).toContain("Reviewer: Review implementation")
     expect(initial).not.toContain("General: Archive results")
+    const sectionRoots = findScrollBox(app.renderer.root)?.getChildren() ?? []
+    expect(sectionRoots).toHaveLength(2)
+    expect(sectionRoots.every((child) => child instanceof BoxRenderable)).toBe(true)
 
     app.mockInput.pressKey("ARROW_DOWN")
     app.mockInput.pressKey("ARROW_DOWN")
