@@ -10,6 +10,7 @@ import { Provider } from "../src/provider.js"
 import { Pty } from "../src/pty.js"
 import { Question } from "../src/question.js"
 import { Session } from "../src/session.js"
+import { SessionEvent } from "../src/session-event.js"
 import { SessionMessage } from "../src/session-message.js"
 import { SessionPending } from "../src/session-pending.js"
 import { FileDiff } from "../src/file-diff.js"
@@ -162,6 +163,23 @@ describe("contract hygiene", () => {
         time: { created: DateTime.makeUnsafe(0) },
       }),
     ).not.toHaveProperty("provider")
+  })
+
+  test("cache mechanism is absent from durable step facts and projected assistants", () => {
+    expect(SessionEvent.Step.Ended.data.fields).not.toHaveProperty("cacheMechanism")
+    expect(SessionEvent.Step.Failed.data.fields).not.toHaveProperty("cacheMechanism")
+    expect(
+      Schema.decodeUnknownSync(SessionMessage.Assistant)({
+        id: "msg_test",
+        sessionID: "ses_test",
+        type: "assistant",
+        agent: "build",
+        model: { providerID: "openai", id: "gpt-5" },
+        content: [],
+        diagnostics: { contextLimit: 2_000, cacheMechanism: "openai-prompt-cache" },
+        time: { created: 0 },
+      }).diagnostics,
+    ).toEqual({ contextLimit: 2_000 })
   })
 
   test("reviewed session contracts use their canonical current shapes", () => {

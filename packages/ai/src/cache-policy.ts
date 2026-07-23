@@ -42,20 +42,71 @@ const resolve = (policy: CachePolicy | undefined): CachePolicyObject => {
 // prefix caching, Gemini's implicit + out-of-band CachedContent). Skip the
 // whole policy pass for these — emitting hints would be harmless but pointless.
 const RESPECTS_INLINE_HINTS = new Set(["anthropic-messages", "bedrock-converse"])
+const INLINE_HINT_CAP = 4
 
 const makeHint = (ttlSeconds: number | undefined): CacheHint =>
   ttlSeconds !== undefined ? new CacheHint({ type: "ephemeral", ttlSeconds }) : new CacheHint({ type: "ephemeral" })
 
-const markLastTool = (tools: ReadonlyArray<ToolDefinition>, hint: CacheHint): ReadonlyArray<ToolDefinition> => {
+type HintPosition = readonly [section: number, item: number, part: number]
+
+interface ManualHint {
+  readonly hint: CacheHint
+  readonly position: HintPosition
+}
+
+// Section numbers preserve provider wire order: tools → system → messages.
+const comparePosition = (left: HintPosition, right: HintPosition) =>
+  left[0] - right[0] || left[1] - right[1] || left[2] - right[2]
+
+const isOneHour = (hint: CacheHint) => hint.ttlSeconds !== undefined && hint.ttlSeconds >= 3600
+
+const manualHints = (request: LLMRequest): ReadonlyArray<ManualHint> => [
+  ...request.tools.flatMap((tool, item) =>
+    tool.cache ? [{ hint: tool.cache, position: [0, item, 0] as const }] : [],
+  ),
+  ...request.system.flatMap((part, item) =>
+    part.cache ? [{ hint: part.cache, position: [1, item, 0] as const }] : [],
+  ),
+  ...request.messages.flatMap((message, item) =>
+    message.content.flatMap((part, index) => {
+      const hint = "cache" in part ? part.cache : undefined
+      return hint ? [{ hint, position: [2, item, index] as const }] : []
+    }),
+  ),
+]
+
+const coordinateAutoHints = (request: LLMRequest) => {
+  const manual = manualHints(request)
+  const state = { remaining: Math.max(0, INLINE_HINT_CAP - manual.length) }
+  return (position: HintPosition, hint: CacheHint) => {
+    if (state.remaining <= 0) return false
+    const conflicts = isOneHour(hint)
+      ? manual.some((entry) => !isOneHour(entry.hint) && comparePosition(entry.position, position) < 0)
+      : manual.some((entry) => isOneHour(entry.hint) && comparePosition(entry.position, position) > 0)
+    if (conflicts) return false
+    state.remaining -= 1
+    return true
+  }
+}
+
+const markLastTool = (
+  tools: ReadonlyArray<ToolDefinition>,
+  hint: CacheHint,
+  reserve: (position: HintPosition, hint: CacheHint) => boolean,
+): ReadonlyArray<ToolDefinition> => {
   if (tools.length === 0) return tools
   const last = tools.length - 1
-  if (tools[last]!.cache) return tools
+  if (tools[last]!.cache || !reserve([0, last, 0], hint)) return tools
   return tools.map((tool, i) => (i === last ? new ToolDefinition({ ...tool, cache: hint }) : tool))
 }
 
-const markLastSystem = (system: LLMRequest["system"], hint: CacheHint): LLMRequest["system"] => {
+const markLastSystem = (
+  system: LLMRequest["system"],
+  hint: CacheHint,
+  reserve: (position: HintPosition, hint: CacheHint) => boolean,
+): LLMRequest["system"] => {
   const last = system.findLastIndex((part) => part.text.trim().length > 0)
-  if (last < 0 || system[last]!.cache) return system
+  if (last < 0 || system[last]!.cache || !reserve([1, last, 0], hint)) return system
   return system.map((part, i) => (i === last ? { ...part, cache: hint } : part))
 }
 
@@ -65,7 +116,12 @@ const lastIndexOfRole = (messages: ReadonlyArray<Message>, role: Message["role"]
 // Mark the last non-empty text or tool-result part of `messages[index]`.
 // Other part types do not expose a cache field in the canonical schema and
 // empty text markers are rejected by Anthropic-compatible APIs.
-const markMessageAt = (messages: ReadonlyArray<Message>, index: number, hint: CacheHint): ReadonlyArray<Message> => {
+const markMessageAt = (
+  messages: ReadonlyArray<Message>,
+  index: number,
+  hint: CacheHint,
+  reserve: (position: HintPosition, hint: CacheHint) => boolean,
+): ReadonlyArray<Message> => {
   if (index < 0 || index >= messages.length) return messages
   const target = messages[index]!
   if (target.content.length === 0) return messages
@@ -74,7 +130,7 @@ const markMessageAt = (messages: ReadonlyArray<Message>, index: number, hint: Ca
   )
   if (markAt < 0) return messages
   const existing = target.content[markAt]!
-  if ("cache" in existing && existing.cache) return messages
+  if (("cache" in existing && existing.cache) || !reserve([2, index, markAt], hint)) return messages
   const nextContent = target.content.map((part, i) => (i === markAt ? ({ ...part, cache: hint } as ContentPart) : part))
   const next = new Message({ ...target, content: nextContent })
   // Single pass over `messages`, substituting the one updated entry. Long
@@ -89,25 +145,27 @@ const markMessages = (
   messages: ReadonlyArray<Message>,
   strategy: NonNullable<CachePolicyObject["messages"]>,
   hint: CacheHint,
+  reserve: (position: HintPosition, hint: CacheHint) => boolean,
 ): ReadonlyArray<Message> => {
   if (messages.length === 0) return messages
-  if (strategy === "latest-user-message") return markMessageAt(messages, lastIndexOfRole(messages, "user"), hint)
-  if (strategy === "latest-assistant") return markMessageAt(messages, lastIndexOfRole(messages, "assistant"), hint)
+  if (strategy === "latest-user-message") return markMessageAt(messages, lastIndexOfRole(messages, "user"), hint, reserve)
+  if (strategy === "latest-assistant") return markMessageAt(messages, lastIndexOfRole(messages, "assistant"), hint, reserve)
   const start = Math.max(0, messages.length - strategy.tail)
   let next = messages
-  for (let i = start; i < messages.length; i++) next = markMessageAt(next, i, hint)
+  for (let i = start; i < messages.length; i++) next = markMessageAt(next, i, hint, reserve)
   return next
 }
 
 export const applyCachePolicy = (request: LLMRequest): LLMRequest => {
-  if (!RESPECTS_INLINE_HINTS.has(request.model.route.id)) return request
+  if (!RESPECTS_INLINE_HINTS.has(request.model.route.protocol)) return request
   const policy = resolve(request.cache)
   if (!policy.tools && !policy.system && !policy.messages) return request
 
   const hint = makeHint(policy.ttlSeconds)
-  const tools = policy.tools ? markLastTool(request.tools, hint) : request.tools
-  const system = policy.system ? markLastSystem(request.system, hint) : request.system
-  const messages = policy.messages ? markMessages(request.messages, policy.messages, hint) : request.messages
+  const reserve = coordinateAutoHints(request)
+  const tools = policy.tools ? markLastTool(request.tools, hint, reserve) : request.tools
+  const system = policy.system ? markLastSystem(request.system, hint, reserve) : request.system
+  const messages = policy.messages ? markMessages(request.messages, policy.messages, hint, reserve) : request.messages
 
   if (tools === request.tools && system === request.system && messages === request.messages) return request
   return LLMRequest.update(request, { tools, system, messages })

@@ -558,11 +558,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             currentAssistant.finish = event.data.finish
             currentAssistant.cost = event.data.cost
             currentAssistant.tokens = event.data.tokens
-            if (event.data.cacheMechanism)
-              currentAssistant.diagnostics = {
-                cacheMechanism: event.data.cacheMechanism,
-                contextLimit: event.data.contextLimit,
-              }
+            currentAssistant.diagnostics =
+              event.data.contextLimit === undefined ? undefined : { contextLimit: event.data.contextLimit }
             if (event.data.snapshot)
               currentAssistant.snapshot = { ...currentAssistant.snapshot, end: event.data.snapshot }
           })
@@ -582,11 +579,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               currentAssistant.cost = event.data.cost
               currentAssistant.tokens = event.data.tokens
             }
-            if (event.data.cacheMechanism)
-              currentAssistant.diagnostics = {
-                cacheMechanism: event.data.cacheMechanism,
-                contextLimit: event.data.contextLimit,
-              }
+            currentAssistant.diagnostics =
+              event.data.contextLimit === undefined ? undefined : { contextLimit: event.data.contextLimit }
           })
           result.session.diagnostics.invalidate(event.data.sessionID)
           void result.session.diagnostics.sync(event.data.sessionID).catch(() => undefined)

@@ -242,7 +242,7 @@ describe("Bedrock Converse route", () => {
     }),
   )
 
-  it.effect("decodes text-delta + messageStop + metadata usage from binary event stream", () =>
+  it.effect("decodes inclusive cached usage with and without a provider total", () =>
     Effect.gen(function* () {
       const body = eventStreamBody(
         ["messageStart", { role: "assistant" }],
@@ -257,8 +257,8 @@ describe("Bedrock Converse route", () => {
               inputTokens: 5,
               outputTokens: 2,
               totalTokens: 7,
-              cacheReadInputTokens: 2,
-              cacheWriteInputTokens: 1,
+              cacheReadInputTokens: 1,
+              cacheWriteInputTokens: 2,
             },
           },
         ],
@@ -273,12 +273,59 @@ describe("Bedrock Converse route", () => {
       expect(finishes).toHaveLength(1)
       expect(finishes[0]).toMatchObject({ type: "finish", reason: "stop" })
       expect(response.usage).toMatchObject({
-        inputTokens: 5,
+        inputTokens: 8,
         outputTokens: 2,
-        totalTokens: 7,
-        nonCachedInputTokens: 2,
-        cacheReadInputTokens: 2,
-        cacheWriteInputTokens: 1,
+        totalTokens: 10,
+        nonCachedInputTokens: 5,
+        cacheReadInputTokens: 1,
+        cacheWriteInputTokens: 2,
+      })
+      expect(response.usage?.providerMetadata).toEqual({
+        bedrock: {
+          inputTokens: 5,
+          outputTokens: 2,
+          totalTokens: 7,
+          cacheReadInputTokens: 1,
+          cacheWriteInputTokens: 2,
+        },
+      })
+
+      const withoutProviderTotal = yield* LLMClient.generate(baseRequest).pipe(
+        Effect.provide(
+          fixedBytes(
+            eventStreamBody(
+              ["messageStart", { role: "assistant" }],
+              ["messageStop", { stopReason: "end_turn" }],
+              [
+                "metadata",
+                {
+                  usage: {
+                    inputTokens: 5,
+                    outputTokens: 2,
+                    cacheReadInputTokens: 1,
+                    cacheWriteInputTokens: 2,
+                  },
+                },
+              ],
+            ),
+          ),
+        ),
+      )
+      expect(withoutProviderTotal.usage).toMatchObject({
+        inputTokens: 8,
+        outputTokens: 2,
+        totalTokens: 10,
+        nonCachedInputTokens: 5,
+        cacheReadInputTokens: 1,
+        cacheWriteInputTokens: 2,
+      })
+      expect(withoutProviderTotal.usage?.providerMetadata).toEqual({
+        bedrock: {
+          inputTokens: 5,
+          outputTokens: 2,
+          cacheReadInputTokens: 1,
+          cacheWriteInputTokens: 2,
+        },
       })
     }),
   )

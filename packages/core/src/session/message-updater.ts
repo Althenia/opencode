@@ -280,11 +280,8 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           draft.finish = event.data.finish
           draft.cost = event.data.cost
           draft.tokens = event.data.tokens
-          if (event.data.cacheMechanism)
-            draft.diagnostics = {
-              cacheMechanism: event.data.cacheMechanism,
-              contextLimit: event.data.contextLimit,
-            }
+          draft.diagnostics =
+            event.data.contextLimit === undefined ? undefined : { contextLimit: event.data.contextLimit }
           if (event.data.snapshot || event.data.files)
             draft.snapshot = {
               ...draft.snapshot,
@@ -303,11 +300,8 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             draft.cost = event.data.cost
             draft.tokens = castDraft(event.data.tokens)
           }
-          if (event.data.cacheMechanism)
-            draft.diagnostics = {
-              cacheMechanism: event.data.cacheMechanism,
-              contextLimit: event.data.contextLimit,
-            }
+          draft.diagnostics =
+            event.data.contextLimit === undefined ? undefined : { contextLimit: event.data.contextLimit }
           if (event.data.snapshot || event.data.files)
             draft.snapshot = {
               ...draft.snapshot,

@@ -1007,6 +1007,13 @@ describe("SessionRunnerLLM", () => {
       yield* admit(session, "Measure cache")
       yield* session.resume(sessionID)
 
+      const assistant = requireAssistant(yield* session.context(sessionID))
+      expect(assistant.diagnostics).toEqual({ contextLimit: 2_000 })
+      expect(
+        (yield* recordedStepSettlementEvents(sessionID, assistant.id)).find(
+          (event) => event.type === "session.step.ended.1",
+        )?.data,
+      ).not.toHaveProperty("cacheMechanism")
       const diagnostics = yield* session.diagnostics(sessionID)
       expect(diagnostics).toMatchObject({
         context: { total: 1_030, limit: 2_000, remaining: 970, percent: 52 },
