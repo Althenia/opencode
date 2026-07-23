@@ -7,6 +7,7 @@ import { AgentAttachment, Base64, FileAttachment } from "@opencode-ai/schema/pro
 import { toLLMMessages } from "@opencode-ai/core/session/runner/to-llm-message"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Shell } from "@opencode-ai/schema/shell"
+import { ID, Name } from "@opencode-ai/core/skill"
 import { DateTime } from "effect"
 
 const created = DateTime.makeUnsafe(0)
@@ -43,6 +44,43 @@ describe("toLLMMessages", () => {
     )
 
     expect(messages.map((message) => message.id)).toEqual([id("text"), id("reasoning")])
+  })
+
+  test("places an agent switch boundary after prior skill instructions", () => {
+    const messages = toLLMMessages(
+      [
+        SessionMessage.Skill.make({
+          id: id("plan-skill"),
+          type: "skill",
+          skill: ID.make("planning"),
+          name: Name.make("Planning"),
+          text: "Plan instructions",
+          time: { created },
+        }),
+        SessionMessage.AgentSelected.make({
+          id: id("build-agent"),
+          type: "agent-switched",
+          agent: build,
+          time: { created },
+        }),
+        SessionMessage.User.make({
+          id: id("build-prompt"),
+          type: "user",
+          text: "Implement the plan",
+          time: { created },
+        }),
+      ],
+      model,
+    )
+
+    expect(messages.map((message) => message.role)).toEqual(["user", "system", "user"])
+    expect(messages[0]).toMatchObject({ id: id("plan-skill"), content: [{ type: "text", text: "Plan instructions" }] })
+    expect(messages[1]).toEqual(
+      Message.system(
+        "The active agent is now build. This agent's current instructions and permissions apply. Previous agents' instructions no longer apply unless repeated in the current context.",
+      ),
+    )
+    expect(messages[2]).toMatchObject({ id: id("build-prompt"), content: [{ type: "text", text: "Implement the plan" }] })
   })
 
   test("maps every top-level V2 Session message type", () => {
@@ -109,9 +147,14 @@ describe("toLLMMessages", () => {
       model,
     )
 
-    expect(messages.map((message) => message.role)).toEqual(["system", "user", "user", "user", "user"])
-    expect(messages[0]).toEqual(Message.system("Updated context\n\nOther context"))
-    expect(messages[1]).toEqual(
+    expect(messages.map((message) => message.role)).toEqual(["system", "system", "user", "user", "user", "user"])
+    expect(messages[0]).toEqual(
+      Message.system(
+        "The active agent is now build. This agent's current instructions and permissions apply. Previous agents' instructions no longer apply unless repeated in the current context.",
+      ),
+    )
+    expect(messages[1]).toEqual(Message.system("Updated context\n\nOther context"))
+    expect(messages[2]).toEqual(
       Message.make({
         id: id("user"),
         role: "user",
@@ -122,7 +165,7 @@ describe("toLLMMessages", () => {
         metadata: { agents: [{ name: "build" }] },
       }),
     )
-    expect(messages.slice(2).map((message) => message.content)).toEqual([
+    expect(messages.slice(3).map((message) => message.content)).toEqual([
       [{ type: "text", text: "Synthetic context" }],
       [
         {

@@ -181,6 +181,11 @@ const assistant = (message: SessionMessage.Assistant, model: ModelV2.Ref, provid
 function toLLMMessage(message: SessionMessage.Info, model: ModelV2.Ref, providerMetadataKey: string): Message[] {
   switch (message.type) {
     case "agent-switched":
+      return [
+        Message.system(
+          `The active agent is now ${message.agent}. This agent's current instructions and permissions apply. Previous agents' instructions no longer apply unless repeated in the current context.`,
+        ),
+      ]
     case "model-switched":
       return []
     case "user":
