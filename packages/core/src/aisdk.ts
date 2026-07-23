@@ -430,9 +430,50 @@ function prompt(request: LLMRequest): LanguageModelV3Prompt {
     .map((part) => part.text)
     .filter(Boolean)
     .join("\n\n")
-  const messages = request.messages.flatMap(message)
+  const messages = request.model.route.id === "ai-sdk:@ai-sdk/anthropic"
+    ? anthropicMessages(request)
+    : request.messages.flatMap(message)
   if (!system.length) return messages
   return [{ role: "system", content: system }, ...messages]
+}
+
+function validAnthropicSystemUpdate(request: LLMRequest, index: number): boolean {
+  if (request.model.id !== "claude-opus-4-8") return false
+  const previous = request.messages[index - 1]
+  const next = request.messages[index + 1]
+  const last = previous?.content.at(-1)
+  const followsServerToolUse = previous?.role === "assistant"
+    && last?.type === "tool-call"
+    && last.providerExecuted === true
+  return previous !== undefined
+    && previous.role !== "system"
+    && (previous.role === "user" || previous.role === "tool" || followsServerToolUse)
+    && next?.role !== "system"
+    && (next === undefined || next.role === "assistant")
+}
+
+function anthropicMessages(request: LLMRequest): LanguageModelV3Message[] {
+  const messages: LanguageModelV3Message[] = []
+  for (const [index, input] of request.messages.entries()) {
+    if (input.role !== "system" || validAnthropicSystemUpdate(request, index)) {
+      messages.push(...message(input))
+      continue
+    }
+
+    const block = {
+      type: "text" as const,
+      text: ProviderShared.wrapSystemUpdate(
+        input.content.flatMap((part) => part.type === "text" ? [{ text: part.text }] : []),
+      ),
+    }
+    const previous = messages.at(-1)
+    if (previous?.role === "user" && Array.isArray(previous.content)) {
+      previous.content.push(block)
+    } else {
+      messages.push({ role: "user", content: [block] })
+    }
+  }
+  return messages
 }
 
 function message(input: LLMRequest["messages"][number]): LanguageModelV3Message[] {

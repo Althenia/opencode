@@ -270,6 +270,71 @@ it.effect("projects replay metadata onto AI SDK prompt parts", () =>
   }),
 )
 
+it.effect("wraps unsupported Anthropic chronological system updates as user content", () =>
+  Effect.gen(function* () {
+    const aisdk = yield* AISDK.Service
+    yield* aisdk.hook.sdk((event) => {
+      event.sdk = { languageModel: () => ({ provider: event.model.providerID }) }
+    })
+    const catalog = ModelV2.Info.make({
+      ...model("@ai-sdk/anthropic"),
+      modelID: ModelV2.ID.make("claude-sonnet-4-6"),
+    })
+    const resolved = yield* aisdk.model(catalog)
+    const prepared = yield* LLMClient.prepare<LanguageModelV3CallOptions>(
+      LLM.request({
+        model: resolved,
+        messages: [
+          Message.user("before"),
+          Message.assistant([{ type: "text", text: "answer" }]),
+          Message.system("late <update>"),
+          Message.user("after"),
+        ],
+      }),
+    )
+
+    expect(prepared.body.prompt).toEqual([
+      { role: "user", content: [{ type: "text", text: "before" }] },
+      { role: "assistant", content: [{ type: "text", text: "answer" }] },
+      {
+        role: "user",
+        content: [{ type: "text", text: "<system-update>\nlate &lt;update&gt;\n</system-update>" }],
+      },
+      { role: "user", content: [{ type: "text", text: "after" }] },
+    ])
+  }),
+)
+
+it.effect("preserves valid Opus 4.8 chronological system updates", () =>
+  Effect.gen(function* () {
+    const aisdk = yield* AISDK.Service
+    yield* aisdk.hook.sdk((event) => {
+      event.sdk = { languageModel: () => ({ provider: event.model.providerID }) }
+    })
+    const catalog = ModelV2.Info.make({
+      ...model("@ai-sdk/anthropic"),
+      modelID: ModelV2.ID.make("claude-opus-4-8"),
+    })
+    const resolved = yield* aisdk.model(catalog)
+    const prepared = yield* LLMClient.prepare<LanguageModelV3CallOptions>(
+      LLM.request({
+        model: resolved,
+        messages: [
+          Message.user("question"),
+          Message.system("updated instruction"),
+          Message.assistant([{ type: "text", text: "answer" }]),
+        ],
+      }),
+    )
+
+    expect(prepared.body.prompt).toEqual([
+      { role: "user", content: [{ type: "text", text: "question" }] },
+      { role: "system", content: "updated instruction" },
+      { role: "assistant", content: [{ type: "text", text: "answer" }] },
+    ])
+  }),
+)
+
 it.effect("emits malformed AI SDK tool input without executing it", () =>
   Effect.gen(function* () {
     const aisdk = yield* AISDK.Service
