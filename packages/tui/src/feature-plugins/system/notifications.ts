@@ -189,16 +189,18 @@ export function createNotifications(scheduleAttention: Schedule = schedule) {
         if (disposed || terminals.get(episode.sessionID) !== episode || episode.controller !== controller) return
         episode.controller = undefined
         episode.state = "terminal"
-        if (!session || session.parentID || !initial || !final) return
+        if (!session || !initial || !final) return
         const output =
-          initial.mode === "goal"
+          session.parentID
+            ? { message: "Session done", sound: { name: "subagent_done" as const, when: "always" as const } }
+            : initial.mode === "goal"
             ? goalNotification(final)
             : { message: "Session done", sound: { name: "done" as const, when: "always" as const } }
         send(
           {
             title: session.title,
             message: output.message,
-            notification: { when: "blurred" },
+            notification: session.parentID ? false : { when: "blurred" },
             sound: output.sound,
           },
           () => terminals.get(episode.sessionID) === episode && episode.state === "terminal",

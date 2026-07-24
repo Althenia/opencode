@@ -167,7 +167,7 @@ export function resolve(input: Info, options: { terminalSuspend: boolean }): Res
   return {
     ...input,
     attention: {
-      enabled: input.attention?.enabled ?? false,
+      enabled: input.attention?.enabled ?? true,
       notifications: input.attention?.notifications ?? true,
       sound: input.attention?.sound ?? true,
       volume: input.attention?.volume ?? 0.4,

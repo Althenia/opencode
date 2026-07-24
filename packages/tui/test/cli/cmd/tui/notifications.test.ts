@@ -320,14 +320,30 @@ describe("internal notifications TUI plugin", () => {
     ])
   })
 
-  test("keeps child session completion silent", async () => {
+  test("uses sound-only attention when a child session reaches stable idle", async () => {
     const harness = await setup()
+    const idle = Promise.withResolvers<void>()
+    harness.waits.set("subagent", idle)
 
     harness.emit(executionStarted("event-1", "subagent"))
     harness.emit(executionSucceeded("event-2", "subagent"))
-    await Promise.resolve()
+    harness.emit(executionSucceeded("event-3", "subagent"))
+    await settle()
 
     expect(harness.notifications).toEqual([])
+
+    idle.resolve()
+    await idle.promise
+    await settle()
+
+    expect(harness.notifications).toEqual([
+      {
+        title: "Subagent session",
+        message: "Session done",
+        notification: false,
+        sound: { name: "subagent_done", when: "always" },
+      },
+    ])
   })
 
   test("notifies once when a goal completes after successor executions", async () => {
@@ -573,6 +589,12 @@ describe("internal notifications TUI plugin", () => {
         message: "Input needs response",
         notification: false,
         sound: { name: "question", when: "always" },
+      },
+      {
+        title: "Subagent session",
+        message: "Session done",
+        notification: false,
+        sound: { name: "subagent_done", when: "always" },
       },
     ])
   })

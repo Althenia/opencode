@@ -25,6 +25,9 @@ test("resolves nested config and keybind defaults", () => {
   expect(config.scroll).toEqual({ speed: 2, acceleration: true })
   expect(config.diffs).toEqual({ view: "split" })
   expect(config.debug).toEqual({ devtools: true })
+
+  expect(resolve({}, { terminalSuspend: true }).attention.enabled).toBe(true)
+  expect(resolve({ attention: { enabled: false } }, { terminalSuspend: true }).attention.enabled).toBe(false)
 })
 
 test("provides config and its host interface", async () => {
