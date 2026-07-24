@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
-import { CacheHint, LLM, Message } from "../src"
+import { CacheHint, LLM, Message, ToolCallPart } from "../src"
 import { Auth, LLMClient } from "../src/route"
 import { AmazonBedrock, GoogleVertexMessages } from "../src/providers"
 import * as AnthropicMessages from "../src/protocols/anthropic-messages"
@@ -165,6 +165,107 @@ describe("applyCachePolicy", () => {
           { role: "user", content: [{ text: "latest user" }, { cachePoint: { type: "default" } }] },
         ],
       })
+    }),
+  )
+
+  it.effect("'auto' falls back to the latest cacheable message before trailing media on Anthropic", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: anthropicModel,
+          messages: [
+            Message.user("cacheable prefix"),
+            Message.user({ type: "media", mediaType: "image/png", data: "AAECAw==" }),
+          ],
+          cache: "auto",
+        }),
+      )
+
+      const body = prepared.body as { messages: Array<{ content: Array<{ cache_control?: unknown }> }> }
+      expect(body.messages[0]?.content[0]?.cache_control).toEqual({ type: "ephemeral" })
+      expect(body.messages[1]?.content[0]?.cache_control).toBeUndefined()
+    }),
+  )
+
+  it.effect("'auto' falls back to the latest cacheable message before trailing media on Bedrock", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: bedrockModel,
+          messages: [
+            Message.user("cacheable prefix"),
+            Message.user({ type: "media", mediaType: "image/png", data: "AAECAw==" }),
+          ],
+          cache: "auto",
+        }),
+      )
+
+      const body = prepared.body as { messages: Array<{ content: Array<{ cachePoint?: unknown }> }> }
+      expect(body.messages[0]?.content[1]?.cachePoint).toEqual({ type: "default" })
+      expect(body.messages[1]?.content[0]?.cachePoint).toBeUndefined()
+    }),
+  )
+
+  it.effect("explicit tail policy does not search before trailing media", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: anthropicModel,
+          messages: [
+            Message.user("cacheable prefix"),
+            Message.user({ type: "media", mediaType: "image/png", data: "AAECAw==" }),
+          ],
+          cache: { messages: { tail: 1 } },
+        }),
+      )
+
+      expect(JSON.stringify(prepared.body)).not.toContain("cache_control")
+    }),
+  )
+
+  it.effect("'auto' advances the Anthropic cache breakpoint through completed tool results", () =>
+    Effect.gen(function* () {
+      const messages = [
+        Message.user("U"),
+        Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: {} })]),
+        Message.tool({ id: "call_1", name: "lookup", result: "T1" }),
+        Message.assistant([ToolCallPart.make({ id: "call_2", name: "lookup", input: {} })]),
+        Message.tool({ id: "call_2", name: "lookup", result: "T2" }),
+      ]
+      const attempts = yield* Effect.all(
+        [1, 3, 5].map((count) => LLMClient.prepare(LLM.request({ model: anthropicModel, messages: messages.slice(0, count) }))),
+      )
+      const bodies = attempts.map((attempt) => attempt.body as { messages: Array<{ content: Array<{ cache_control?: unknown }> }> })
+
+      expect(bodies[0]?.messages[0]?.content[0]?.cache_control).toEqual({ type: "ephemeral" })
+      expect(bodies[1]?.messages[0]?.content[0]?.cache_control).toBeUndefined()
+      expect(bodies[1]?.messages[2]?.content[0]?.cache_control).toEqual({ type: "ephemeral" })
+      expect(bodies[2]?.messages[2]?.content[0]?.cache_control).toBeUndefined()
+      expect(bodies[2]?.messages[4]?.content[0]?.cache_control).toEqual({ type: "ephemeral" })
+    }),
+  )
+
+  it.effect("'auto' advances the Bedrock cache breakpoint through completed tool results", () =>
+    Effect.gen(function* () {
+      const messages = [
+        Message.user("U"),
+        Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: {} })]),
+        Message.tool({ id: "call_1", name: "lookup", result: "T1" }),
+        Message.assistant([ToolCallPart.make({ id: "call_2", name: "lookup", input: {} })]),
+        Message.tool({ id: "call_2", name: "lookup", result: "T2" }),
+      ]
+      const attempts = yield* Effect.all(
+        [1, 3, 5].map((count) => LLMClient.prepare(LLM.request({ model: bedrockModel, messages: messages.slice(0, count) }))),
+      )
+      const bodies = attempts.map(
+        (attempt) => attempt.body as { messages: Array<{ content: Array<{ cachePoint?: unknown }> }> },
+      )
+
+      expect(bodies[0]?.messages[0]?.content[1]?.cachePoint).toEqual({ type: "default" })
+      expect(bodies[1]?.messages[0]?.content[1]?.cachePoint).toBeUndefined()
+      expect(bodies[1]?.messages[2]?.content[1]?.cachePoint).toEqual({ type: "default" })
+      expect(bodies[2]?.messages[2]?.content[1]?.cachePoint).toBeUndefined()
+      expect(bodies[2]?.messages[4]?.content[1]?.cachePoint).toEqual({ type: "default" })
     }),
   )
 

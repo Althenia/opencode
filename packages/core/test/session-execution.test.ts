@@ -277,7 +277,7 @@ function buildExecution(
     const runner = Layer.succeed(SessionRunner.Service, SessionRunner.Service.of({ drain }))
     const observer = Layer.succeed(
       SelfImprovementSessionObserver.Service,
-      SelfImprovementSessionObserver.Service.of({ record }),
+      SelfImprovementSessionObserver.Service.of({ record, recordTurn: () => Effect.void }),
     )
     const locations = Layer.effect(
       LocationServiceMap.Service,

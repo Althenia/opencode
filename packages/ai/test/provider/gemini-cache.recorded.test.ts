@@ -39,10 +39,8 @@ describe("Gemini cache recorded", () => {
       expect(first.usage?.cacheReadInputTokens ?? 0).toBeGreaterThanOrEqual(0)
 
       const second = yield* LLMClient.generate(cacheRequest)
-      // Implicit caching is best-effort on Gemini's side; we assert the field
-      // is at least populated and non-negative. When re-recording, verify the
-      // cassette shows > 0 in the second response's usage.
-      expect(second.usage?.cacheReadInputTokens ?? 0).toBeGreaterThanOrEqual(0)
+      // The recorded second response reports cachedContentTokenCount=1100.
+      expect(second.usage?.cacheReadInputTokens ?? 0).toBeGreaterThan(0)
     }),
   )
 })

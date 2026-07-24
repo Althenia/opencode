@@ -3,12 +3,9 @@
 // body builder, so the existing inline-hint lowering path handles the rest.
 //
 // The default `"auto"` shape places one breakpoint at the last tool definition,
-// one at the last system part, and one at the latest user message. This
-// matches what production agent harnesses (LangChain's caching middleware,
-// kern-ai's 10x cost-reduction playbook) converge on for tool-use loops: the
-// latest user message stays put while a single turn explodes into many
-// assistant/tool round-trips, so caching at that boundary lets every
-// intra-turn API call hit the prefix.
+// one at the last system part, and one at the latest cacheable message. The
+// message breakpoint advances through completed tool results, so each next
+// tool-loop attempt reuses the longest completed conversation prefix.
 //
 // Manual `cache: CacheHint` placements on individual parts are preserved —
 // this function only fills gaps the caller left empty.
@@ -20,7 +17,7 @@ export const CACHE_POLICY_REVISION = "provider-native/v1"
 const AUTO: CachePolicyObject = {
   tools: true,
   system: true,
-  messages: "latest-user-message",
+  messages: { tail: 1 },
 }
 
 const NONE: CachePolicyObject = {}
@@ -29,7 +26,7 @@ const NONE: CachePolicyObject = {}
 //   - undefined   → "auto" — caching is on by default. The math favors it:
 //                   Anthropic 5m-cache write is 1.25x base, read is 0.1x,
 //                   so a single reuse within 5 minutes already wins.
-//   - "auto"      → tools + system + latest user msg.
+//   - "auto"      → tools + system + latest cacheable message.
 //   - "none"      → no auto placement; manual `CacheHint`s still flow.
 //   - object form → exactly what the caller asked for.
 const resolve = (policy: CachePolicy | undefined): CachePolicyObject => {
@@ -113,6 +110,12 @@ const markLastSystem = (
 const lastIndexOfRole = (messages: ReadonlyArray<Message>, role: Message["role"]): number =>
   messages.findLastIndex((m) => m.role === role)
 
+const isMarkablePart = (part: ContentPart) =>
+  (part.type === "text" && part.text.trim().length > 0) || part.type === "tool-result"
+
+const lastMarkableMessage = (messages: ReadonlyArray<Message>) =>
+  messages.findLastIndex((message) => message.content.some(isMarkablePart))
+
 // Mark the last non-empty text or tool-result part of `messages[index]`.
 // Other part types do not expose a cache field in the canonical schema and
 // empty text markers are rejected by Anthropic-compatible APIs.
@@ -125,9 +128,7 @@ const markMessageAt = (
   if (index < 0 || index >= messages.length) return messages
   const target = messages[index]!
   if (target.content.length === 0) return messages
-  const markAt = target.content.findLastIndex(
-    (part) => (part.type === "text" && part.text.trim().length > 0) || part.type === "tool-result",
-  )
+  const markAt = target.content.findLastIndex(isMarkablePart)
   if (markAt < 0) return messages
   const existing = target.content[markAt]!
   if (("cache" in existing && existing.cache) || !reserve([2, index, markAt], hint)) return messages
@@ -159,13 +160,18 @@ const markMessages = (
 export const applyCachePolicy = (request: LLMRequest): LLMRequest => {
   if (!RESPECTS_INLINE_HINTS.has(request.model.route.protocol)) return request
   const policy = resolve(request.cache)
+  const auto = request.cache === undefined || request.cache === "auto"
   if (!policy.tools && !policy.system && !policy.messages) return request
 
   const hint = makeHint(policy.ttlSeconds)
   const reserve = coordinateAutoHints(request)
   const tools = policy.tools ? markLastTool(request.tools, hint, reserve) : request.tools
   const system = policy.system ? markLastSystem(request.system, hint, reserve) : request.system
-  const messages = policy.messages ? markMessages(request.messages, policy.messages, hint, reserve) : request.messages
+  const messages = !policy.messages
+    ? request.messages
+    : auto
+      ? markMessageAt(request.messages, lastMarkableMessage(request.messages), hint, reserve)
+      : markMessages(request.messages, policy.messages, hint, reserve)
 
   if (tools === request.tools && system === request.system && messages === request.messages) return request
   return LLMRequest.update(request, { tools, system, messages })

@@ -65,11 +65,28 @@ export interface Dependencies {
   }) => Effect.Effect<void, unknown>
 }
 
+export interface Turn {
+  readonly userID: string
+  readonly agent: string
+  readonly startedAt: number
+  readonly terminalAt: number
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  readonly orderedToolSymbolIDs: ReadonlyArray<string>
+  readonly completedToolCount: number
+  readonly assessedToolCount: number
+  readonly failedToolName?: string
+  readonly failed: boolean
+  readonly cancelled: boolean
+}
+
 export interface Interface {
   readonly record: (input: {
     readonly sessionID: SessionSchema.ID
     readonly exit: Exit.Exit<void, unknown>
   }) => Effect.Effect<void>
+  readonly recordTurn: (turn: Turn) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SelfImprovementSessionObserver") {}
@@ -84,19 +101,8 @@ export function make(input: {
   }
   readonly dependencies: Dependencies
 }): Interface {
-  const persist = Effect.fnUntraced(function* (request: {
-    readonly sessionID: SessionSchema.ID
-    readonly exit: Exit.Exit<void, unknown>
-  }) {
+  const persistEvidence = Effect.fnUntraced(function* (evidence: Evidence) {
     if (!input.settings.enabled) return
-    const messages = yield* input.dependencies.loadMessages(request.sessionID)
-    const evidence = summarize(
-      input.locationID,
-      input.settings.producerID ?? SelfImprovementLifecycle.PrincipalID.make("self-improvement-runtime-evidence"),
-      messages,
-      request.exit,
-    )
-    if (evidence === undefined) return
     if (!(yield* input.dependencies.insertEvidence(evidence))) return
     yield* input.dependencies.recordObservation(evidence).pipe(Effect.catchCause(Effect.logWarning))
     if (evidence.outcomeClass === "cancelled") return
@@ -123,6 +129,20 @@ export function make(input: {
       input.dependencies.appendSample({ run, evidence }).pipe(Effect.catchCause(Effect.logWarning)),
     )
   })
+  const persist = Effect.fnUntraced(function* (request: {
+    readonly sessionID: SessionSchema.ID
+    readonly exit: Exit.Exit<void, unknown>
+  }) {
+    if (!input.settings.enabled) return
+    const messages = yield* input.dependencies.loadMessages(request.sessionID)
+    const evidence = summarize(
+      input.locationID,
+      input.settings.producerID ?? SelfImprovementLifecycle.PrincipalID.make("self-improvement-runtime-evidence"),
+      messages,
+      request.exit,
+    )
+    if (evidence !== undefined) yield* persistEvidence(evidence)
+  })
   const record = Effect.fn("SelfImprovementSessionObserver.record")(
     (request: { readonly sessionID: SessionSchema.ID; readonly exit: Exit.Exit<void, unknown> }) =>
       persist(request).pipe(
@@ -131,7 +151,20 @@ export function make(input: {
         ),
       ),
   )
-  return { record }
+  const recordTurn = Effect.fn("SelfImprovementSessionObserver.recordTurn")((turn: Turn) =>
+    persistEvidence(
+      summarizeTurn(
+        input.locationID,
+        input.settings.producerID ?? SelfImprovementLifecycle.PrincipalID.make("self-improvement-runtime-evidence"),
+        turn,
+      ),
+    ).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("self-improvement session observation failed", { cause: Cause.pretty(cause) }),
+      ),
+    ),
+  )
+  return { record, recordTurn }
 }
 
 const MetricsJson = Schema.fromJsonString(SelfImprovementEvaluation.MetricComponents)
@@ -526,6 +559,65 @@ function summarize(
     outcome,
     errorClass,
     orderedToolSymbolIDs,
+    metrics,
+    startedAt,
+    terminalAt,
+  }
+}
+
+function summarizeTurn(
+  locationID: SelfImprovementLifecycle.LocationID,
+  producerID: SelfImprovementLifecycle.PrincipalID,
+  turn: Turn,
+): Evidence {
+  const outcomeClass: SelfImprovementLearning.ObservationOutcomeClass = turn.cancelled
+    ? "cancelled"
+    : turn.failed
+      ? "failure"
+      : "success"
+  const outcome: SelfImprovementEvaluation.TaskOutcome = outcomeClass === "success" ? "success" : "failure"
+  const successful = outcome === "success" ? 1 : 0
+  const startedAt = SelfImprovementLifecycle.TimestampMillis.make(turn.startedAt)
+  const terminalAt = SelfImprovementLifecycle.TimestampMillis.make(turn.terminalAt)
+  const metrics = new SelfImprovementEvaluation.MetricComponents({
+    taskQuality: { earnedAllowlistedPoints: successful, possibleAllowlistedPoints: 1 },
+    correctness: { passedRequiredChecks: successful, requiredChecks: 1 },
+    repeatFixRate: { repeatedTasks: 0, completedTasks: 1 },
+    precision: { acceptedRelevantItems: turn.completedToolCount, assessedItems: turn.assessedToolCount },
+    latencyMs: Math.max(0, terminalAt - startedAt),
+    tokensPerSuccess: new SelfImprovementEvaluation.TokensPerSuccessMetric({
+      inputTokens: turn.inputTokens,
+      outputTokens: turn.outputTokens,
+      successfulTasks: successful,
+    }),
+    cacheHitRatio: {
+      cacheReadTokens: turn.cacheReadTokens,
+      cacheEligibleTokens: turn.inputTokens + turn.cacheReadTokens,
+    },
+  })
+  const workload = SelfImprovementEvaluation.Workload.make(`agent:${turn.agent}`)
+  const workloadRevision = SelfImprovementLifecycle.Revision.make(1)
+  const taskIDDigest = SelfImprovement.Digest.make(Hash.sha256(`${locationID}\0${turn.userID}\0${turn.startedAt}`))
+  const sampleIDDigest = SelfImprovement.Digest.make(
+    Hash.sha256(`${taskIDDigest}\0${JSON.stringify(metrics)}\0${outcome}`),
+  )
+  return {
+    taskIDDigest,
+    sampleIDDigest,
+    requestDigest: SelfImprovement.Digest.make(Hash.sha256(`session-evidence/v1\0${sampleIDDigest}`)),
+    workload,
+    workloadRevision,
+    producerID,
+    outcomeClass,
+    outcome,
+    errorClass: turn.cancelled
+      ? "session.interrupted"
+      : turn.failedToolName === undefined
+        ? turn.failed
+          ? "session.failed"
+          : "none"
+        : `tool.${turn.failedToolName}.failed`,
+    orderedToolSymbolIDs: turn.orderedToolSymbolIDs,
     metrics,
     startedAt,
     terminalAt,
